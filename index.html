@@ -6,10 +6,17 @@
     <meta name="color-scheme" content="light dark" />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.12" />
+    <link rel="stylesheet" href="/layout.css?v=2.13" />
   </head>
   <body data-theme="paper" data-view="library">
-    <div id="startup" class="startup">正在打开书库…</div>
+    <div id="startup" class="startup" role="status" aria-label="正在打开书库">
+      <div class="startup-heading skeleton"></div>
+      <div class="startup-cards" aria-hidden="true">
+        <span class="skeleton"></span><span class="skeleton"></span
+        ><span class="skeleton"></span><span class="skeleton"></span>
+      </div>
+      <p>正在打开书库…</p>
+    </div>
     <div id="workspace" class="workspace" hidden>
       <aside class="app-rail" aria-label="应用导航">
         <a class="wordmark" href="#/library"><span>间</span>页间</a>
@@ -17,12 +24,18 @@
         <nav>
           <a href="#/library" data-nav="library"
             ><i data-icon="library"></i>书库</a
-          ><a href="#/shelf" data-nav="shelf"><i data-icon="shelf"></i>书架</a
-          ><a href="#/imports" data-nav="imports"
-            ><i data-icon="import"></i>导入管理<span id="running-count"></span
-          ></a>
+          >
         </nav>
         <div class="rail-foot">
+          <button
+            id="jobs-open"
+            class="task-status"
+            aria-label="导入与处理任务"
+            aria-haspopup="dialog"
+          >
+            <i data-icon="import"></i><span id="task-label">导入与处理</span
+            ><span id="running-count" hidden></span>
+          </button>
           <a href="#/settings" data-nav="settings"
             ><i data-icon="settings"></i>阅读设置</a
           ><span class="local-note"><b></b>保存在这台 Mac</span>
@@ -44,6 +57,7 @@
           <div class="library-tools">
             <div class="filter-chips" id="shelf-filters">
               <button data-filter="all" aria-pressed="true">全部</button
+              ><button data-filter="pinned" aria-pressed="false">常读 ★</button
               ><button data-filter="小说" aria-pressed="false">小说</button
               ><button data-filter="学习" aria-pressed="false">学习</button>
             </div>
@@ -57,21 +71,20 @@
             /></label>
           </div>
           <div class="book-grid" id="library-grid"></div>
-          <div class="empty-state" id="library-empty" hidden></div>
-        </section>
-        <section id="imports-view" class="app-view" hidden>
-          <header class="page-heading">
-            <div>
-              <div class="eyebrow">IMPORTS</div>
-              <h1>导入管理</h1>
-              <p>导入后即可阅读。目录和文字增强会在后台准备。</p>
-            </div>
-            <button class="primary-button" id="imports-add">
-              <i data-icon="plus"></i>导入书籍
+          <div class="empty-state library-empty" id="library-empty" hidden>
+            <span class="empty-art" aria-hidden="true"
+              ><i data-icon="pages"></i
+            ></span>
+            <h2 id="empty-title">从一本书开始</h2>
+            <p id="empty-description"></p>
+            <button
+              id="empty-action"
+              class="primary-button"
+              data-empty-action="import"
+            >
+              导入第一本书
             </button>
-          </header>
-          <div id="import-jobs" class="job-list"></div>
-          <div class="formats-note" id="formats-note"></div>
+          </div>
         </section>
         <section id="settings-view" class="app-view" hidden>
           <header class="page-heading">
@@ -141,12 +154,12 @@
           >
             <i data-icon="bookmark"></i></button
           ><button
-            class="icon-button"
+            class="secondary-button palm-action"
             id="palm-open"
             aria-label="掌上阅读"
-            title="打开掌上窗口"
+            title="打开独立置顶小窗 · 窗口内用方向键翻页"
           >
-            <i data-icon="palm"></i></button
+            <i data-icon="palm"></i><span>掌上阅读</span></button
           ><button
             class="icon-button"
             id="focus-button"
@@ -218,7 +231,7 @@
             hidden
           ></iframe>
           <div id="pdf-paper" class="pdf-paper" hidden></div>
-          <div id="reader-loading" class="reader-loading" hidden>
+          <div id="reader-loading" class="reader-loading" role="status" hidden>
             正在打开这一页…
           </div>
         </div>
@@ -378,6 +391,30 @@
         </button>
       </div>
     </dialog>
+    <dialog id="jobs-dialog" class="jobs-dialog" aria-labelledby="jobs-title">
+      <form method="dialog" class="dialog-heading">
+        <div>
+          <small>LOCAL TASKS</small>
+          <h2 id="jobs-title">导入与处理</h2>
+        </div>
+        <button class="icon-button" aria-label="关闭处理任务">
+          <i data-icon="close"></i>
+        </button>
+      </form>
+      <div class="jobs-body">
+        <p class="setting-note">
+          书籍导入后即可阅读。文字和目录在后台准备，关闭面板后会继续。
+        </p>
+        <div id="import-jobs" class="job-list"></div>
+        <div class="formats-note" id="formats-note"></div>
+      </div>
+      <div class="dialog-footer">
+        <span>文件保存在本机</span
+        ><button class="primary-button" id="imports-add">
+          <i data-icon="plus"></i>导入书籍
+        </button>
+      </div>
+    </dialog>
     <dialog id="book-dialog" class="book-dialog">
       <form method="dialog" class="dialog-heading">
         <h2>书籍设置</h2>
@@ -421,7 +458,13 @@
         </div>
       </form>
     </dialog>
-    <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app-v2.mjs?v=2.12"></script>
+    <div
+      id="toasts"
+      class="toast-stack"
+      role="status"
+      aria-live="polite"
+      aria-relevant="additions"
+    ></div>
+    <script type="module" src="/app-v2.mjs?v=2.13"></script>
   </body>
 </html>

@@ -58,7 +58,7 @@ export class PageLayout {
       sheet.className = "reader-turn-sheet";
       sheet.setAttribute("aria-hidden", "true");
       sheet.inert = true;
-      sheet.style.cssText = `position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:5;background:${getComputedStyle(this.host).backgroundColor};box-shadow:0 2px 14px #20342a08;`;
+      sheet.style.cssText = `position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:5;background:${getComputedStyle(this.host).backgroundColor};box-shadow:var(--turn-shadow);`;
       const copy = this.flow.cloneNode(true);
       copy.removeAttribute("id");
       copy
@@ -68,7 +68,7 @@ export class PageLayout {
       sheet.append(copy);
       const shade = this.host.ownerDocument.createElement("div");
       shade.style.cssText =
-        "position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,transparent 65%,#20342a06);";
+        "position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,transparent 65%,var(--turn-shade));";
       sheet.append(shade);
       this.host.append(sheet);
       this.sheet = sheet;
@@ -102,7 +102,7 @@ export class PageLayout {
       const shadow = this.host.ownerDocument.createElement("div");
       shadow.className = "reader-turn-shadow";
       shadow.style.cssText =
-        "position:absolute;inset:0;pointer-events:none;z-index:4;background:linear-gradient(90deg,transparent 30%,#29413706 60%,transparent 90%);";
+        "position:absolute;inset:0;pointer-events:none;z-index:4;background:linear-gradient(90deg,transparent 30%,var(--turn-highlight) 60%,transparent 90%);";
       this.host.append(shadow);
       this.shadowAnimation = shadow.animate(
         [{ opacity: 0 }, { opacity: 0.5, offset: 0.4 }, { opacity: 0 }],

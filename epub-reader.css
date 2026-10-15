@@ -1,20 +1,25 @@
 @font-face {
   font-family: ReaderHanSerif;
+  font-display: swap;
   src: url("/assets/fonts/han-serif.otf");
 }
 @font-face {
   font-family: ReaderWenKai;
+  font-display: swap;
   src: url("/assets/fonts/wenkai.ttf");
 }
 @font-face {
   font-family: ReaderHanSans;
+  font-display: swap;
   src: url("/assets/fonts/han-sans.otf");
 }
 @font-face {
   font-family: ReaderLiterata;
+  font-display: swap;
   src: url("/assets/fonts/literata.ttf");
 }
 @font-face {
   font-family: ReaderSourceSerif;
+  font-display: swap;
   src: url("/assets/fonts/source-serif.ttf");
 }

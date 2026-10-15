@@ -6,11 +6,13 @@
 
 ## 建议阅读顺序
 
+先查看 [评审沟通记录](REVIEW_DIALOGUE.md)，其中说明了上一轮源码判断与本轮改动。
+
 1. `paths.py`、`server.py`：模式隔离、文件与状态、任务、HTTP 边界和原生组件启动。
 2. `book_import.py`、`parse_text.mjs`、`core.mjs`：格式适配、EPUB 资源、章节规则与位置。
 3. `pdf_enhancement.py`、`native/OCR.swift`：OCR 坐标、目录判断、页码映射及缓存。
 4. `page-layout.mjs`：分页尺寸、动画取消、真实文字的几何位置、资源释放。
-5. `app-v2.mjs`：异步加载、模式切换、字符锚点、书签、文字选择与主 / 小窗同步。
+5. `ui/library.mjs`、`ui/feedback.mjs`、`ui/shared.mjs`：卡片复用、通知撤销、键盘焦点与输出转义；以及 `app-v2.mjs`：异步加载、模式切换、字符锚点、书签、文字选择与主 / 小窗同步。
 6. `native/Palm.swift`：窗口层级、尺寸、快捷键、桥接与关闭保存。
 7. `tests/` 与 `scripts/create_demo.py`：回归范围、生成样本和缺口。
 

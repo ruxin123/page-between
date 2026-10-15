@@ -26,6 +26,7 @@
 !/native/OCR.swift
 !/native/Palm.swift
 !/scripts/
+!/ui/
 !/tests/
 /tests/*
 !/tests/core.test.mjs
@@ -34,6 +35,8 @@
 !/tests/pipeline_test.py
 !/tests/demo_test.py
 !/tests/page-turn.test.mjs
+!/tests/library.test.mjs
+!/tests/theme.test.mjs
 !/docs/
 !/assets/
 /assets/*

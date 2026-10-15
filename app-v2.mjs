@@ -1,43 +1,12 @@
 import * as pdfjs from "/assets/vendor/pdf.mjs";
 import { clamp, chapterProgress, palmTypography } from "/core.mjs";
-import { PageLayout } from "/page-layout.mjs?v=2.12";
+import { escapeHTML, icon } from "/ui/shared.mjs";
+import { createLibraryView } from "/ui/library.mjs";
+import { createToasts } from "/ui/feedback.mjs";
+import { PageLayout } from "/page-layout.mjs?v=2.13";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
-const escapeHTML = (value) =>
-  String(value ?? "").replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
-      ],
-  );
-const paths = {
-  library: "M4 4h6v16H4zM14 4h6v16h-6zM4 8h6M14 8h6",
-  shelf: "M4 4v16h16V4M4 13h16M8 5v8M12 7v6M16 5v8",
-  import: "M12 3v12M7 10l5 5 5-5M4 16v5h16v-5",
-  plus: "M12 5v14M5 12h14",
-  search: "M21 21l-5-5M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14",
-  settings: "M4 7h16M4 17h16M8 4v6M16 14v6",
-  back: "M15 5l-7 7 7 7",
-  forward: "M9 5l7 7-7 7",
-  toc: "M8 5h12M8 12h12M8 19h12M3 5h.1M3 12h.1M3 19h.1",
-  bookmark: "M6 3h12v18l-6-4-6 4z",
-  palm: "M7 2h10v20H7zM10 18h4",
-  focus: "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5",
-  more: "M5 12h.1M12 12h.1M19 12h.1",
-  close: "M6 6l12 12M18 6L6 18",
-  copy: "M8 8h12v13H8zM16 8V3H3v13h5",
-  image: "M3 4h18v16H3zM3 16l5-5 4 4 3-3 6 5M17 8h.1",
-  ask: "M4 4h16v12H9l-5 4zM8 8h8M8 12h5",
-  timer: "M9 2h6M12 8v5l3 2M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16",
-  star: "M12 3l2.8 5.8 6.4.9-4.6 4.5 1.1 6.4L12 17.6l-5.7 3 1.1-6.4L2.8 9.7l6.4-.9z",
-  pages: "M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3zM12 6v16",
-  scroll: "M7 3h10v18H7zM10 7h4M10 11h4M10 15h4",
-  pin: "M8 3h8l-1 7 4 4H5l4-4zM12 14v8",
-};
-const icon = (name) =>
-  `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.library}"></path></svg>`;
 document
   .querySelectorAll("[data-icon]")
   .forEach((element) => (element.innerHTML = icon(element.dataset.icon)));
@@ -87,7 +56,6 @@ let renderRevision = 0,
   lastAnchor,
   pendingAnchor;
 let saveTimer,
-  toastTimer,
   ocrTimer,
   timerDeadline = 0,
   timerRemaining = 1500,
@@ -115,7 +83,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.12";
+document.body.dataset.readerBuild = "2.13";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -132,12 +100,8 @@ function post(path, value) {
     body: JSON.stringify(value),
   });
 }
-function toast(message) {
-  $("toast").textContent = message;
-  $("toast").hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => ($("toast").hidden = true), 3000);
-}
+const toast = createToasts($("toasts"));
+const libraryView = createLibraryView(document);
 function postState(patch) {
   stateQueue = stateQueue
     .catch(() => {})
@@ -184,74 +148,71 @@ function initialLocation(book) {
 function progressFor(book) {
   return clamp(positions[book.id]?.progress || 0, 0, 1);
 }
-function cover(book, small = false) {
-  return `<div class="book-cover ${book.shelf === "学习" ? "cover-study" : ""} ${small ? "small-cover" : ""}">${book.cover ? `<img src="${escapeHTML(book.cover)}" alt="${escapeHTML(book.title)}封面" loading="lazy">` : `<span class="cover-title">${escapeHTML(book.title)}</span><span class="cover-author">${escapeHTML(book.author)}</span>`}</div>`;
-}
-
 function renderLibrary() {
-  const onShelf = route === "shelf";
-  $("library-title").textContent = onShelf ? "书架" : "书库";
-  $("library-eyebrow").textContent = onShelf ? "ON YOUR SHELF" : "LIBRARY";
-  const collection = books.filter((book) => !onShelf || book.onShelf);
-  $("library-summary").textContent = onShelf
-    ? `${collection.length} 本常读书籍 · 在书库中点击星标即可加入`
-    : `${books.length} 本书籍 · 原文件保存在本机`;
-  const text = $("library-search").value.trim().toLocaleLowerCase();
-  const selected = collection.filter(
-    (book) =>
-      (shelfFilter === "all" || book.shelf === shelfFilter) &&
-      `${book.title} ${book.author} ${book.format}`
-        .toLocaleLowerCase()
-        .includes(text),
-  );
-  $("library-grid").innerHTML = selected
-    .map(
-      (book) =>
-        `<article class="library-book"><button class="cover-open" data-read="${book.id}" aria-label="阅读 ${escapeHTML(book.title)}">${cover(book)}</button><button class="book-more icon-button" data-options="${book.id}" aria-label="${escapeHTML(book.title)}的设置">${icon("more")}</button><div class="book-card-foot"><div class="book-card-copy"><h3>${escapeHTML(book.title)}</h3><p>${escapeHTML(book.author)}</p><div class="book-tags"><span>${escapeHTML(book.format)}</span><span>·</span><span>${book.processing === "pending" ? "目录准备中" : book.type === "epub" ? "原书排版" : book.type === "pdf" ? "原书版面" : `${book.chapters.length} 章`}</span></div></div><button class="shelf-star" data-star="${book.id}" aria-label="${book.onShelf ? "移出" : "加入"}书架 ${escapeHTML(book.title)}" aria-pressed="${!!book.onShelf}">${icon("star")}</button></div></article>`,
-    )
-    .join("");
-  $("library-empty").hidden = selected.length > 0;
-  $("library-empty").textContent =
-    onShelf && !collection.length
-      ? "把常读的书加入书架，在这里留一个位置。"
-      : "没有找到这本书。可以换个关键词，或导入一本新书。";
   const last =
     books.find((book) => book.id === current?.id) ||
     books.find((book) => positions[book.id]) ||
     books[0];
-  $("continue-reading").innerHTML =
-    !text && last
-      ? `<article class="continue-card">${cover(last, true)}<div class="continue-copy"><small>继续阅读</small><h2>${escapeHTML(last.title)}</h2><p>${escapeHTML(chapterTitle(last, positions[last.id]?.index || 1))}${progressFor(last) ? ` · ${Math.round(progressFor(last) * 100)}%` : ""}</p></div><div class="continue-actions"><button class="primary-button" data-read="${last.id}">翻开书页 ${icon("forward")}</button>${last.type !== "pdf" && last.layout !== "comic" ? `<button class="icon-button" data-palm="${last.id}" aria-label="掌上阅读 ${escapeHTML(last.title)}" title="掌上阅读">${icon("palm")}</button>` : ""}</div><div class="continue-progress" style="width:${Math.max(1, progressFor(last) * 100)}%"></div></article>`
-      : "";
-  document
-    .querySelectorAll("[data-filter]")
-    .forEach((button) =>
-      button.setAttribute(
-        "aria-pressed",
-        String(button.dataset.filter === shelfFilter),
-      ),
-    );
+  libraryView.render({
+    books,
+    filter: shelfFilter,
+    query: $("library-search").value,
+    last,
+    progress: progressFor,
+    detail: (book) => chapterTitle(book, positions[book.id]?.index || 1),
+  });
 }
 function renderJobs() {
-  $("running-count").textContent =
-    jobs.filter((job) => job.status === "running").length || "";
   const entries = jobs.length
     ? jobs
     : books.map((book) => ({
         title: book.title,
-        status: book.processing === "pending" ? "running" : "ready",
+        status:
+          book.processing === "pending"
+            ? "running"
+            : book.processing === "error"
+              ? "error"
+              : "ready",
         phase:
           book.type === "epub"
             ? "已沿用原书目录、插图与正文。"
             : book.processingNote || "已导入，可直接阅读。",
         book: book.id,
       }));
-  $("import-jobs").innerHTML = entries
-    .map(
-      (job) =>
-        `<article class="job-row"><span class="job-label ${job.status}">${job.status === "running" ? "准备中" : job.status === "error" ? "待处理" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><button class="secondary-button" data-read="${job.book}">阅读</button></article>`,
-    )
-    .join("");
+  const running = entries.filter((job) => job.status === "running").length;
+  const failed = entries.filter((job) => job.status === "error").length;
+  $("running-count").textContent = running || failed || "";
+  $("running-count").hidden = !(running || failed);
+  $("task-label").textContent = running
+    ? "后台处理中"
+    : failed
+      ? "有任务待处理"
+      : "导入与处理";
+  $("jobs-open").dataset.state = running
+    ? "running"
+    : failed
+      ? "error"
+      : "ready";
+  $("jobs-open").setAttribute(
+    "aria-label",
+    running
+      ? `${running} 项后台处理任务，点击查看`
+      : failed
+        ? `${failed} 项任务待处理，点击查看`
+        : "导入与处理任务",
+  );
+  $("import-jobs").innerHTML =
+    entries
+      .map(
+        (job) =>
+          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "准备中" : job.status === "error" ? "待处理" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></article>`,
+      )
+      .join("") ||
+    '<div class="empty-state">还没有处理任务，导入一本书即可开始。</div>';
+}
+function openJobs() {
+  renderJobs();
+  $("jobs-dialog").showModal();
 }
 
 function settingsMarkup() {
@@ -541,7 +502,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.12",
+        build: "2.13",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -734,9 +695,7 @@ async function toggleBookmark() {
     (mark) => mark.book === current.id && samePlace(mark.position, position),
   );
   if (mark) {
-    bookmarks = bookmarks.filter((item) => item !== mark);
-    await postState({ bookmarkChanges: { remove: [mark.id] } });
-    toast("书签已移除。");
+    await removeBookmark(mark.id);
   } else {
     const added = {
       id: crypto.randomUUID(),
@@ -750,11 +709,60 @@ async function toggleBookmark() {
             ? `本章第 ${pagination.page + 1} 页 · ${Math.round(position.progress * 100)}%`
             : `${Math.round(position.progress * 100)}%`,
     };
-    bookmarks.push(added);
-    await postState({ bookmarkChanges: { add: [added] } });
-    toast("已为这里留下书签。");
+    try {
+      await postState({ bookmarkChanges: { add: [added] } });
+      if (!bookmarks.some((item) => item.id === added.id))
+        bookmarks.push(added);
+      toast("已为这里留下书签。", { kind: "success" });
+    } catch (error) {
+      toast(error.message, { kind: "error" });
+    }
   }
   renderBookmarks();
+}
+async function removeBookmark(id) {
+  const mark = bookmarks.find((item) => item.id === id);
+  if (!mark) return;
+  try {
+    await postState({ bookmarkChanges: { remove: [id] } });
+    bookmarks = bookmarks.filter((item) => item.id !== id);
+    renderBookmarks();
+    toast("书签已移除。", {
+      undo: async () => {
+        await postState({ bookmarkChanges: { add: [mark] } });
+        if (!bookmarks.some((item) => item.id === id)) bookmarks.push(mark);
+        renderBookmarks();
+      },
+    });
+  } catch (error) {
+    toast(error.message, { kind: "error" });
+  }
+}
+
+const pinning = new Set();
+async function setPinned(id, pinned, offerUndo = true) {
+  if (pinning.has(id)) throw new Error("这本书正在保存，请稍后重试。");
+  pinning.add(id);
+  const button = document.querySelector(`[data-star="${CSS.escape(id)}"]`);
+  button?.setAttribute("aria-busy", "true");
+  const previous = !!books.find((book) => book.id === id)?.onShelf;
+  try {
+    const response = await post("/api/books/" + id, { onShelf: pinned });
+    const book = books.find((item) => item.id === id);
+    if (book) book.onShelf = response.book.onShelf;
+    renderLibrary();
+    if (offerUndo)
+      toast(pinned ? "已加入常读。" : "已移出常读。", {
+        undo: async () => {
+          if (!!books.find((item) => item.id === id)?.onShelf !== pinned)
+            throw new Error("常读状态已再次更改，已保留最新选择。");
+          await setPinned(id, previous, false);
+        },
+      });
+  } finally {
+    pinning.delete(id);
+    button?.removeAttribute("aria-busy");
+  }
 }
 
 function clearSelection() {
@@ -832,9 +840,9 @@ function captureSelection(doc = document) {
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
-    toast("已复制。");
+    toast("已复制。", { kind: "success" });
   } catch {
-    toast("请选中文字后按 ⌘C 复制。");
+    toast("请选中文字后按 ⌘C 复制。", { kind: "warning" });
   }
 }
 async function copyImage() {
@@ -851,9 +859,9 @@ async function copyImage() {
       canvas.toBlob(resolve, "image/png"),
     );
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-    toast("原图已复制。");
+    toast("原图已复制。", { kind: "success" });
   } catch {
-    toast("图片暂时无法复制，可在原书中查看完整图像。");
+    toast("图片暂时无法复制，可在原书中查看完整图像。", { kind: "warning" });
   }
 }
 
@@ -1346,8 +1354,18 @@ async function styleEpub() {
       : innerWidth < 760
         ? "30px 25px"
         : "46px 50px";
+  for (const key of [
+    "--ink",
+    "--paper",
+    "--accent",
+    "--selection",
+    "--turn-shadow",
+    "--turn-shade",
+    "--turn-highlight",
+  ])
+    doc.documentElement.style.setProperty(key, colors.getPropertyValue(key));
   const fixed = current.layout === "pre-paginated";
-  style.textContent = `.reader-flow{font:inherit;color:inherit;}.reader-flow :is(img,svg,table,figure){break-inside:avoid;}.reader-flow :is(h1,h2,h3,h4){break-after:avoid;}html{height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;background:${colors.getPropertyValue("--paper")}!important;color:${colors.getPropertyValue("--ink")}!important;font-size:${actualSize()}px!important;}body{height:auto!important;min-height:0!important;margin:0!important;padding:${padding}!important;box-sizing:border-box!important;font-family:${fontFamilies[prefs.enFont]},${fontFamilies[prefs.zhFont]},serif!important;font-size:${actualSize()}px!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;overflow-wrap:break-word!important;color:${colors.getPropertyValue("--ink")}!important;background:${colors.getPropertyValue("--paper")}!important;}img{max-width:100%!important;}svg[viewBox][height="100%"]{height:auto!important;max-width:100%!important;}p{font-family:inherit!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;}table{max-width:100%;}a{color:${colors.getPropertyValue("--accent")};} [data-reader-selected]{outline:2px solid ${colors.getPropertyValue("--accent")};outline-offset:3px;}::selection{background:#8cb49b60;}${prefs.theme === "night" ? "body :is(p,span,div,h1,h2,h3,h4,li,blockquote){color:inherit!important;background-color:transparent!important;}" : ""}${palm ? "h1{font-size:1.25em!important;}h2{font-size:1.15em!important;}h3{font-size:1.08em!important;}" : ""}${fixed ? "body{padding:0!important;}" : ""}${readingMode() === "pages" ? `html,body{width:100%!important;height:100%!important;padding:0!important;}#reader-flow{font:inherit;}.reader-flow :is(img,svg){max-height:${Math.max(80, $("reading-viewport").clientHeight - (palm ? 90 : 160))}px!important;object-fit:contain;}` : ""}`;
+  style.textContent = `.reader-flow{font:inherit;color:inherit;}.reader-flow :is(img,svg,table,figure){break-inside:avoid;}.reader-flow :is(h1,h2,h3,h4){break-after:avoid;}html{height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;background:${colors.getPropertyValue("--paper")}!important;color:${colors.getPropertyValue("--ink")}!important;font-size:${actualSize()}px!important;}body{height:auto!important;min-height:0!important;margin:0!important;padding:${padding}!important;box-sizing:border-box!important;font-family:${fontFamilies[prefs.enFont]},${fontFamilies[prefs.zhFont]},serif!important;font-size:${actualSize()}px!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;overflow-wrap:break-word!important;color:${colors.getPropertyValue("--ink")}!important;background:${colors.getPropertyValue("--paper")}!important;}img{max-width:100%!important;}svg[viewBox][height="100%"]{height:auto!important;max-width:100%!important;}p{font-family:inherit!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;}table{max-width:100%;}a{color:${colors.getPropertyValue("--accent")};} [data-reader-selected]{outline:2px solid ${colors.getPropertyValue("--accent")};outline-offset:3px;}::selection{background:var(--selection);}${prefs.theme === "night" ? "body :is(p,span,div,h1,h2,h3,h4,li,blockquote){color:inherit!important;background-color:transparent!important;}" : ""}${palm ? "h1{font-size:1.25em!important;}h2{font-size:1.15em!important;}h3{font-size:1.08em!important;}" : ""}${fixed ? "body{padding:0!important;}" : ""}${readingMode() === "pages" ? `html,body{width:100%!important;height:100%!important;padding:0!important;}#reader-flow{font:inherit;}.reader-flow :is(img,svg){max-height:${Math.max(80, $("reading-viewport").clientHeight - (palm ? 90 : 160))}px!important;object-fit:contain;}` : ""}`;
   await Promise.race([
     Promise.all(
       [prefs.zhFont, prefs.enFont].map((key) =>
@@ -1607,6 +1625,8 @@ async function renderCurrent(position) {
   pagination = null;
   const revision = ++renderRevision;
   readerReady = false;
+  $("reading-viewport").setAttribute("aria-busy", "true");
+  $("bookmark-button").disabled = true;
   retainedAnchor = position.anchor || null;
   pendingAnchor = null;
   lastAnchor = null;
@@ -1623,7 +1643,13 @@ async function renderCurrent(position) {
   $("epub-frame").hidden = current.type !== "epub";
   $("pdf-paper").hidden = current.type !== "pdf";
   $("reader-loading").hidden = false;
-  $("reader-loading").textContent = "正在打开这一页…";
+  $("reader-loading").dataset.state = "loading";
+  $("reader-loading").textContent =
+    current.type === "pdf"
+      ? "正在绘制原书页面…"
+      : current.type === "epub"
+        ? "正在加载原书章节与字体…"
+        : "正在整理章节排版…";
   $("book-title").textContent = current.title;
   $("book-subtitle").textContent = position.resource
     ? "原书附加内容 · 返回后继续阅读"
@@ -1669,8 +1695,19 @@ async function renderCurrent(position) {
     )
       return;
     $("reader-loading").textContent =
-      error.message || "本页暂时无法打开，请重新选择章节。";
+      `${chapterTitle(current, position.index)}暂时无法打开。${error.message || "请重新选择章节。"}`;
+    $("reader-loading").dataset.state = "error";
+    const retry = document.createElement("button");
+    retry.className = "secondary-button";
+    retry.textContent = "重新打开";
+    retry.onclick = () => renderCurrent(location);
+    $("reader-loading").append(retry);
     console.error(error);
+  } finally {
+    if (revision === renderRevision) {
+      $("reading-viewport").setAttribute("aria-busy", "false");
+      $("bookmark-button").disabled = !readerReady;
+    }
   }
 }
 async function navigate(index, options = {}, record = true) {
@@ -1792,11 +1829,15 @@ async function readBook(id) {
 }
 function showRoute() {
   const requested = window.location.hash.slice(2).split("/");
+  if (!palm && ["shelf", "imports"].includes(requested[0])) {
+    if (requested[0] === "shelf") shelfFilter = "pinned";
+    window.history.replaceState(null, "", "#/library");
+  }
   const next = palm
     ? "reader"
     : requested[0] === "read"
       ? "reader"
-      : ["library", "shelf", "imports", "settings"].includes(requested[0])
+      : ["library", "settings"].includes(requested[0])
         ? requested[0]
         : "library";
   if (route === "reader" && next !== "reader") {
@@ -1809,10 +1850,9 @@ function showRoute() {
   $("reader").hidden = next !== "reader";
   for (const [id, name] of [
     ["library-view", "library"],
-    ["imports-view", "imports"],
     ["settings-view", "settings"],
   ])
-    $(id).hidden = name !== (next === "shelf" ? "library" : next);
+    $(id).hidden = name !== next;
   document
     .querySelectorAll("[data-nav]")
     .forEach((a) =>
@@ -1824,16 +1864,9 @@ function showRoute() {
       : requested[1];
     readBook(id || books[0]?.id);
   } else {
-    document.title =
-      (next === "shelf"
-        ? "书架"
-        : next === "imports"
-          ? "导入管理"
-          : next === "settings"
-            ? "阅读设置"
-            : "书库") + " · 页间";
-    if (next === "library" || next === "shelf") renderLibrary();
-    if (next === "imports") renderJobs();
+    document.title = (next === "settings" ? "阅读设置" : "书库") + " · 页间";
+    if (next === "library") renderLibrary();
+    if (requested[0] === "imports") openJobs();
     if (next === "settings") renderSettings();
   }
 }
@@ -1844,10 +1877,11 @@ async function openPalm(id) {
     await post("/api/palm", { book: id });
     toast("已打开掌上窗口。");
   } catch (error) {
-    toast(error.message);
+    toast(error.message, { kind: "error" });
   }
 }
 function openImport() {
+  $("jobs-dialog").close();
   importFiles = [];
   $("import-files").innerHTML = "";
   $("import-result").textContent = "";
@@ -1859,7 +1893,7 @@ function addFiles(files) {
   for (const file of files) {
     const extension = "." + file.name.split(".").at(-1).toLowerCase();
     if (!formatInfo.some((info) => info.extension === extension)) {
-      toast("暂不支持 " + file.name);
+      toast("暂不支持 " + file.name, { kind: "warning" });
       continue;
     }
     importFiles.push({
@@ -1912,7 +1946,7 @@ async function submitImport() {
     }
   }
   $("import-result").textContent = results.join("\n");
-  $("import-submit").textContent = "导入完成";
+  $("import-submit").textContent = "本轮导入结束";
   await refreshLibrary();
   renderLibrary();
 }
@@ -1998,23 +2032,54 @@ function validatePreferences(input) {
 
 function handleKeydown(event) {
   lastInput = Date.now();
+  if (event.isComposing) return;
   const editing =
     event.target.matches?.("input,textarea,select") ||
     event.target.isContentEditable;
   if (event.key === "Escape") {
+    if (document.querySelector("dialog[open]")) return;
+    if (route === "library") {
+      $("library-search").value = "";
+      shelfFilter = "all";
+      renderLibrary();
+    }
     $("reader-aside").hidden = true;
     $("reader-settings").hidden = true;
     $("question-panel").hidden = true;
     $("selection-toolbar").hidden = true;
-    $("reader").classList.remove("focused");
-    $("focus-exit").hidden = true;
+    if ($("reader").classList.contains("focused")) setFocus(false);
     return;
   }
-  if (route !== "reader" || editing || event.isComposing) return;
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+  if (document.querySelector("dialog[open]")) return;
+  if (
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey &&
+    event.key.toLowerCase() === "k"
+  ) {
     event.preventDefault();
-    $("reader-aside").hidden = false;
-    $("toc-search").focus();
+    if (route === "reader") {
+      $("reader-aside").hidden = false;
+      $("toc-tab").click();
+      $("toc-search").focus();
+    } else if (route === "library") $("library-search").focus();
+    else {
+      window.addEventListener("hashchange", () => $("library-search").focus(), {
+        once: true,
+      });
+      window.location.hash = "#/library";
+    }
+    return;
+  }
+  if (route !== "reader" || editing) return;
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "g") {
+    event.preventDefault();
+    openPageDialog();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && ["[", "]"].includes(event.key)) {
+    event.preventDefault();
+    const index = location.index + (event.key === "]" ? 1 : -1);
+    if (readerReady && index >= 1 && index <= count(current)) navigate(index);
     return;
   }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
@@ -2023,6 +2088,12 @@ function handleKeydown(event) {
     return;
   }
   if (event.metaKey || event.ctrlKey || event.altKey) return;
+  // Space must activate the focused control before it can serve as a page shortcut.
+  if (
+    event.key === " " &&
+    event.target.closest?.('button,a,[role="button"],summary')
+  )
+    return;
   const selection = event.target.ownerDocument.defaultView.getSelection();
   if (selection && !selection.isCollapsed) return;
   if (["PageDown", "ArrowRight", " "].includes(event.key)) {
@@ -2057,6 +2128,7 @@ function setFocus(value) {
 document.addEventListener("click", async (event) => {
   const read = event.target.closest("[data-read]");
   if (read) {
+    $("jobs-dialog").close();
     window.location.hash = "#/read/" + read.dataset.read;
     return;
   }
@@ -2073,14 +2145,11 @@ document.addEventListener("click", async (event) => {
   const star = event.target.closest("[data-star]");
   if (star) {
     const book = books.find((book) => book.id === star.dataset.star);
+    if (!book || pinning.has(book.id)) return;
     try {
-      const response = await post("/api/books/" + book.id, {
-        onShelf: !book.onShelf,
-      });
-      Object.assign(book, response.book);
-      renderLibrary();
+      await setPinned(book.id, !book.onShelf);
     } catch (error) {
-      toast(error.message);
+      toast(error.message, { kind: "error" });
     }
     return;
   }
@@ -2135,6 +2204,16 @@ $("shelf-filters").addEventListener("click", (event) => {
     renderLibrary();
   }
 });
+$("empty-action").onclick = () => {
+  if ($("empty-action").dataset.emptyAction === "import") openImport();
+  else {
+    $("library-search").value = "";
+    shelfFilter = "all";
+    renderLibrary();
+    $("library-search").focus();
+  }
+};
+$("jobs-open").onclick = openJobs;
 ["import-open", "imports-add"].forEach((id) => ($(id).onclick = openImport));
 $("file-input").addEventListener("change", (event) => {
   addFiles(event.target.files);
@@ -2191,13 +2270,7 @@ $("toc-list").addEventListener("click", (event) => {
 $("bookmarks-list").addEventListener("click", async (event) => {
   const remove = event.target.closest("[data-remove-mark]");
   if (remove) {
-    bookmarks = bookmarks.filter(
-      (mark) => mark.id !== remove.dataset.removeMark,
-    );
-    await postState({
-      bookmarkChanges: { remove: [remove.dataset.removeMark] },
-    });
-    renderBookmarks();
+    await removeBookmark(remove.dataset.removeMark);
     return;
   }
   const button = event.target.closest("[data-mark]");
@@ -2216,7 +2289,7 @@ $("reader-settings-open").onclick = () =>
 $("reader-settings-close").onclick = () => ($("reader-settings").hidden = true);
 $("palm-settings").onclick = () =>
   ($("reader-settings").hidden = !$("reader-settings").hidden);
-$("page-label").onclick = () => {
+function openPageDialog() {
   if (!readerReady) return;
   const total = pagination?.count || count(current);
   $("page-jump-label").textContent =
@@ -2233,7 +2306,8 @@ $("page-label").onclick = () => {
     `共 ${total} ${current.type === "pdf" || pagination ? "页" : "章"}`;
   $("page-dialog").showModal();
   $("page-jump-input").select();
-};
+}
+$("page-label").onclick = openPageDialog;
 $("page-jump-close").onclick = () => $("page-dialog").close();
 $("page-jump-form").onsubmit = (event) => {
   event.preventDefault();
@@ -2412,7 +2486,7 @@ async function poll() {
       const previousFlag = current?.parseEnabled,
         previousCount = current?.chapters?.length;
       await refreshLibrary();
-      if (route === "library" || route === "shelf") renderLibrary();
+      if (route === "library") renderLibrary();
       if (
         route === "reader" &&
         current &&
@@ -2473,7 +2547,7 @@ async function poll() {
           updateProgress();
         }
       }
-      if (route === "library" || route === "shelf") renderLibrary();
+      if (route === "library") renderLibrary();
       renderBookmarks();
     }
   } catch {}

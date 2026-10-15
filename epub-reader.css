@@ -1,0 +1,20 @@
+@font-face {
+  font-family: ReaderHanSerif;
+  src: url("/assets/fonts/han-serif.otf");
+}
+@font-face {
+  font-family: ReaderWenKai;
+  src: url("/assets/fonts/wenkai.ttf");
+}
+@font-face {
+  font-family: ReaderHanSans;
+  src: url("/assets/fonts/han-sans.otf");
+}
+@font-face {
+  font-family: ReaderLiterata;
+  src: url("/assets/fonts/literata.ttf");
+}
+@font-face {
+  font-family: ReaderSourceSerif;
+  src: url("/assets/fonts/source-serif.ttf");
+}

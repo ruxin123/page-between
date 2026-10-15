@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>页间 · 书库</title>
+    <link rel="icon" href="/assets/favicon.svg" />
+    <link rel="stylesheet" href="/layout.css?v=2.12" />
+  </head>
+  <body data-theme="paper" data-view="library">
+    <div id="startup" class="startup">正在打开书库…</div>
+    <div id="workspace" class="workspace" hidden>
+      <aside class="app-rail" aria-label="应用导航">
+        <a class="wordmark" href="#/library"><span>间</span>页间</a>
+        <div class="rail-caption">自己的阅读空间</div>
+        <nav>
+          <a href="#/library" data-nav="library"
+            ><i data-icon="library"></i>书库</a
+          ><a href="#/shelf" data-nav="shelf"><i data-icon="shelf"></i>书架</a
+          ><a href="#/imports" data-nav="imports"
+            ><i data-icon="import"></i>导入管理<span id="running-count"></span
+          ></a>
+        </nav>
+        <div class="rail-foot">
+          <a href="#/settings" data-nav="settings"
+            ><i data-icon="settings"></i>阅读设置</a
+          ><span class="local-note"><b></b>保存在这台 Mac</span>
+        </div>
+      </aside>
+      <main class="workspace-main">
+        <section id="library-view" class="app-view">
+          <header class="page-heading">
+            <div>
+              <div class="eyebrow" id="library-eyebrow">LIBRARY</div>
+              <h1 id="library-title">书库</h1>
+              <p id="library-summary"></p>
+            </div>
+            <button class="primary-button" id="import-open">
+              <i data-icon="plus"></i>导入书籍
+            </button>
+          </header>
+          <div id="continue-reading"></div>
+          <div class="library-tools">
+            <div class="filter-chips" id="shelf-filters">
+              <button data-filter="all" aria-pressed="true">全部</button
+              ><button data-filter="小说" aria-pressed="false">小说</button
+              ><button data-filter="学习" aria-pressed="false">学习</button>
+            </div>
+            <label class="library-search"
+              ><i data-icon="search"></i
+              ><input
+                id="library-search"
+                type="search"
+                placeholder="搜索书名或作者"
+                aria-label="搜索书籍"
+            /></label>
+          </div>
+          <div class="book-grid" id="library-grid"></div>
+          <div class="empty-state" id="library-empty" hidden></div>
+        </section>
+        <section id="imports-view" class="app-view" hidden>
+          <header class="page-heading">
+            <div>
+              <div class="eyebrow">IMPORTS</div>
+              <h1>导入管理</h1>
+              <p>导入后即可阅读。目录和文字增强会在后台准备。</p>
+            </div>
+            <button class="primary-button" id="imports-add">
+              <i data-icon="plus"></i>导入书籍
+            </button>
+          </header>
+          <div id="import-jobs" class="job-list"></div>
+          <div class="formats-note" id="formats-note"></div>
+        </section>
+        <section id="settings-view" class="app-view" hidden>
+          <header class="page-heading">
+            <div>
+              <div class="eyebrow">READING</div>
+              <h1>阅读设置</h1>
+              <p>把正文调成适合自己的样子。</p>
+            </div>
+          </header>
+          <div class="settings-layout">
+            <div class="settings-form" id="global-settings"></div>
+            <article class="type-sample">
+              <small>阅读预览</small>
+              <h2>留一点时间给书</h2>
+              <p>
+                书页在眼前展开，窗外的声音渐渐远了。沿着文字往前走，偶尔停下来，想一想刚刚读到的那句话。
+              </p>
+              <p lang="en">
+                A quiet page, a little time. Some books invite us to wander;
+                others help us see a familiar idea in a new light.
+              </p>
+              <span class="sample-leaf">❦</span>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <main id="reader" class="reader" hidden>
+      <header class="reader-bar" id="reader-bar">
+        <div class="reader-leading">
+          <button
+            id="reader-home"
+            class="icon-button"
+            aria-label="返回书库"
+            title="返回书库"
+          >
+            <i data-icon="library"></i></button
+          ><span class="bar-divider"></span
+          ><button
+            id="reader-back"
+            class="icon-button"
+            aria-label="返回跳转前的位置"
+            disabled
+          >
+            <i data-icon="back"></i>
+          </button>
+          <div class="reader-heading">
+            <strong id="book-title"></strong><small id="book-subtitle"></small>
+          </div>
+        </div>
+        <div class="reader-actions">
+          <button
+            class="icon-button"
+            id="toc-toggle"
+            aria-label="目录与书签"
+            aria-expanded="false"
+            title="目录 · ⌘K"
+          >
+            <i data-icon="toc"></i></button
+          ><button
+            class="icon-button"
+            id="bookmark-button"
+            aria-label="添加书签"
+            aria-pressed="false"
+            title="书签 · ⌘B"
+          >
+            <i data-icon="bookmark"></i></button
+          ><button
+            class="icon-button"
+            id="palm-open"
+            aria-label="掌上阅读"
+            title="打开掌上窗口"
+          >
+            <i data-icon="palm"></i></button
+          ><button
+            class="icon-button"
+            id="focus-button"
+            aria-label="专注阅读"
+            aria-pressed="false"
+            title="专注阅读 · F"
+          >
+            <i data-icon="focus"></i></button
+          ><button
+            class="icon-button"
+            id="reading-mode"
+            aria-label="浏览方式"
+          ></button
+          ><button
+            class="type-button"
+            id="reader-settings-open"
+            aria-label="阅读设置"
+            aria-expanded="false"
+          >
+            Aa</button
+          ><button class="icon-button" id="book-options" aria-label="书籍设置">
+            <i data-icon="more"></i>
+          </button>
+        </div>
+      </header>
+      <header id="palm-bar" class="palm-bar" hidden>
+        <span id="palm-book-title"></span
+        ><button
+          class="icon-button"
+          id="palm-pin"
+          aria-label="取消置顶"
+          title="置顶"
+          aria-pressed="true"
+        >
+          <i data-icon="pin"></i></button
+        ><button
+          class="type-button"
+          id="palm-settings"
+          aria-label="掌上阅读设置"
+        >
+          Aa</button
+        ><button class="icon-button" id="palm-close" aria-label="关闭掌上窗口">
+          <i data-icon="close"></i>
+        </button>
+      </header>
+      <div class="reader-stage">
+        <div
+          id="reading-viewport"
+          class="reading-viewport"
+          tabindex="0"
+          aria-label="阅读正文"
+        >
+          <div id="text-host" class="text-host" hidden>
+            <article id="text-paper" class="text-paper" hidden>
+              <div id="chapter-eyebrow" class="chapter-eyebrow"></div>
+              <h1 id="chapter-title"></h1>
+              <div class="chapter-rule">❦</div>
+              <div id="chapter-body" class="chapter-body"></div>
+              <button id="next-chapter" class="chapter-next">
+                继续下一章<i data-icon="forward"></i>
+              </button>
+            </article>
+          </div>
+          <iframe
+            id="epub-frame"
+            class="epub-frame"
+            title="原书 EPUB 正文"
+            sandbox="allow-same-origin"
+            hidden
+          ></iframe>
+          <div id="pdf-paper" class="pdf-paper" hidden></div>
+          <div id="reader-loading" class="reader-loading" hidden>
+            正在打开这一页…
+          </div>
+        </div>
+        <div id="ocr-status" class="ocr-status" role="status" hidden></div>
+        <button class="focus-exit" id="focus-exit" hidden>
+          <i data-icon="focus"></i>退出专注 <kbd>Esc</kbd>
+        </button>
+      </div>
+      <footer class="reader-footer">
+        <button
+          id="timer-button"
+          class="timer-button"
+          aria-label="开始专注计时"
+        >
+          <i data-icon="timer"></i
+          ><span id="timer-label">专注一会儿</span></button
+        ><span id="position-label"></span>
+        <div class="page-controls">
+          <button id="previous-button" class="icon-button" aria-label="上一屏">
+            <i data-icon="back"></i></button
+          ><button
+            id="page-label"
+            aria-label="跳转页码"
+            title="跳转页码"
+          ></button
+          ><button id="next-button" class="icon-button" aria-label="下一屏">
+            <i data-icon="forward"></i>
+          </button>
+        </div>
+        <div class="book-progress"><span id="progress-fill"></span></div>
+      </footer>
+      <footer id="palm-footer" class="palm-footer" hidden>
+        <button id="palm-previous" aria-label="掌上上一屏">
+          <i data-icon="back"></i></button
+        ><span id="palm-position"></span
+        ><button id="palm-next" aria-label="掌上下一屏">
+          <i data-icon="forward"></i>
+        </button>
+      </footer>
+      <aside
+        id="reader-aside"
+        class="reader-aside"
+        aria-label="目录与书签"
+        hidden
+      >
+        <div class="aside-head">
+          <div>
+            <button id="toc-tab" aria-selected="true">目录</button
+            ><button id="bookmark-tab" aria-selected="false">书签</button>
+          </div>
+          <button id="toc-close" class="icon-button" aria-label="关闭目录">
+            <i data-icon="close"></i>
+          </button>
+        </div>
+        <label class="toc-search"
+          ><i data-icon="search"></i
+          ><input
+            id="toc-search"
+            aria-label="查找章节"
+            type="search"
+            placeholder="查找章节"
+          /><kbd>⌘K</kbd></label
+        >
+        <div id="toc-list" class="toc-list"></div>
+        <div id="bookmarks-list" class="bookmarks-list" hidden></div>
+        <div id="toc-source" class="toc-source"></div>
+      </aside>
+      <aside
+        id="reader-settings"
+        class="reader-settings"
+        aria-label="阅读设置"
+        hidden
+      >
+        <div class="aside-head">
+          <strong>阅读设置</strong
+          ><button
+            id="reader-settings-close"
+            class="icon-button"
+            aria-label="关闭阅读设置"
+          >
+            <i data-icon="close"></i>
+          </button>
+        </div>
+        <div id="quick-settings" class="settings-form"></div>
+      </aside>
+    </main>
+
+    <div
+      id="selection-toolbar"
+      class="selection-toolbar"
+      role="toolbar"
+      aria-label="选中内容操作"
+      hidden
+    >
+      <button id="copy-selection">
+        <i data-icon="copy"></i><span id="copy-label">复制</span></button
+      ><button id="copy-image" hidden><i data-icon="image"></i>复制原图</button
+      ><button id="ask-selection"><i data-icon="ask"></i>提问</button>
+    </div>
+    <aside
+      id="question-panel"
+      class="question-panel"
+      aria-label="围绕选中内容提问"
+      hidden
+    >
+      <div class="aside-head">
+        <strong>围绕这一段</strong
+        ><button
+          id="question-close"
+          class="icon-button"
+          aria-label="关闭提问草稿"
+        >
+          <i data-icon="close"></i>
+        </button>
+      </div>
+      <div id="question-source" class="question-source"></div>
+      <img id="question-image" alt="选中的完整图表" hidden /><label
+        for="question-input"
+        >你想了解什么？</label
+      ><textarea
+        id="question-input"
+        rows="3"
+        placeholder="例如：这里为什么可以这样推导？"
+      ></textarea
+      ><button id="copy-question" class="primary-button">复制内容与问题</button>
+    </aside>
+
+    <dialog id="import-dialog" class="import-dialog">
+      <form method="dialog" class="dialog-heading">
+        <div>
+          <small>IMPORT</small>
+          <h2>把书放进来</h2>
+        </div>
+        <button class="icon-button" aria-label="关闭导入">
+          <i data-icon="close"></i>
+        </button>
+      </form>
+      <div class="import-body">
+        <label class="drop-zone" id="drop-zone"
+          ><input id="file-input" type="file" multiple hidden /><span
+            class="drop-icon"
+            ><i data-icon="import"></i></span
+          ><strong>选择文件，或拖到这里</strong
+          ><small>EPUB · PDF · TXT · Kindle · 更多电子书格式</small></label
+        >
+        <div id="import-files" class="import-files"></div>
+        <p id="import-policy" class="import-policy">
+          EPUB 保留原书目录和插图。PDF、TXT
+          默认开启文档解析，可为每本书单独调整。
+        </p>
+        <div id="import-result" class="import-result" role="status"></div>
+      </div>
+      <div class="dialog-footer">
+        <span id="import-count">文件保存在本机</span
+        ><button class="primary-button" id="import-submit" disabled>
+          导入书籍
+        </button>
+      </div>
+    </dialog>
+    <dialog id="book-dialog" class="book-dialog">
+      <form method="dialog" class="dialog-heading">
+        <h2>书籍设置</h2>
+        <button class="icon-button" aria-label="关闭书籍设置">
+          <i data-icon="close"></i>
+        </button>
+      </form>
+      <div id="book-form" class="book-form"></div>
+      <div class="dialog-footer">
+        <span id="book-save-note"></span
+        ><button id="book-save" class="primary-button">保存设置</button>
+      </div>
+    </dialog>
+    <dialog id="page-dialog" class="book-dialog">
+      <form id="page-jump-form">
+        <div class="dialog-heading">
+          <h2>跳到这里</h2>
+          <button
+            type="button"
+            id="page-jump-close"
+            class="icon-button"
+            aria-label="关闭页码跳转"
+          >
+            <i data-icon="close"></i>
+          </button>
+        </div>
+        <div class="book-form">
+          <label
+            ><span id="page-jump-label">页码</span
+            ><input
+              id="page-jump-input"
+              type="number"
+              min="1"
+              required
+              aria-label="目标页码"
+          /></label>
+        </div>
+        <div class="dialog-footer">
+          <span id="page-jump-total"></span
+          ><button type="submit" class="primary-button">前往</button>
+        </div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="/app-v2.mjs?v=2.12"></script>
+  </body>
+</html>

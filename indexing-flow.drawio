@@ -1,0 +1,121 @@
+<mxfile host="Electron">
+  <diagram id="2S82ik5AxvWPuVK4C3DG" name="pageWithNumber">
+    <mxGraphModel grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="0" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="import" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#edf2eb;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="书库／导入管理&lt;br&gt;逐本选择文档解析" vertex="1">
+          <mxGeometry height="60" width="207" x="76.75" y="12" as="geometry" />
+        </mxCell>
+        <mxCell id="pdf" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="PDF&lt;br&gt;默认开启解析" vertex="1">
+          <mxGeometry height="60" width="140" x="614" y="114" as="geometry" />
+        </mxCell>
+        <mxCell id="epub" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="EPUB／Kindle 等&lt;br&gt;默认沿用原书内容" vertex="1">
+          <mxGeometry height="60" width="217" x="296" y="114" as="geometry" />
+        </mxCell>
+        <mxCell id="txt" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="TXT&lt;br&gt;默认识别章节" vertex="1">
+          <mxGeometry height="60" width="140" x="58.5" y="114" as="geometry" />
+        </mxCell>
+        <mxCell id="pdf-toc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#edf2eb;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="原书目录与文字层&lt;br&gt;书签优先，OCR 补充" vertex="1">
+          <mxGeometry height="60" width="240" x="564" y="204" as="geometry" />
+        </mxCell>
+        <mxCell id="epub-toc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#edf2eb;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="原生阅读顺序与目录&lt;br&gt;保留正文、样式与插图" vertex="1">
+          <mxGeometry height="60" width="259" x="275" y="204" as="geometry" />
+        </mxCell>
+        <mxCell id="txt-toc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#edf2eb;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="通用章／回／卷规则&lt;br&gt;记录原文字符位置" vertex="1">
+          <mxGeometry height="60" width="233" x="12" y="204" as="geometry" />
+        </mxCell>
+        <mxCell id="toc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="统一章节索引&lt;br&gt;搜索、定位与返回" vertex="1">
+          <mxGeometry height="60" width="194" x="307.5" y="296" as="geometry" />
+        </mxCell>
+        <mxCell id="reader" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#edf2eb;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="沉浸阅读器&lt;br&gt;翻页／滚动、划词" vertex="1">
+          <mxGeometry height="60" width="181" x="314" y="386" as="geometry" />
+        </mxCell>
+        <mxCell id="palm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#aab9ad;fontColor=#29352d;fontSize=13;" value="掌上独立窗口&lt;br&gt;字号自适应／进度同步" vertex="1">
+          <mxGeometry height="60" width="220" x="294.5" y="476" as="geometry" />
+        </mxCell>
+        <mxCell id="import-pdf" edge="1" parent="1" source="import" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.75;exitY=1;entryX=0.5;entryY=0;" target="pdf">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="232" y="88" />
+              <mxPoint x="684" y="88" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="import-epub" edge="1" parent="1" source="import" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="epub">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="180.25" y="98" />
+              <mxPoint x="404.5" y="98" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="import-txt" edge="1" parent="1" source="import" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" target="txt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="128.5" y="93" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="pdf-pdf-toc" edge="1" parent="1" source="pdf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="pdf-toc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="684" y="189" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="epub-epub-toc" edge="1" parent="1" source="epub" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="epub-toc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="404.5" y="189" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="txt-txt-toc" edge="1" parent="1" source="txt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="txt-toc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="128.5" y="189" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="pdf-toc-toc" edge="1" parent="1" source="pdf-toc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.75;entryY=0;" target="toc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="684" y="280" />
+              <mxPoint x="453" y="280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="epub-toc-toc" edge="1" parent="1" source="epub-toc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="toc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="404.5" y="280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="txt-toc-toc" edge="1" parent="1" source="txt-toc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.25;entryY=0;" target="toc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="128.5" y="280" />
+              <mxPoint x="356" y="280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="toc-reader" edge="1" parent="1" source="toc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="reader">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="404.5" y="371" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="reader-palm" edge="1" parent="1" source="reader" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#718075;endArrow=block;endFill=1;curved=0;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="palm">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="404.5" y="461" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

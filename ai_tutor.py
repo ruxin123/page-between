@@ -3,7 +3,6 @@
 import copy
 import html
 import json
-import os
 import shutil
 import socket
 import subprocess
@@ -11,12 +10,12 @@ import threading
 import time
 import uuid
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from lxml import etree
-from paths import ROOT, DATA
+from paths import DATA
 from storage import load, save
+import service_settings
 
 LOCK = threading.RLock()
 ACTIVE = set()
@@ -39,50 +38,10 @@ class TutorError(ValueError):
 
 
 def configuration():
-    values = {}
-    env = ROOT / ".env"
-    if env.is_file():
-        for line in env.read_text().splitlines():
-            name, separator, value = line.partition("=")
-            if separator and name.strip() in {"AI_BASE_URL", "AI_MODEL", "AI_API_KEY"}:
-                value = value.strip()
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                    value = value[1:-1]
-                values[name.strip()] = value
-    values.update(
-        {
-            key: os.environ[key]
-            for key in ("AI_BASE_URL", "AI_MODEL", "AI_API_KEY")
-            if key in os.environ
-        }
-    )
-    base, model, key = (
-        values.get(name, "").strip()
-        for name in ("AI_BASE_URL", "AI_MODEL", "AI_API_KEY")
-    )
-    if not base or not model:
-        raise TutorError("尚未配置模型，请填写本机 .env 中的模型地址、名称和 Key。")
-    address = urlsplit(base)
-    local = address.hostname in {"127.0.0.1", "localhost", "::1"}
-    if (
-        address.username
-        or address.password
-        or address.query
-        or address.fragment
-        or not address.hostname
-        or (address.scheme != "https" and not (local and address.scheme == "http"))
-    ):
-        raise TutorError(
-            "模型地址应使用 HTTPS；本地模型可使用回环 HTTP 地址，不要把 Key 放在地址中。"
-        )
-    if not key and not local:
-        raise TutorError("请填写模型 API Key。")
-    if "\r" in key or "\n" in key:
-        raise TutorError("API Key 含有换行，请检查本机配置。")
-    endpoint = base.rstrip("/")
-    if not endpoint.endswith("/chat/completions"):
-        endpoint += "/chat/completions"
-    return {"url": endpoint, "model": model, "key": key, "host": address.netloc}
+    try:
+        return service_settings.ai_configuration()
+    except service_settings.SettingsError as error:
+        raise TutorError(str(error)) from None
 
 
 def status():
@@ -245,13 +204,13 @@ def answer_html(text):
         return "<p>" + html.escape(text).replace("\n", "<br>") + "</p>"
 
 
-def complete(config, messages):
+def complete(config, messages, *, max_tokens=4096, timeout=120):
     payload = json.dumps(
         {
             "model": config["model"],
             "messages": messages,
             "stream": False,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
         }
     ).encode()
     headers = {"Content-Type": "application/json"}
@@ -259,7 +218,7 @@ def complete(config, messages):
         headers["Authorization"] = "Bearer " + config["key"]
     try:
         request = Request(config["url"], payload, headers, method="POST")
-        with build_opener(NoRedirect()).open(request, timeout=120) as response:
+        with build_opener(NoRedirect()).open(request, timeout=timeout) as response:
             raw = response.read(2 * 1024 * 1024 + 1)
         if len(raw) > 2 * 1024 * 1024:
             raise TutorError("模型响应过长，请换一种更简短的问法。")

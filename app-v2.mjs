@@ -4,8 +4,9 @@ import { escapeHTML, icon } from "/ui/shared.mjs";
 import { createLibraryView } from "/ui/library.mjs";
 import { createToasts } from "/ui/feedback.mjs";
 import { createTutor } from "/ui/tutor.mjs";
+import { createServiceSettings } from "/ui/settings.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.14";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.15";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -84,7 +85,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.14";
+document.body.dataset.readerBuild = "2.15";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -106,6 +107,7 @@ function post(path, value) {
   });
 }
 const toast = createToasts($("toasts"));
+const serviceSettings = createServiceSettings({ document, api, post, toast });
 const libraryView = createLibraryView(document);
 function postState(patch) {
   stateQueue = stateQueue
@@ -483,7 +485,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.14",
+        build: "2.15",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1829,6 +1831,9 @@ function showRoute() {
   if (route === "reader" && next !== "reader") {
     savePosition(true);
     readerReady = false;
+    $("question-panel").hidden = true;
+    $("reader-settings").hidden = true;
+    clearSelection();
   }
   route = next;
   document.body.dataset.view = next;
@@ -1850,10 +1855,13 @@ function showRoute() {
       : requested[1];
     readBook(id || books[0]?.id);
   } else {
-    document.title = (next === "settings" ? "阅读设置" : "书库") + " · 页间";
+    document.title = (next === "settings" ? "设置" : "书库") + " · 页间";
     if (next === "library") renderLibrary();
     if (requested[0] === "imports") openJobs();
-    if (next === "settings") renderSettings();
+    if (next === "settings") {
+      renderSettings();
+      serviceSettings.show(requested[1]);
+    }
   }
 }
 

@@ -31,6 +31,7 @@ from pdf_enhancement import build_contents, recognize
 from paths import DATA, RUNTIME, DEMO
 from storage import load, save
 import ai_tutor
+import service_settings
 
 MUTEX = threading.RLock()
 WORKERS = ThreadPoolExecutor(max_workers=2)
@@ -171,7 +172,10 @@ def build_native():
     if sys.platform != "darwin" or not shutil.which("swiftc"):
         return
     RUNTIME.mkdir(parents=True, exist_ok=True)
-    outputs = [(ROOT / "native/OCR.swift", RUNTIME / "ocr-page")]
+    outputs = [
+        (ROOT / "native/OCR.swift", RUNTIME / "ocr-page"),
+        (ROOT / "native/Secrets.swift", RUNTIME / "service-secrets"),
+    ]
     palm_bundle = RUNTIME / "页间掌上阅读.app"
     palm_binary = palm_bundle / "Contents/MacOS/page-between-palm"
     if (ROOT / "native/Palm.swift").exists():
@@ -259,6 +263,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({"error": "请求来源不受支持。"}, 403)
             if route.path == "/api/ai/status":
                 return self.json(ai_tutor.status())
+            if route.path == "/api/settings":
+                return self.json(service_settings.public_settings())
             if route.path == "/api/ai/conversations":
                 book = book_for(query.get("book", [""])[0])
                 if not book:
@@ -383,6 +389,33 @@ class Handler(SimpleHTTPRequestHandler):
                     finally:
                         shutil.rmtree(incoming, ignore_errors=True)
             payload = json.loads(self.request_body())
+            if route.path in {"/api/settings/save", "/api/settings/test"}:
+                if not isinstance(payload, dict):
+                    raise ValueError("服务配置无效。")
+                service = payload.get("service")
+                config = payload.get("config")
+                if route.path.endswith("/save"):
+                    return self.json(service_settings.update(service, config))
+                snapshot = service_settings.candidate(service, config, require_key=True)
+                if service == "ai":
+                    endpoint = snapshot["baseUrl"]
+                    if not endpoint.endswith("/chat/completions"):
+                        endpoint += "/chat/completions"
+                    ai_tutor.complete(
+                        {**snapshot, "url": endpoint},
+                        [{"role": "user", "content": "这是连接测试，请只回复 OK。"}],
+                        max_tokens=512,
+                        timeout=45,
+                    )
+                    return self.json(
+                        {"message": "连接成功，所选模型已返回回答。测试未保存设置。"}
+                    )
+                return self.json(
+                    {
+                        "message": "配置格式检查通过。云解析任务尚未接入，Token 有效性将在实际解析时确认。",
+                        "verified": False,
+                    }
+                )
             if route.path == "/api/ai/ask":
                 book = book_for(payload.get("book"))
                 if not book:

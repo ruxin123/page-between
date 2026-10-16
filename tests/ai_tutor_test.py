@@ -18,10 +18,11 @@ class Tutor(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.patches = [
             patch.object(tutor, "DATA", self.root),
-            patch.object(tutor, "ROOT", self.root),
+            patch.object(tutor.service_settings, "ROOT", self.root),
+            patch.object(tutor.service_settings, "CONFIG", self.root / "services.json"),
             patch.object(tutor, "ACTIVE", set()),
             patch.dict(
-                tutor.os.environ,
+                tutor.service_settings.os.environ,
                 {
                     "AI_BASE_URL": "http://127.0.0.1:1/v1",
                     "AI_MODEL": "test-model",
@@ -81,7 +82,7 @@ class Tutor(unittest.TestCase):
         worker.start()
         try:
             with patch.dict(
-                tutor.os.environ,
+                tutor.service_settings.os.environ,
                 {"AI_BASE_URL": f"http://127.0.0.1:{http.server_port}/v1"},
             ):
                 first = tutor.ask(self.book, self.payload)
@@ -155,7 +156,7 @@ class Tutor(unittest.TestCase):
 
     def test_configuration_hides_credentials_and_rejects_unsafe_urls(self):
         with patch.dict(
-            tutor.os.environ,
+            tutor.service_settings.os.environ,
             {
                 "AI_BASE_URL": "https://example.invalid/v1",
                 "AI_API_KEY": "test-value-only",
@@ -167,7 +168,9 @@ class Tutor(unittest.TestCase):
             "https://name:password@example.invalid",
             "https://example.invalid/v1?key=value",
         ):
-            with patch.dict(tutor.os.environ, {"AI_BASE_URL": address}):
+            with patch.dict(
+                tutor.service_settings.os.environ, {"AI_BASE_URL": address}
+            ):
                 self.assertFalse(tutor.status()["configured"])
         self.assertFalse((self.root / "ai-conversations.json").exists())
 
@@ -225,7 +228,7 @@ class Tutor(unittest.TestCase):
         worker.start()
         try:
             with patch.dict(
-                tutor.os.environ,
+                tutor.service_settings.os.environ,
                 {
                     "AI_BASE_URL": f"http://127.0.0.1:{http.server_port}/v1",
                     "AI_API_KEY": "test-value-only",

@@ -2,7 +2,7 @@
 
 ## 运行与验证
 
-按 [README](../README.md) 配置环境并启动匿名演示。运行 Node 与 Python 测试；无需私人书库、已有缓存或云端 OCR 凭据；AI 回归使用本机模拟 HTTP 服务，实际模型调用需要本机 .env。
+按 [README](../README.md) 配置环境并启动匿名演示。运行 Node 与 Python 测试；无需私人书库、已有缓存或云端 OCR 凭据；AI 回归使用本机模拟 HTTP 服务，实际模型可在「设置 → AI 答疑」中配置，开发环境也兼容本机 `.env`。
 
 ## 建议阅读顺序
 
@@ -15,6 +15,7 @@
 5. `ui/library.mjs`、`ui/feedback.mjs`、`ui/shared.mjs`：卡片复用、通知撤销、键盘焦点与输出转义；以及 `app-v2.mjs`：异步加载、模式切换、字符锚点、书签、文字选择与主 / 小窗同步。
 6. `native/Palm.swift`：窗口层级、尺寸、快捷键、桥接与关闭保存。
 7. `ai_tutor.py`、`ui/tutor.mjs`：来源、对话隔离、模型请求、失败重试与安全 Markdown / MathML。
+8. `service_settings.py`、`native/Secrets.swift`、`ui/settings.mjs`：非敏感配置、钥匙串、草稿测试与凭据保留 / 替换 / 移除。完整交付边界见 `APP_READINESS.md`。
 8. `tests/` 与 `scripts/create_demo.py`：回归范围、生成样本和缺口。
 
 文件名保留 `app-v2.mjs` 以对应当前原型，旧版入口和样本专用脚本不属于公开运行链路。

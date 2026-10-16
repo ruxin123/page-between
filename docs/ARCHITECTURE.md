@@ -2,7 +2,7 @@
 
 ## 当前结构
 
-浏览器处理阅读 UI，Python 提供本地导入、OCR、任务与存储。Swift 组件只负责 macOS Vision OCR 和 NSPanel / WKWebView 掌上窗口。原型没有前端打包步骤；阅读和存储保留本机，AI 仅在用户发送时调用配置的模型服务。
+浏览器处理阅读 UI，Python 提供本地导入、OCR、任务、服务设置与存储。Swift 组件负责 macOS Vision OCR、NSPanel / WKWebView 掌上窗口与钥匙串。原型没有前端打包步骤；阅读和存储保留本机，AI 仅在用户发送问题或连接测试时调用配置的模型服务。
 
 ![导入与索引流程](../indexing-flow.drawio.svg)
 
@@ -83,3 +83,11 @@ HTTP 只绑定回环地址，检查 Host / Origin；静态读取隐藏文件受�
 AI 入口复用选区和当前阅读位置，`ui/tutor.mjs` 管理问题、记录、回复与出处按钮。`ai_tutor.py` 只从后端读取模型配置，使用兼容 Chat Completions 的 HTTP 请求，按书保存 `ai-conversations.json`；生成前先保存问题，成功或失败后更新同一回复，服务中断的生成记录可以重试。
 
 已保存的来源在追问时保持不变；每次请求使用原文、附近内容和有界的近期对话，不默认上传整本书。Pandoc 排版后清理输出标签与属性，MathML 保留，URL、脚本和外部图片移除。Python 模型请求不跟随重定向，避免将认证与资料转发到其他地址。
+
+## 2.15 的应用内服务设置
+
+`ui/settings.mjs` 管理独立的服务表单，阅读偏好重绘不会销毁这些表单。`GET /api/settings` 只返回非敏感字段与凭据是否存在；保存和测试分别使用 `/api/settings/save`、`/api/settings/test`。模型测试使用草稿快照，实际回答读取同一套服务配置。
+
+`service_settings.py` 负责旧 `.env` 兼容、配置校验、目标地址变更保护与持久化。普通设置放在 Application Support；`native/Secrets.swift` 通过 Security.framework 保存凭据。值仅经过后端与 helper 的管道，进程参数和日志中没有 Key。替换凭据时先创建新条目，再原子替换设置文件，最后清理旧条目；文件保存失败保留原设置与原凭据。
+
+更完整的前后端 App 化问题与交付门槛见 [APP_READINESS.md](APP_READINESS.md)。服务配置完成不等于 MinerU 任务、主窗口或安装包已经完成。

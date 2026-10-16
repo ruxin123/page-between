@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.14" />
+    <link rel="stylesheet" href="/layout.css?v=2.15" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -37,7 +37,7 @@
             ><span id="running-count" hidden></span>
           </button>
           <a href="#/settings" data-nav="settings"
-            ><i data-icon="settings"></i>阅读设置</a
+            ><i data-icon="settings"></i>设置</a
           ><span class="local-note"><b></b>保存在这台 Mac</span>
         </div>
       </aside>
@@ -89,12 +89,48 @@
         <section id="settings-view" class="app-view" hidden>
           <header class="page-heading">
             <div>
-              <div class="eyebrow">READING</div>
-              <h1>阅读设置</h1>
-              <p>把正文调成适合自己的样子。</p>
+              <div class="eyebrow">PREFERENCES</div>
+              <h1>让阅读合你心意</h1>
+              <p>从字里行间，到陪你读书的服务。</p>
             </div>
           </header>
-          <div class="settings-layout">
+          <div class="settings-tabs" role="tablist" aria-label="设置分类">
+            <button
+              id="tab-reading"
+              role="tab"
+              aria-controls="settings-reading"
+              aria-selected="true"
+              data-settings-tab="reading"
+            >
+              阅读外观
+            </button>
+            <button
+              id="tab-ai"
+              role="tab"
+              aria-controls="settings-ai"
+              aria-selected="false"
+              tabindex="-1"
+              data-settings-tab="ai"
+            >
+              AI 答疑
+            </button>
+            <button
+              id="tab-mineru"
+              role="tab"
+              aria-controls="settings-mineru"
+              aria-selected="false"
+              tabindex="-1"
+              data-settings-tab="mineru"
+            >
+              文档解析
+            </button>
+          </div>
+          <div
+            id="settings-reading"
+            class="settings-layout"
+            role="tabpanel"
+            aria-labelledby="tab-reading"
+          >
             <div class="settings-form" id="global-settings"></div>
             <article class="type-sample">
               <small>阅读预览</small>
@@ -109,6 +145,21 @@
               <span class="sample-leaf">❦</span>
             </article>
           </div>
+          <section
+            id="settings-ai"
+            class="service-layout"
+            role="tabpanel"
+            aria-labelledby="tab-ai"
+            hidden
+          ></section>
+          <section
+            id="settings-mineru"
+            class="service-layout"
+            role="tabpanel"
+            aria-labelledby="tab-mineru"
+            hidden
+          ></section>
+          <p id="settings-load-status" class="setting-note" role="status"></p>
         </section>
       </main>
     </div>
@@ -358,6 +409,7 @@
         </button>
       </div>
       <div id="ai-model-status" class="ai-model-status" role="status"></div>
+      <a class="ai-settings-link" href="#/settings/ai">管理模型服务</a>
       <details id="ai-service-details" class="ai-service-details" hidden>
         <summary>查看模型服务</summary>
         <span id="ai-service"></span>
@@ -503,6 +555,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.14"></script>
+    <script type="module" src="/app-v2.mjs?v=2.15"></script>
   </body>
 </html>

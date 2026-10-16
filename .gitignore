@@ -15,6 +15,7 @@
 !/epub-reader.css
 !/server.py
 !/ai_tutor.py
+!/service_settings.py
 !/storage.py
 !/book_import.py
 !/pdf_enhancement.py
@@ -27,6 +28,7 @@
 /native/*
 !/native/OCR.swift
 !/native/Palm.swift
+!/native/Secrets.swift
 !/scripts/
 !/ui/
 !/tests/
@@ -42,6 +44,7 @@
 !/tests/jobs.test.mjs
 !/tests/feedback.test.mjs
 !/tests/ai_tutor_test.py
+!/tests/settings_test.py
 !/docs/
 !/assets/
 /assets/*

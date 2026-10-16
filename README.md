@@ -4,7 +4,7 @@
 
 A local-first reading prototype with native EPUB navigation, enhanced PDF selection, paginated text, and a compact macOS reading window.
 
-当前阶段用于**产品交互与代码评审**。主体是 HTML / CSS / JavaScript，加上 Python 本地服务和两个 Swift 原生组件；还不是打包发行的完整 macOS 应用。
+当前阶段用于**产品交互与代码评审**，正在向可独立安装的 macOS App 推进。主体是 HTML / CSS / JavaScript、Python 本地服务，以及 OCR、掌上窗口和钥匙串三个 Swift 组件。完整功能与安装交付的验收清单见 [App 改造与交付](docs/APP_READINESS.md)。
 
 ![匿名示例书库](docs/screenshots/library.png)
 
@@ -55,16 +55,25 @@ python server.py
 
 两套资料、进度、书签和 OCR 缓存分开保存，两个数据目录均由 Git 忽略。服务只监听本机回环地址；本仓库上传的是代码与评审资料，没有部署公网阅读服务。
 
-## 书内 AI 答疑（2.14）
+## 服务设置（2.15）
+
+进入侧栏「设置」后，可以分别调整阅读外观、AI 答疑和文档解析。模型服务填写地址、模型 ID 与 API Key，支持 Chat Completions 兼容接口；本机回环模型可以使用 HTTP，也可以不填 Key。
+
+「测试连接」使用表单中的配置发送一句简短测试文本，不发送书籍，不自动保存。点击「保存设置」后，新请求立即生效。凭据保存在 **macOS 钥匙串**，不会回显；留空保留现有凭据，可单独勾选移除。更换服务目标时需要重新填写凭据，防止将旧 Key 交给新地址。
+
+普通服务设置保存在 `~/Library/Application Support/Page Between/Personal/services.json`；匿名演示保存在相邻 `Review Demo/` 目录，凭据也按模式隔离。文件只含地址、模型和钥匙串引用，不包含 Key。原有 `.env` 仍可使用；主动保存后应用配置优先，移除凭据后不恢复旧 `.env` Key。
+
+MinerU 页面可保存云 API v4 的地址、Token 与解析模型。目前云任务仍在接入；「检查配置」只检查填写格式，不宣称 Token 鉴权成功。当前 PDF 的日常目录与划词仍由本机 OCR 提供。参考 [MinerU 官方 API 文档](https://mineru.net/apiManage/docs)。
+
+![匿名示例上的服务设置](docs/screenshots/services.png)
+
+模型设置截图使用本机模拟服务与虚构模型 ID，见 [设置示例](docs/screenshots/model-settings.png)。真实模型另行验证，截图不展示私人地址或凭据。
+
+## 书内 AI 答疑
 
 支持选中原文提问、围绕当前页提问、连续追问和本书对话记录。每条对话保存原文选段、附近内容与位置，点击出处可回到书中，并使用阅读器的返回按钮回到跳转前的位置。
 
-```sh
-cp -n .env.example .env
-# 在本机 .env 填写 AI_BASE_URL、AI_MODEL、AI_API_KEY
-```
-
-地址使用支持 `POST /chat/completions` 的 API 根地址，也可填写完整端点。服务使用 HTTPS；本机回环模型可用 HTTP，且可以不填 Key。配置由 Python 后端按请求读取，保存后无需重启。协议参考 [Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion/)。
+先通过上述「设置 → AI 答疑」配置。地址使用支持 `POST /chat/completions` 的 API 根地址，也可填写完整端点。协议参考 [Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion/)。开发环境也可复制 `.env.example` 并填写 `AI_BASE_URL`、`AI_MODEL`、`AI_API_KEY`，已保存的应用设置优先。
 
 进入阅读页，选中文字后点「提问」，或点击顶栏「书内 AI 答疑」。`⌘Enter` 可发送问题。「本书记录」可重新打开已保存对话；失败回答可以重新生成。生成时可关闭面板继续读，稍后在本书记录查看。
 

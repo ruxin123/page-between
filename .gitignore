@@ -14,6 +14,8 @@
 !/layout.css
 !/epub-reader.css
 !/server.py
+!/ai_tutor.py
+!/storage.py
 !/book_import.py
 !/pdf_enhancement.py
 !/paths.py
@@ -37,6 +39,9 @@
 !/tests/page-turn.test.mjs
 !/tests/library.test.mjs
 !/tests/theme.test.mjs
+!/tests/jobs.test.mjs
+!/tests/feedback.test.mjs
+!/tests/ai_tutor_test.py
 !/docs/
 !/assets/
 /assets/*
@@ -55,6 +60,7 @@ __pycache__/
 *.py[cod]
 .env
 .env.*
+!/.env.example
 *.pem
 *.key
 .DS_Store

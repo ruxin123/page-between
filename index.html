@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.13" />
+    <link rel="stylesheet" href="/layout.css?v=2.14" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -137,6 +137,14 @@
           </div>
         </div>
         <div class="reader-actions">
+          <button
+            class="icon-button"
+            id="ai-open"
+            aria-label="书内 AI 答疑"
+            title="问当前页，或查看本书对话"
+          >
+            <i data-icon="ask"></i>
+          </button>
           <button
             class="icon-button"
             id="toc-toggle"
@@ -338,25 +346,55 @@
       hidden
     >
       <div class="aside-head">
-        <strong>围绕这一段</strong
+        <strong>书内答疑</strong
+        ><button id="ai-history-toggle" class="secondary-button">
+          本书记录</button
         ><button
           id="question-close"
           class="icon-button"
-          aria-label="关闭提问草稿"
+          aria-label="关闭书内答疑"
         >
           <i data-icon="close"></i>
         </button>
       </div>
-      <div id="question-source" class="question-source"></div>
-      <img id="question-image" alt="选中的完整图表" hidden /><label
-        for="question-input"
-        >你想了解什么？</label
-      ><textarea
-        id="question-input"
-        rows="3"
-        placeholder="例如：这里为什么可以这样推导？"
-      ></textarea
-      ><button id="copy-question" class="primary-button">复制内容与问题</button>
+      <div id="ai-model-status" class="ai-model-status" role="status"></div>
+      <details id="ai-service-details" class="ai-service-details" hidden>
+        <summary>查看模型服务</summary>
+        <span id="ai-service"></span>
+      </details>
+      <div id="ai-history-list" class="ai-history-list" hidden></div>
+      <div id="ai-conversation">
+        <div class="question-source">
+          <button
+            id="question-source"
+            class="ai-source-link"
+            title="返回原文位置"
+          ></button>
+          <p id="ai-quote"></p>
+        </div>
+        <img id="question-image" alt="选中的完整图表，仅在本机显示" hidden />
+        <div id="ai-messages" class="ai-messages" aria-live="polite"></div>
+        <p id="ai-progress" class="setting-note" role="status" hidden></p>
+        <form id="ai-question-form">
+          <label for="question-input">你想了解什么？</label
+          ><textarea
+            id="question-input"
+            rows="3"
+            placeholder="例如：这里为什么可以这样推导？"
+            maxlength="6000"
+          ></textarea>
+          <div class="ai-form-actions">
+            <button id="ai-submit" class="primary-button" type="submit">
+              发送提问</button
+            ><button id="copy-question" class="secondary-button" type="button">
+              复制出处与对话
+            </button>
+          </div>
+          <p class="setting-note">
+            发送时会将原文选段与附近文字交给已配置的模型服务。对话保存在本机；点击出处可返回原文。
+          </p>
+        </form>
+      </div>
     </aside>
 
     <dialog id="import-dialog" class="import-dialog">
@@ -465,6 +503,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.13"></script>
+    <script type="module" src="/app-v2.mjs?v=2.14"></script>
   </body>
 </html>

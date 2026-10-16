@@ -29,22 +29,13 @@ from book_import import (
 from pdf_enhancement import build_contents, recognize
 
 from paths import DATA, RUNTIME, DEMO
+from storage import load, save
+import ai_tutor
 
 MUTEX = threading.RLock()
 WORKERS = ThreadPoolExecutor(max_workers=2)
 RUNNING = set()
 IMPORT_LOCKS = defaultdict(threading.Lock)
-
-
-def load(path, fallback):
-    return json.loads(path.read_text()) if path.is_file() else fallback
-
-
-def save(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-    temporary.replace(path)
 
 
 def library():
@@ -69,9 +60,10 @@ def start_job(ident):
     with MUTEX:
         if ident in RUNNING:
             return
-        RUNNING.add(ident)
         data = library()
         book = next(book for book in data["books"] if book["id"] == ident)
+        RUNNING.add(ident)
+        book.update({"processing": "pending", "processingNote": "准备文档解析"})
         job = {
             "id": uuid.uuid4().hex,
             "book": ident,
@@ -80,9 +72,11 @@ def start_job(ident):
             "phase": "准备文档解析",
             "startedAt": time.time(),
         }
+        data["jobs"] = [entry for entry in data["jobs"] if entry.get("book") != ident]
         data["jobs"].insert(0, job)
         data["jobs"] = data["jobs"][:100]
         save(DATA / "library.json", data)
+        save(BOOK_ROOT / ident / "book.json", book)
 
     def phase(text, status="running"):
         with MUTEX:
@@ -90,9 +84,15 @@ def start_job(ident):
             entry = next(
                 (entry for entry in data["jobs"] if entry["id"] == job["id"]), None
             )
+            book = next((book for book in data["books"] if book["id"] == ident), None)
+            if book and status in {"ready", "error"}:
+                if not book["parseEnabled"] and book["type"] != "txt":
+                    text, status = "已关闭增强解析，保留原书阅读。", "ready"
+                book.update({"processing": status, "processingNote": text})
+                save(BOOK_ROOT / ident / "book.json", book)
             if entry:
                 entry.update({"phase": text, "status": status})
-                save(DATA / "library.json", data)
+            save(DATA / "library.json", data)
 
     def run():
         try:
@@ -150,14 +150,15 @@ def start_job(ident):
                     ident,
                     {
                         "processing": "ready",
-                        "structureIndexUrl": "/data/books/"
+                        "structureIndexUrl": "/"
+                        + DATA.name
+                        + "/books/"
                         + ident
                         + "/structure-index.json",
                     },
                 )
                 phase("附加结构索引已准备；原书排版保留。", "ready")
         except Exception as error:
-            update_book(ident, {"processing": "error", "processingNote": str(error)})
             phase(str(error), "error")
         finally:
             with MUTEX:
@@ -256,6 +257,18 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if not self.same_origin():
                 return self.json({"error": "请求来源不受支持。"}, 403)
+            if route.path == "/api/ai/status":
+                return self.json(ai_tutor.status())
+            if route.path == "/api/ai/conversations":
+                book = book_for(query.get("book", [""])[0])
+                if not book:
+                    raise ValueError("找不到这本书。")
+                ident = query.get("id", [""])[0]
+                return self.json(
+                    {"conversation": ai_tutor.conversation(ident, book["id"])}
+                    if ident
+                    else {"conversations": ai_tutor.history(book["id"])}
+                )
             if route.path == "/api/library":
                 return self.json(library())
             if route.path == "/api/library-version":
@@ -370,6 +383,17 @@ class Handler(SimpleHTTPRequestHandler):
                     finally:
                         shutil.rmtree(incoming, ignore_errors=True)
             payload = json.loads(self.request_body())
+            if route.path == "/api/ai/ask":
+                book = book_for(payload.get("book"))
+                if not book:
+                    raise ValueError("找不到这本书。")
+                try:
+                    return self.json({"conversation": ai_tutor.ask(book, payload)})
+                except ai_tutor.TutorError as error:
+                    return self.json(
+                        {"error": str(error), "conversation": error.conversation},
+                        502 if error.conversation else 400,
+                    )
             if route.path == "/api/state":
                 with MUTEX:
                     state = load(

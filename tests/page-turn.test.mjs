@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { PageLayout } from "../page-layout.mjs";
+import { PageLayout, characterRect } from "../page-layout.mjs";
 
 const animations = [];
 class Motion {
@@ -88,5 +88,56 @@ assert.equal(
   "Reduced motion changes pages without animation.",
 );
 assert.equal(host.dataset.page, 1);
+
+const first = { length: 3, left: 10 },
+  second = { length: 5, left: 790 },
+  empty = { length: 0 };
+const paragraph = {
+  ownerDocument: {
+    createTreeWalker() {
+      let i = 0;
+      return { nextNode: () => [first, second, empty][i++] };
+    },
+    createRange() {
+      let node, start, end;
+      return {
+        setStart(n, offset) {
+          node = n;
+          start = offset;
+        },
+        setEnd(n, offset) {
+          end = offset;
+        },
+        getClientRects() {
+          return start === end || node.invisible
+            ? []
+            : [{ left: node.left, top: 20 }];
+        },
+      };
+    },
+  },
+  getClientRects: () => [{ left: 10, top: 20 }],
+};
+flow.getBoundingClientRect = () => ({ left: 0 });
+layout.reveal(paragraph, 3);
+assert.equal(
+  layout.page,
+  1,
+  "An inline-node boundary reveals the next column, not the paragraph start.",
+);
+layout.reveal(paragraph, 8);
+assert.equal(
+  layout.page,
+  1,
+  "Paragraph end uses its last non-empty text node.",
+);
+assert.equal(characterRect(paragraph, 100).left, 790);
+first.invisible = true;
+layout.reveal(paragraph, 0);
+assert.equal(
+  layout.page,
+  0,
+  "Invisible leading whitespace must not jump to the last column.",
+);
 layout.destroy();
 console.log("换页几何保持、连续翻页取消、临时层清理与减少动态效果：通过。");

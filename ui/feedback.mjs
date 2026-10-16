@@ -1,9 +1,9 @@
 import { icon } from "./shared.mjs";
 
 export function createToasts(root) {
-  return function toast(message, { kind = "info", undo } = {}) {
+  return function toast(message, { kind = "info", undo, focusTarget } = {}) {
     const doc = root.ownerDocument,
-      origin = doc.activeElement;
+      origin = focusTarget || doc.activeElement;
     const item = doc.createElement("div");
     item.className = "toast";
     item.dataset.kind = kind;
@@ -21,7 +21,7 @@ export function createToasts(root) {
       closing = false,
       actionRunning = false;
     const stopTimer = () => clearTimeout(timer);
-    async function dismiss() {
+    async function dismiss(restoreFocus = item.contains(doc.activeElement)) {
       if (closing) return;
       closing = true;
       stopTimer();
@@ -32,7 +32,12 @@ export function createToasts(root) {
             { duration: 160 },
           )
           .finished.catch(() => {});
-      if (item.contains(doc.activeElement) && origin?.isConnected)
+      if (
+        restoreFocus &&
+        origin?.isConnected &&
+        !origin.closest("[hidden]") &&
+        origin.getClientRects().length
+      )
         origin.focus({ preventScroll: true });
       item.remove();
     }
@@ -45,7 +50,7 @@ export function createToasts(root) {
         !item.matches(":hover")
       )
         timer = setTimeout(
-          dismiss,
+          () => dismiss(),
           undo ? 8000 : kind === "error" ? 6000 : 3500,
         );
     }
@@ -55,17 +60,24 @@ export function createToasts(root) {
       button.textContent = "撤销";
       button.setAttribute("aria-label", `撤销：${message}`);
       button.onclick = async () => {
+        if (actionRunning || closing) return;
+        const beforeFocus = doc.activeElement;
         actionRunning = true;
         stopTimer();
-        button.disabled = true;
+        button.setAttribute("aria-disabled", "true");
+        button.setAttribute("aria-busy", "true");
         try {
           await undo();
-          await dismiss();
+          await dismiss(
+            item.contains(doc.activeElement) ||
+              doc.activeElement === beforeFocus,
+          );
         } catch (error) {
           toast("撤销未完成：" + error.message, { kind: "error" });
         } finally {
           actionRunning = false;
-          button.disabled = false;
+          button.removeAttribute("aria-disabled");
+          button.removeAttribute("aria-busy");
           startTimer();
         }
       };
@@ -75,7 +87,7 @@ export function createToasts(root) {
     close.className = "toast-close";
     close.innerHTML = icon("close");
     close.setAttribute("aria-label", "关闭通知");
-    close.onclick = dismiss;
+    close.onclick = () => dismiss();
     item.append(close);
     item.addEventListener("pointerenter", stopTimer);
     item.addEventListener("pointerleave", startTimer);

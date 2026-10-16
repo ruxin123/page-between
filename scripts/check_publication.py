@@ -32,7 +32,7 @@ def findings(name, content, denied=()):
     issues = []
     if any(part in PRIVATE or part.startswith("._") for part in path.parts):
         issues.append("private or generated directory")
-    if path.name.startswith(".env") or path.suffix.lower() in {
+    if (path.name.startswith(".env") and path.name != ".env.example") or path.suffix.lower() in {
         ".pem",
         ".key",
         ".pdf",

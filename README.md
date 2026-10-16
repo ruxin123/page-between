@@ -37,7 +37,7 @@ xcode-select --install
 - **Tesseract**：英文扫描文字识别。
 - **Swift + macOS SDK**：首次启动编译中文 OCR 和独立掌上窗口；这两项属于 macOS 能力。其他系统仍可评审网页及可直接读取的文档。
 
-本轮功能不需要 MinerU Token 或大模型 API Key。
+阅读、导入与本机 OCR 不需要 MinerU Token 或大模型 Key；书内 AI 答疑按下节配置。
 
 ## 使用自己的书籍
 
@@ -55,6 +55,29 @@ python server.py
 
 两套资料、进度、书签和 OCR 缓存分开保存，两个数据目录均由 Git 忽略。服务只监听本机回环地址；本仓库上传的是代码与评审资料，没有部署公网阅读服务。
 
+## 书内 AI 答疑（2.14）
+
+支持选中原文提问、围绕当前页提问、连续追问和本书对话记录。每条对话保存原文选段、附近内容与位置，点击出处可回到书中，并使用阅读器的返回按钮回到跳转前的位置。
+
+```sh
+cp -n .env.example .env
+# 在本机 .env 填写 AI_BASE_URL、AI_MODEL、AI_API_KEY
+```
+
+地址使用支持 `POST /chat/completions` 的 API 根地址，也可填写完整端点。服务使用 HTTPS；本机回环模型可用 HTTP，且可以不填 Key。配置由 Python 后端按请求读取，保存后无需重启。协议参考 [Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion/)。
+
+进入阅读页，选中文字后点「提问」，或点击顶栏「书内 AI 答疑」。`⌘Enter` 可发送问题。「本书记录」可重新打开已保存对话；失败回答可以重新生成。生成时可关闭面板继续读，稍后在本书记录查看。
+
+发送会把原文选段、附近文字和近期对话交给你配置的模型服务。Key 不发给浏览器，也不保存在对话里；个人与匿名演示记录分别保存在被 Git 忽略的 `data/ai-conversations.json` 和 `demo-data/ai-conversations.json`。只有点击发送才调用模型，复制与阅读不调用模型。
+
+回答支持 Markdown；已安装 Pandoc 时会将公式转为原生 MathML。未安装 Pandoc 时显示安全纯文本。模型输出中的脚本、外部图片与链接不会执行或发出请求。当前按整段返回回答，原图只在本机显示，图像理解尚未接入。
+
+首阶段参考当前选段及附近文字；全书检索、自动追溯此前定理和知识依赖仍在后续范围。上下文不足时会要求模型说明缺少的证据。
+
+![匿名资料上的真实模型问答](docs/screenshots/ai-answer.png)
+
+[本书记录示例](docs/screenshots/ai-history.png)
+
 ## 当前功能
 
 | 部分        | 已实现的行为                                                                           |
@@ -66,7 +89,7 @@ python server.py
 | PDF         | 保留原版面；原有书签与文字层优先，不足时按页 OCR；扫描目录识别及印刷页码映射           |
 | 阅读方式    | 文字书默认轻滑与淡入淡出的分页；PDF 默认连续滚动；可切换分页 / 滚动                    |
 | 位置与书签  | 目录搜索、跳转返回、同章多个书签；保存段落及字符锚点，排版变化后恢复内容位置           |
-| 取用内容    | 划词后复制或打开带出处的提问草稿；EPUB 图片 / 表格 / MathML 可完整取用                 |
+| 取用内容    | 划词复制、真实 AI 答疑、保存本书对话与出处回跳；EPUB 图片 / 表格 / MathML 可完整取用   |
 | 字体与主题  | 中英文分别选字体，调字号 / 行距 / 宽度，四种主题，专注模式和计时                       |
 | 掌上阅读    | 真实 macOS NSPanel，默认置顶；窗口缩小时同步缩放字号，独立保存浏览方式并共享阅读位置   |
 
@@ -83,7 +106,7 @@ python server.py
 
 开关可在导入时或书籍设置中调整。EPUB 关闭增强解析仍保留原有目录和插图。格式适配不代表所有厂商变体均已验证；加密 / 受保护文件不在直接读取范围内。
 
-## 本轮改进（2.13）
+## 阅读界面改进（2.13）
 
 书库合并常读筛选，导入状态移到按需打开的任务面板。星标操作保留卡片与键盘焦点；通知支持语义反馈和撤销。四种主题的辅助文字达到 AA 对比度，正文颜色达到 AAA，封面、遮罩和光影使用语义变量。保留字符锚点分页与个人排印偏好。
 
@@ -143,7 +166,9 @@ app-v2.mjs             路由、阅读状态、目录、选择、设置及窗口
 ui/                    复用书籍卡片、语义通知与撤销、图标和转义
 page-layout.mjs        实时 DOM 分页与柔和换页动画
 core.mjs               TXT 章节、编码、进度与掌上字号计算
-server.py              本地 HTTP / 导入 / 任务 / 状态接口
+server.py              本地 HTTP / 导入 / 任务 / 状态 / AI 接口
+ai_tutor.py            模型配置、真实请求、对话存储、来源与安全排版
+storage.py             共享 JSON 原子读写
 book_import.py         格式适配与原生 EPUB 结构读取
 pdf_enhancement.py     OCR、扫描目录、页码校准、区块内保守修正
 paths.py               个人与演示资料隔离、运行路径
@@ -165,6 +190,8 @@ node tests/layout.test.mjs
 node tests/page-turn.test.mjs
 node tests/library.test.mjs
 node tests/theme.test.mjs
+node tests/jobs.test.mjs
+node tests/feedback.test.mjs
 python -m unittest discover -s tests -p '*_test.py' -v
 ```
 
@@ -178,7 +205,7 @@ python scripts/check_publication.py
 
 ## 当前边界
 
-- AI 面板目前只准备问题与出处、支持复制；没有调用大模型或保存完整问答。
+- AI 已接通真实模型并保存对话；当前参考选段与附近文字，尚未实现全书检索或图像理解。
 - MinerU 全书任务、全书精确公式识别、定理依赖导航、依据此前知识的辅导继续暂缓；现有增强接口不自动上传图书。
 - OCR 可能出错，尤其数学公式；字符精确对齐、跨页取用及不确定性表达仍待完善。
 - 后台全局翻页快捷键已注册，当前可靠验证范围为聚焦小窗的方向键；离焦触发需进一步复核。

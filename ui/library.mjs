@@ -41,6 +41,18 @@ export function reconcileCards(grid, books, visible, cards, create, update) {
   }
 }
 
+export function nextVisibleCard(cards, previous) {
+  const ordered = [...cards],
+    index = ordered.indexOf(previous);
+  return (
+    ordered.slice(index + 1).find((card) => !card.hidden) ||
+    ordered
+      .slice(0, Math.max(0, index))
+      .reverse()
+      .find((card) => !card.hidden)
+  );
+}
+
 export function createLibraryView(doc) {
   const $ = (id) => doc.getElementById(id);
   const cards = new Map();
@@ -95,6 +107,9 @@ export function createLibraryView(doc) {
   }
   return {
     render({ books, filter, query, last, progress, detail }) {
+      const focusedCard = [...cards.values()].find((card) =>
+        card.contains(doc.activeElement),
+      );
       const selected = filterBooks(books, filter, query);
       $("library-summary").textContent = query.trim()
         ? `找到 ${selected.length} 本 · 共 ${books.length} 本书籍`
@@ -107,12 +122,6 @@ export function createLibraryView(doc) {
         createCard,
         updateCard,
       );
-      if (
-        [...cards.values()].some(
-          (card) => card.hidden && card.contains(doc.activeElement),
-        )
-      )
-        doc.querySelector(`[data-filter="${filter}"]`).focus();
       $("library-empty").hidden = selected.length > 0;
       $("empty-title").textContent = !books.length
         ? "从一本书开始"
@@ -128,6 +137,15 @@ export function createLibraryView(doc) {
         ? "查看全部书籍"
         : "导入第一本书";
       $("empty-action").dataset.emptyAction = books.length ? "clear" : "import";
+      if (focusedCard?.hidden)
+        (
+          nextVisibleCard(cards.values(), focusedCard)?.querySelector(
+            ".shelf-star",
+          ) ||
+          (!selected.length
+            ? $("empty-action")
+            : doc.querySelector(`[data-filter="${filter}"]`))
+        )?.focus({ preventScroll: true });
       $("continue-reading").hidden = !!query.trim() || !last;
       if (last) {
         const fraction = progress(last),

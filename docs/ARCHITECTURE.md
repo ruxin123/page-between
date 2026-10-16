@@ -2,7 +2,7 @@
 
 ## 当前结构
 
-浏览器处理阅读 UI，Python 提供本地导入、OCR、任务与存储。Swift 组件只负责 macOS Vision OCR 和 NSPanel / WKWebView 掌上窗口。原型没有前端打包步骤，也没有云服务。
+浏览器处理阅读 UI，Python 提供本地导入、OCR、任务与存储。Swift 组件只负责 macOS Vision OCR 和 NSPanel / WKWebView 掌上窗口。原型没有前端打包步骤；阅读和存储保留本机，AI 仅在用户发送时调用配置的模型服务。
 
 ![导入与索引流程](../indexing-flow.drawio.svg)
 
@@ -75,3 +75,11 @@ HTTP 只绑定回环地址，检查 Host / Origin；静态读取隐藏文件受�
 `ui/library.mjs` 按 ID 缓存书籍卡片，筛选只改变可见性，星标不替换按钮或图片。`ui/feedback.mjs` 管理有语义、可暂停计时和可撤销的通知；撤销动作继续使用原有书籍 / 书签接口。`ui/shared.mjs` 集中图标与 HTML 转义。主脚本仍协调已有阅读状态和服务通信，没有引入第二套状态存储。
 
 常读成为书库筛选；导入处理结果由侧栏底部打开对话框查看。旧 shelf / imports 路由兼容转入新的入口。具体取舍见 [评审沟通记录](REVIEW_DIALOGUE.md)。
+
+## 2.14 的任务恢复与书内 AI
+
+任务按书替换旧记录，并同步书籍当前状态；界面聚合旧数据时以书籍状态为准，避免历史失败成为永久告警。`characterRect` 同时服务分页和滚动锚点，避免内联文本节点边界的空 Range。
+
+AI 入口复用选区和当前阅读位置，`ui/tutor.mjs` 管理问题、记录、回复与出处按钮。`ai_tutor.py` 只从后端读取模型配置，使用兼容 Chat Completions 的 HTTP 请求，按书保存 `ai-conversations.json`；生成前先保存问题，成功或失败后更新同一回复，服务中断的生成记录可以重试。
+
+已保存的来源在追问时保持不变；每次请求使用原文、附近内容和有界的近期对话，不默认上传整本书。Pandoc 排版后清理输出标签与属性，MathML 保留，URL、脚本和外部图片移除。Python 模型请求不跟随重定向，避免将认证与资料转发到其他地址。

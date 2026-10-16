@@ -43,6 +43,7 @@
   --shadow: 0 2px 6px #14281e08, 0 16px 40px -8px #14281e1c;
   --cover-fiction: linear-gradient(145deg, #4a665a, #354c42);
   --cover-study: linear-gradient(145deg, #566b7e, #3e5060);
+  --night-preview-check: #bed5b9;
   --cover-text: #f4f6f0;
   --spine-lighting:
     inset 4px 0 6px #ffffff2e, inset 1px 0 0 #0000001a,
@@ -464,7 +465,7 @@ kbd {
   justify-content: center;
   overflow: hidden;
   border-radius: 3px 9px 9px 3px;
-  box-shadow: var(--spine-lighting), var(--shadow-card);
+  box-shadow: var(--shadow-card);
   background: var(--cover-fiction);
   color: var(--cover-text);
   transition:
@@ -473,7 +474,7 @@ kbd {
 }
 .cover-open:hover .book-cover {
   transform: translateY(-4px);
-  box-shadow: var(--spine-lighting), var(--shadow-card-hover);
+  box-shadow: var(--shadow-card-hover);
 }
 .book-cover img {
   display: block;
@@ -514,7 +515,7 @@ kbd {
   right: 10px;
   top: -5px;
 }
-.book-cover.cover-study .cover-title {
+.book-cover.cover-study .cover-title:not(.long-title) {
   font-family: ReaderSourceSerif, ReaderHanSerif, serif;
   letter-spacing: 0;
   font-size: 27px;
@@ -526,7 +527,7 @@ kbd {
 .small-cover .cover-author {
   display: none;
 }
-.small-cover.book-cover.cover-study .cover-title {
+.small-cover.book-cover.cover-study .cover-title:not(.long-title) {
   font-size: 17px;
 }
 .book-card-foot {
@@ -705,7 +706,7 @@ kbd {
   font-size: 16px;
 }
 .theme-choices button[data-theme="night"] .theme-circle:after {
-  color: #bed5b9;
+  color: var(--night-preview-check);
 }
 .setting-row {
   display: flex;
@@ -2325,7 +2326,7 @@ body[data-mode="palm"] .chapter-next {
     scroll-behavior: auto !important;
   }
 }
-.book-cover.cover-study .cover-title {
+.book-cover.cover-study .cover-title:not(.long-title) {
   padding-inline: 14px;
   font-size: 25px;
 }
@@ -2502,4 +2503,166 @@ body[data-mode="palm"] .text-host {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
   }
+}
+
+.job-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Book questions stay in a bounded panel, with source navigation outside generated HTML. */
+.question-panel {
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100dvh - 96px);
+}
+.question-panel .aside-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  gap: 8px;
+}
+.question-panel .aside-head strong {
+  flex: 1;
+}
+.question-panel .aside-head .secondary-button {
+  padding: 6px 8px;
+}
+.question-source {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: var(--ink);
+}
+.question-source:hover {
+  outline: 1px solid var(--accent);
+}
+.ai-model-status,
+.ai-service-details {
+  color: var(--secondary);
+  font-size: 11px;
+  line-height: 1.8;
+  margin-top: 8px;
+}
+.ai-service-details span {
+  overflow-wrap: anywhere;
+}
+.ai-history-list {
+  padding-top: 16px;
+}
+.ai-history-item {
+  display: grid;
+  width: 100%;
+  text-align: left;
+  gap: 6px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ai-history-item strong {
+  font-weight: 500;
+  line-height: 1.6;
+}
+.ai-history-item span,
+.ai-history-item small {
+  color: var(--secondary);
+  font-size: 11px;
+}
+.ai-messages {
+  display: grid;
+  gap: 16px;
+}
+.ai-message {
+  line-height: 1.85;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.ai-message > small {
+  display: block;
+  color: var(--secondary);
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+.ai-user {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--soft);
+  white-space: pre-wrap;
+}
+.ai-error {
+  color: var(--error);
+}
+.ai-message p {
+  margin: 8px 0;
+}
+.ai-answer pre {
+  overflow: auto;
+  padding: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.ai-answer code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+.ai-answer table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ai-answer th,
+.ai-answer td {
+  padding: 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+.ai-answer math[display="block"] {
+  display: block;
+  margin: 16px 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.ai-answer ul,
+.ai-answer ol {
+  padding-left: 22px;
+}
+.ai-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.question-panel .ai-form-actions button {
+  margin-top: 0;
+}
+#ai-question-form {
+  margin-top: 20px;
+}
+@media (max-width: 440px) {
+  #palm-open {
+    padding: 8px;
+  }
+  .question-panel {
+    right: 8px;
+    width: calc(100vw - 16px);
+  }
+}
+.question-source {
+  cursor: text;
+}
+.question-source:hover {
+  outline: none;
+}
+.ai-source-link {
+  color: var(--accent);
+  text-align: left;
+  padding: 0;
+  font-size: 11px;
+}
+.ai-source-link:hover {
+  text-decoration: underline;
+}
+#ai-quote {
+  margin: 12px 0 0;
 }

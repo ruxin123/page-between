@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { filterBooks, reconcileCards, cover } from "../ui/library.mjs";
+import {
+  filterBooks,
+  reconcileCards,
+  cover,
+  nextVisibleCard,
+} from "../ui/library.mjs";
 
 const books = [
   {
@@ -73,4 +78,15 @@ assert.equal(
 reconcileCards(grid, books.slice(1), new Set(["b"]), cards, create, update);
 assert.equal(cards.has("a"), false);
 assert.equal(nodes.length, 1);
+const adjacent = [
+  { hidden: false },
+  { hidden: true },
+  { hidden: false },
+  { hidden: false },
+];
+assert.equal(nextVisibleCard(adjacent, adjacent[1]), adjacent[2]);
+adjacent[2].hidden = adjacent[3].hidden = true;
+assert.equal(nextVisibleCard(adjacent, adjacent[1]), adjacent[0]);
+adjacent[0].hidden = true;
+assert.equal(nextVisibleCard(adjacent, adjacent[1]), undefined);
 console.log("书库筛选、内容转义、卡片复用与删除：通过。");

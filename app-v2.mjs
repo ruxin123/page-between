@@ -3,7 +3,9 @@ import { clamp, chapterProgress, palmTypography } from "/core.mjs";
 import { escapeHTML, icon } from "/ui/shared.mjs";
 import { createLibraryView } from "/ui/library.mjs";
 import { createToasts } from "/ui/feedback.mjs";
-import { PageLayout } from "/page-layout.mjs?v=2.13";
+import { createTutor } from "/ui/tutor.mjs";
+import { taskEntries } from "/ui/jobs.mjs";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.14";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -52,7 +54,6 @@ let renderRevision = 0,
   textLayerTask,
   epubObserver,
   currentSelection,
-  questionContext,
   lastAnchor,
   pendingAnchor;
 let saveTimer,
@@ -83,14 +84,18 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.13";
+document.body.dataset.readerBuild = "2.14";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "操作没有完成，请重试。");
+  if (!response.ok) {
+    const error = new Error(data.error || "操作没有完成，请重试。");
+    error.data = data;
+    throw error;
+  }
   return data;
 }
 function post(path, value) {
@@ -163,22 +168,7 @@ function renderLibrary() {
   });
 }
 function renderJobs() {
-  const entries = jobs.length
-    ? jobs
-    : books.map((book) => ({
-        title: book.title,
-        status:
-          book.processing === "pending"
-            ? "running"
-            : book.processing === "error"
-              ? "error"
-              : "ready",
-        phase:
-          book.type === "epub"
-            ? "已沿用原书目录、插图与正文。"
-            : book.processingNote || "已导入，可直接阅读。",
-        book: book.id,
-      }));
+  const entries = taskEntries(books, jobs);
   const running = entries.filter((job) => job.status === "running").length;
   const failed = entries.filter((job) => job.status === "error").length;
   $("running-count").textContent = running || failed || "";
@@ -205,7 +195,7 @@ function renderJobs() {
     entries
       .map(
         (job) =>
-          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "准备中" : job.status === "error" ? "待处理" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></article>`,
+          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "准备中" : job.status === "error" ? "待处理" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><div class="job-actions">${job.status === "error" ? `<button class="secondary-button" data-retry="${escapeHTML(job.book)}">重新解析</button><button class="secondary-button" data-options="${escapeHTML(job.book)}">书籍设置</button>` : ""}<button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></div></article>`,
       )
       .join("") ||
     '<div class="empty-state">还没有处理任务，导入一本书即可开始。</div>';
@@ -418,22 +408,13 @@ function restoreAnchor(anchor) {
   let rect = globalRect(element),
     remaining = anchor.charOffset || 0;
   if (remaining) {
-    const doc = element.ownerDocument,
-      walker = doc.createTreeWalker(element, 4);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (remaining <= node.length) {
-        const range = doc.createRange();
-        range.setStart(node, remaining);
-        range.setEnd(node, Math.min(node.length, remaining + 1));
-        const line = range.getClientRects()[0];
-        if (line) {
-          const shift =
-            doc === document ? 0 : $("epub-frame").getBoundingClientRect().top;
-          rect = { ...rect, top: line.top + shift };
-        }
-        break;
-      }
-      remaining -= node.length;
+    const line = characterRect(element, remaining);
+    if (line) {
+      const shift =
+        element.ownerDocument === document
+          ? 0
+          : $("epub-frame").getBoundingClientRect().top;
+      rect = { ...rect, top: line.top + shift };
     }
   }
   const top = $("reading-viewport").getBoundingClientRect().top;
@@ -502,7 +483,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.13",
+        build: "2.14",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -753,6 +734,7 @@ async function setPinned(id, pinned, offerUndo = true) {
     renderLibrary();
     if (offerUndo)
       toast(pinned ? "已加入常读。" : "已移出常读。", {
+        focusTarget: button,
         undo: async () => {
           if (!!books.find((item) => item.id === id)?.onShelf !== pinned)
             throw new Error("常读状态已再次更改，已保留最新选择。");
@@ -817,6 +799,7 @@ function captureSelection(doc = document) {
   currentSelection = {
     text,
     kind: "text",
+    position: { ...makePosition(), index: Number(pdfPage) || location.index },
     source: pdfPage
       ? `《${current.title}》 · PDF 第 ${pdfPage} 页`
       : selectionContext(),
@@ -891,6 +874,7 @@ function renderObjects(blocks, viewport, root, page) {
         text: block.text || "[完整图表]",
         image: block.image,
         format: block.type === "equation" ? "latex" : null,
+        position: { ...makePosition(), index: page },
         source: `《${current.title}》 · PDF 第 ${page} 页`,
       };
       showToolbar(button.getBoundingClientRect());
@@ -1550,6 +1534,7 @@ function onEpubClick(event) {
     image,
     text: text || "[完整图像]",
     format,
+    position: makePosition(),
     source: selectionContext(),
   };
   showToolbar(rect);
@@ -1631,7 +1616,8 @@ async function renderCurrent(position) {
   pendingAnchor = null;
   lastAnchor = null;
   clearSelection();
-  $("question-panel").hidden = true;
+  if ($("question-panel").dataset.book !== current.id)
+    $("question-panel").hidden = true;
   $("ocr-status").hidden = true;
   epubObserver?.disconnect();
   $("text-host").hidden = current.type !== "txt";
@@ -2071,6 +2057,7 @@ function handleKeydown(event) {
     return;
   }
   if (route !== "reader" || editing) return;
+  if (event.target.closest?.(".question-panel")) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "g") {
     event.preventDefault();
     openPageDialog();
@@ -2106,7 +2093,15 @@ function handleKeydown(event) {
     setFocus(!$("reader").classList.contains("focused"));
 }
 function onCopy(event) {
-  if (currentSelection && !event.target.closest?.("input,textarea")) {
+  const selection = event.target.ownerDocument?.defaultView?.getSelection();
+  const inTutor =
+    event.target.closest?.(".question-panel") ||
+    selection?.anchorNode?.parentElement?.closest(".question-panel");
+  if (
+    currentSelection &&
+    !inTutor &&
+    !event.target.closest?.("input,textarea")
+  ) {
     event.clipboardData.setData("text/plain", currentSelection.text);
     event.preventDefault();
   }
@@ -2126,6 +2121,21 @@ function setFocus(value) {
 }
 
 document.addEventListener("click", async (event) => {
+  const retry = event.target.closest("[data-retry]");
+  if (retry) {
+    retry.disabled = true;
+    try {
+      await post("/api/books/" + retry.dataset.retry, { parseEnabled: true });
+      await refreshLibrary();
+      if (route === "library") renderLibrary();
+      toast("已重新开始解析。", { kind: "success" });
+    } catch (error) {
+      toast(error.message, { kind: "error" });
+    } finally {
+      retry.disabled = false;
+    }
+    return;
+  }
   const read = event.target.closest("[data-read]");
   if (read) {
     $("jobs-dialog").close();
@@ -2350,31 +2360,56 @@ $("selection-toolbar").onmousedown = (event) => event.preventDefault();
 $("copy-selection").onclick = () =>
   currentSelection && copyText(currentSelection.text);
 $("copy-image").onclick = copyImage;
+function tutorContext(selection = null) {
+  if (!current || !readerReady) return null;
+  const position = selection?.position || makePosition();
+  let context,
+    quote = selection?.text;
+  if (current.type === "pdf") {
+    context = [
+      ...(pdfPageElement(position.index)?.querySelectorAll(".textLayer span") ||
+        []),
+    ]
+      .map((node) => node.textContent)
+      .join(" ");
+    quote ||= context.slice(0, 6000);
+  } else {
+    const elements = readingElements();
+    const anchor = retainedAnchor || lastAnchor || captureAnchor();
+    quote ||= elements[anchor?.index || 0]?.textContent.trim();
+    context = elements
+      .map((element) => element.textContent.trim())
+      .join("\n\n");
+  }
+  quote ||= "";
+  const start = Math.max(0, context.indexOf(quote) - 4000);
+  return {
+    book: current.id,
+    source: {
+      quote: quote.slice(0, 6000),
+      context: context.slice(start, start + 18000),
+      position,
+      citation: selection?.source || selectionContext(),
+      image: selection?.image,
+    },
+  };
+}
+const tutor = createTutor({
+  api,
+  post,
+  toast,
+  getContext: tutorContext,
+  openSource: (book, position) => {
+    if (current?.id === book) navigate(position.index, position);
+  },
+});
 $("ask-selection").onclick = () => {
   if (!currentSelection) return;
-  questionContext = { ...currentSelection };
-  $("question-source").textContent =
-    questionContext.source + "\n\n" + questionContext.text;
-  $("question-image").hidden = !questionContext.image;
-  if (questionContext.image) $("question-image").src = questionContext.image;
-  else $("question-image").removeAttribute("src");
-  $("copy-question").textContent = questionContext.image
-    ? "复制出处与问题"
-    : "复制内容与问题";
-  $("question-panel").hidden = false;
+  const context = tutorContext(currentSelection);
+  if (context) tutor.openContext(context);
   $("selection-toolbar").hidden = true;
-  $("question-input").focus();
 };
-$("question-close").onclick = () => ($("question-panel").hidden = true);
-$("copy-question").onclick = () =>
-  questionContext &&
-  copyText(
-    questionContext.source +
-      "\n\n" +
-      questionContext.text +
-      "\n\n问题：" +
-      $("question-input").value,
-  );
+$("ai-open").onclick = tutor.showHistory;
 document.addEventListener("keydown", handleKeydown);
 document.addEventListener("copy", onCopy);
 attachPageGestures($("reading-viewport"));

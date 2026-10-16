@@ -1,0 +1,265 @@
+import { escapeHTML } from "./shared.mjs";
+
+export function createTutor({ api, post, toast, getContext, openSource }) {
+  const $ = (id) => document.getElementById(id);
+  let book,
+    source,
+    active,
+    pending = false,
+    revision = 0,
+    historyMode = false,
+    pollTimer;
+  const url = (id) =>
+    "/api/ai/conversations?book=" +
+    encodeURIComponent(book) +
+    (id ? "&id=" + encodeURIComponent(id) : "");
+
+  function showConversation() {
+    clearTimeout(pollTimer);
+    historyMode = false;
+    $("ai-history-list").hidden = true;
+    $("ai-conversation").hidden = false;
+    $("ai-history-toggle").textContent = "本书记录";
+    const original = active?.source || source;
+    $("question-source").textContent = original
+      ? original.citation + " · 返回原文"
+      : "";
+    $("ai-quote").textContent = original?.quote || "";
+    $("question-source").disabled = !original;
+    $("question-image").hidden = !source?.image || !!active;
+    if (source?.image && !active) $("question-image").src = source.image;
+    else $("question-image").removeAttribute("src");
+    $("ai-messages").innerHTML =
+      (active?.storageWarning
+        ? `<p class="ai-error" role="alert">${escapeHTML(active.storageWarning)}</p>`
+        : "") +
+      (active?.messages || [])
+        .map((message, index) => {
+          if (message.role === "user")
+            return `<article class="ai-message ai-user"><small>你</small><div>${escapeHTML(message.content)}</div></article>`;
+          if (message.status === "generating")
+            return '<article class="ai-message"><small>AI</small><p role="status">正在理解原文并生成回答…</p></article>';
+          if (message.status === "error")
+            return `<article class="ai-message ai-error"><small>本次未完成</small><p>${escapeHTML(message.error)}</p>${index === active.messages.length - 1 ? '<button class="secondary-button" data-ai-retry>重新生成</button>' : ""}</article>`;
+          return `<article class="ai-message"><small>AI</small><div class="ai-answer">${message.html || escapeHTML(message.content)}</div></article>`;
+        })
+        .join("");
+    $("ai-submit").disabled =
+      pending || active?.messages.at(-1)?.status === "generating";
+    $("ai-submit").textContent = pending
+      ? "生成中…"
+      : active
+        ? "继续提问"
+        : "发送提问";
+    $("ai-progress").hidden = !pending;
+    if (
+      active?.messages.at(-1)?.status === "generating" &&
+      !$("question-panel").hidden
+    )
+      pollAnswer();
+  }
+  function pollAnswer() {
+    const version = revision,
+      ident = active.id;
+    pollTimer = setTimeout(async () => {
+      if (version !== revision || $("question-panel").hidden || historyMode)
+        return;
+      try {
+        const data = await api(url(ident));
+        if (version !== revision) return;
+        active = data.conversation;
+        if (active.messages.at(-1)?.status === "generating") pollAnswer();
+        else showConversation();
+      } catch {
+        if (version === revision) pollAnswer();
+      }
+    }, 1500);
+  }
+  async function configuration() {
+    try {
+      const config = await api("/api/ai/status");
+      $("ai-model-status").textContent = config.configured
+        ? "已配置模型 · 对话保存在本机"
+        : config.message;
+      $("ai-service-details").hidden = !config.configured;
+      $("ai-service").textContent = config.configured
+        ? config.host + " · " + config.model
+        : "";
+    } catch {
+      $("ai-model-status").textContent = "暂时无法检查模型配置。";
+    }
+  }
+  function openContext(context) {
+    revision++;
+    book = context.book;
+    $("question-panel").dataset.book = book;
+    source = context.source;
+    active = null;
+    $("question-panel").hidden = false;
+    $("question-input").value = "";
+    configuration();
+    showConversation();
+    $("question-input").focus();
+  }
+  async function showHistory() {
+    const context = getContext();
+    if (!context) return;
+    book = context.book;
+    $("question-panel").dataset.book = book;
+    revision++;
+    const version = revision;
+    historyMode = true;
+    $("question-panel").hidden = false;
+    $("ai-conversation").hidden = true;
+    $("ai-history-list").hidden = false;
+    $("ai-history-toggle").textContent = "围绕当前页";
+    $("ai-history-list").textContent = "正在读取本书记录…";
+    configuration();
+    try {
+      const data = await api(url());
+      if (version !== revision) return;
+      $("ai-history-list").innerHTML = data.conversations.length
+        ? data.conversations
+            .map(
+              (item) =>
+                `<button class="ai-history-item" data-ai-conversation="${escapeHTML(item.id)}"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.citation)}</span><small>${item.status === "generating" ? "生成中" : item.status === "error" ? "可重新生成" : "已保存"}</small></button>`,
+            )
+            .join("")
+        : '<div class="empty-state">这本书还没有对话。选中原文提问，或围绕当前页开始。</div>';
+    } catch (error) {
+      $("ai-history-list").textContent = error.message;
+    }
+  }
+  async function loadConversation(id) {
+    const version = ++revision;
+    try {
+      const data = await api(url(id));
+      if (version !== revision) return;
+      active = data.conversation;
+      source = null;
+      $("question-input").value = "";
+      showConversation();
+    } catch (error) {
+      toast(error.message, { kind: "error" });
+    }
+  }
+  async function send(retry = false) {
+    if (pending) return;
+    const question = retry
+      ? active?.messages.at(-2)?.content
+      : $("question-input").value.trim();
+    if (!question) {
+      $("question-input").focus();
+      return;
+    }
+    const startingRevision = revision;
+    const config = await api("/api/ai/status");
+    if (pending || startingRevision !== revision) return;
+    if (!config.configured) {
+      await configuration();
+      toast(config.message, { kind: "warning" });
+      return;
+    }
+    if (!active && (!source?.quote || /^\[.*图.*\]$/.test(source.quote))) {
+      toast("当前提问需要文字或公式内容，原图可以继续在本机查看。", {
+        kind: "warning",
+      });
+      return;
+    }
+    const version = revision,
+      sendingBook = book;
+    pending = true;
+    showConversation();
+    $("ai-progress").textContent =
+      "正在生成，可以关闭面板继续阅读；回答完成后会保存在本书记录中。";
+    try {
+      const data = await post("/api/ai/ask", {
+        book,
+        conversation: active?.id,
+        source,
+        question,
+        retry,
+      });
+      if (
+        sendingBook === book &&
+        (version === revision || active?.id === data.conversation.id)
+      ) {
+        active = data.conversation;
+        $("question-input").value = "";
+        if (!historyMode) showConversation();
+      }
+    } catch (error) {
+      if (sendingBook === book && error.data?.conversation)
+        await loadConversation(error.data.conversation);
+      toast(error.message, { kind: "error" });
+    } finally {
+      pending = false;
+      if (!historyMode) showConversation();
+      else showHistory();
+    }
+  }
+
+  $("ai-question-form").onsubmit = (event) => {
+    event.preventDefault();
+    send().catch((error) => toast(error.message, { kind: "error" }));
+  };
+  $("question-input").onkeydown = (event) => {
+    if (
+      !event.isComposing &&
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey)
+    ) {
+      event.preventDefault();
+      $("ai-question-form").requestSubmit();
+    }
+  };
+  $("ai-messages").onclick = (event) => {
+    if (event.target.closest("[data-ai-retry]"))
+      send(true).catch((error) => toast(error.message, { kind: "error" }));
+  };
+  $("ai-history-list").onclick = (event) => {
+    const button = event.target.closest("[data-ai-conversation]");
+    if (button) loadConversation(button.dataset.aiConversation);
+  };
+  $("ai-history-toggle").onclick = () => {
+    if (historyMode) {
+      const context = getContext();
+      if (context?.source.quote) openContext(context);
+      else toast("当前页文字尚未就绪，请先选中原文。", { kind: "warning" });
+    } else showHistory();
+  };
+  $("question-source").onclick = () => {
+    const original = active?.source || source;
+    if (!original) return;
+    $("question-panel").hidden = true;
+    openSource(book, original.position);
+  };
+  $("question-close").onclick = () => {
+    $("question-panel").hidden = true;
+    clearTimeout(pollTimer);
+  };
+  $("copy-question").onclick = async () => {
+    const original = active?.source || source;
+    if (!original) return;
+    const text = [
+      original.citation,
+      original.quote,
+      ...(active?.messages || [])
+        .filter((message) => message.content)
+        .map(
+          (message) =>
+            (message.role === "user" ? "问题：" : "回答：") + message.content,
+        ),
+      $("question-input").value,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("出处与对话已复制。", { kind: "success" });
+    } catch {
+      toast("暂时无法复制，请手动选择需要的文字。", { kind: "warning" });
+    }
+  };
+  return { openContext, showHistory };
+}

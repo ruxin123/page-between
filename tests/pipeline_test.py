@@ -57,6 +57,54 @@ class Contents(unittest.TestCase):
 
 
 class SharedState(unittest.TestCase):
+    def test_failed_job_retry_replaces_history_and_returns_book_to_ready(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            queued = []
+            with (
+                patch.object(server, "DATA", root),
+                patch.object(server, "BOOK_ROOT", root / "books"),
+                patch.object(server, "RUNNING", set()),
+                patch.object(server.WORKERS, "submit", side_effect=queued.append),
+                patch.object(
+                    server,
+                    "build_contents",
+                    side_effect=[
+                        RuntimeError("示例失败"),
+                        {"processing": "ready", "processingNote": "示例重试成功"},
+                    ],
+                ),
+            ):
+                server.save(
+                    root / "library.json",
+                    {
+                        "books": [
+                            {
+                                "id": "a",
+                                "title": "示例",
+                                "type": "pdf",
+                                "parseEnabled": True,
+                            }
+                        ],
+                        "jobs": [],
+                    },
+                )
+                server.start_job("a")
+                self.assertEqual(server.book_for("a")["processing"], "pending")
+                queued.pop()()
+                self.assertEqual(server.book_for("a")["processing"], "error")
+                server.start_job("a")
+                self.assertEqual(len(server.library()["jobs"]), 1)
+                queued.pop()()
+                self.assertEqual(server.book_for("a")["processing"], "ready")
+                self.assertEqual(server.library()["jobs"][0]["status"], "ready")
+                self.assertFalse(server.RUNNING)
+                server.start_job("a")
+                server.update_book("a", {"parseEnabled": False})
+                queued.pop()()
+                self.assertEqual(server.book_for("a")["processing"], "ready")
+                self.assertEqual(server.library()["jobs"][0]["status"], "ready")
+
     def test_palm_launch_reuses_starting_window_and_discards_old_commands(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

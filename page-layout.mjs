@@ -9,6 +9,27 @@ export function pageIndex(left, width, count) {
   );
 }
 
+export function characterRect(element, offset = 0) {
+  const doc = element.ownerDocument;
+  const walker = doc.createTreeWalker(element, 4);
+  let remaining = Math.max(0, Math.floor(Number(offset) || 0)),
+    last;
+  const measure = (node, start) => {
+    const range = doc.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, start + 1);
+    return range.getClientRects()[0];
+  };
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.length) continue;
+    if (remaining < node.length) return measure(node, remaining);
+    remaining -= node.length;
+    last = node;
+  }
+  // At paragraph end, measure its last character instead of an empty caret range.
+  if (last) return measure(last, last.length - 1);
+}
+
 // Live columns keep text selection, links and original illustrations available during pagination.
 export class PageLayout {
   constructor(host, flow, width, height, padding) {
@@ -117,20 +138,7 @@ export class PageLayout {
     this.host.dataset.page = next + 1;
   }
   reveal(element, offset = 0) {
-    let rect;
-    const doc = element.ownerDocument;
-    const walker = doc.createTreeWalker(element, 4);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (offset <= node.length) {
-        const range = doc.createRange();
-        range.setStart(node, offset);
-        range.setEnd(node, Math.min(node.length, offset + 1));
-        rect = range.getClientRects()[0];
-        break;
-      }
-      offset -= node.length;
-    }
-    rect ||= element.getClientRects()[0];
+    const rect = characterRect(element, offset) || element.getClientRects()[0];
     if (rect)
       this.set(
         pageIndex(

@@ -3,6 +3,20 @@ const headingPattern =
 const volumePattern =
   /^(?:第\s*[零〇一二三四五六七八九十百千万两\d]+\s*[卷部篇]|(?:part|book)\s)/iu;
 
+export function shouldFollowPosition({
+  revision,
+  seen,
+  remote,
+  local,
+  allowed,
+}) {
+  return !!(
+    allowed &&
+    revision >= seen &&
+    remote?.updatedAt > (local?.updatedAt || 0)
+  );
+}
+
 export function parseChapters(input) {
   const text = input.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const headings = [];

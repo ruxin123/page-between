@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import hmac
 from collections import defaultdict
 import json
 import os
@@ -14,6 +15,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie, CookieError
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -25,10 +27,12 @@ from book_import import (
     import_book,
     text_metadata,
     flatten_toc,
+    url_for,
+    path_for,
 )
 from pdf_enhancement import build_contents, recognize
 
-from paths import DATA, RUNTIME, DEMO
+from paths import DATA, RUNTIME, DEMO, APP_MODE, DATA_PREFIX
 from storage import load, save
 import ai_tutor
 import service_settings
@@ -37,6 +41,11 @@ MUTEX = threading.RLock()
 WORKERS = ThreadPoolExecutor(max_workers=2)
 RUNNING = set()
 IMPORT_LOCKS = defaultdict(threading.Lock)
+SESSION = os.environ.pop("PAGE_BETWEEN_SESSION", "")
+
+
+def session_matches(value):
+    return hmac.compare_digest(value.encode(), SESSION.encode())
 
 
 def library():
@@ -151,11 +160,9 @@ def start_job(ident):
                     ident,
                     {
                         "processing": "ready",
-                        "structureIndexUrl": "/"
-                        + DATA.name
-                        + "/books/"
-                        + ident
-                        + "/structure-index.json",
+                        "structureIndexUrl": url_for(
+                            BOOK_ROOT / ident / "structure-index.json"
+                        ),
                     },
                 )
                 phase("附加结构索引已准备；原书排版保留。", "ready")
@@ -169,7 +176,11 @@ def start_job(ident):
 
 
 def build_native():
-    if sys.platform != "darwin" or not shutil.which("swiftc"):
+    if (
+        getattr(sys, "frozen", False)
+        or sys.platform != "darwin"
+        or not shutil.which("swiftc")
+    ):
         return
     RUNTIME.mkdir(parents=True, exist_ok=True)
     outputs = [
@@ -201,13 +212,24 @@ def build_native():
         if not binary.exists() or source.stat().st_mtime > binary.stat().st_mtime:
             binary.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["swiftc", "-O", "-swift-version", "5", str(source), "-o", str(binary)],
+                ["swiftc", "-O", "-swift-version", "5"]
+                + (
+                    ["-D", "PALM_STANDALONE", "-parse-as-library"]
+                    if source.name == "Palm.swift"
+                    else []
+                )
+                + [str(source), "-o", str(binary)],
                 check=True,
             )
 
 
 class Handler(SimpleHTTPRequestHandler):
     def end_headers(self):
+        if SESSION and session_matches(self.headers.get("X-Page-Between-Session", "")):
+            self.send_header(
+                "Set-Cookie",
+                "pb_session=" + SESSION + "; HttpOnly; SameSite=Strict; Path=/",
+            )
         self.send_header(
             "Cache-Control",
             "public, max-age=31536000, immutable"
@@ -217,7 +239,7 @@ class Handler(SimpleHTTPRequestHandler):
             else "no-store",
         )
         self.send_header("X-Content-Type-Options", "nosniff")
-        if urlsplit(self.path).path.startswith("/" + DATA.name + "/books/"):
+        if urlsplit(self.path).path.startswith(DATA_PREFIX + "/books/"):
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'self' data: blob:; script-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; form-action 'none'; base-uri 'self'",
@@ -227,6 +249,18 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, format, *arguments):
         if not self.path.startswith(("/api/state", "/api/library-version")):
             super().log_message(format, *arguments)
+
+    def translate_path(self, path):
+        if urlsplit(path).path.startswith(DATA_PREFIX + "/books/"):
+            return str(path_for(path))
+        return super().translate_path(path)
+
+    def list_directory(self, path):
+        self.send_error(404)
+        return None
+
+    def do_HEAD(self):
+        self.send_error(405)
 
     def json(self, value, status=200):
         data = json.dumps(value, ensure_ascii=False).encode()
@@ -255,12 +289,29 @@ class Handler(SimpleHTTPRequestHandler):
             f"http://localhost:{port}",
         }
 
+    def authenticated(self):
+        if not SESSION:
+            return True
+        try:
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            cookie = cookies.get("pb_session")
+            value = self.headers.get("X-Page-Between-Session", "") or (
+                cookie.value if cookie else ""
+            )
+            return session_matches(value)
+        except (CookieError, TypeError):
+            return False
+
     def do_GET(self):
         route = urlsplit(self.path)
         query = parse_qs(route.query)
         try:
             if not self.same_origin():
                 return self.json({"error": "请求来源不受支持。"}, 403)
+            if route.path == "/api/health":
+                return self.json({"ready": True, "desktop": APP_MODE})
+            if not self.authenticated():
+                return self.json({"error": "请通过页间 App 打开此阅读空间。"}, 401)
             if route.path == "/api/ai/status":
                 return self.json(ai_tutor.status())
             if route.path == "/api/settings":
@@ -332,10 +383,42 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_error(404)
             if requested.parts[1:2] in [("data",), ("demo-data",)] and (
                 len(requested.parts) < 3
-                or requested.parts[1] != DATA.name
+                or "/" + requested.parts[1] != DATA_PREFIX
                 or requested.parts[2] != "books"
             ):
                 return self.send_error(404)
+            if route.path.startswith(DATA_PREFIX + "/books/"):
+                ident = unquote(route.path[len(DATA_PREFIX + "/books/") :]).split("/")[
+                    0
+                ]
+                if not book_for(ident):
+                    return self.send_error(404)
+            else:
+                target = (ROOT / str(requested).lstrip("/")).resolve()
+                entrypoints = {
+                    (ROOT / name).resolve()
+                    for name in (
+                        "index.html",
+                        "app-v2.mjs",
+                        "core.mjs",
+                        "page-layout.mjs",
+                        "layout.css",
+                        "epub-reader.css",
+                        "assets/favicon.svg",
+                    )
+                }
+                if route.path != "/" and not (
+                    target in entrypoints
+                    or (
+                        target.is_relative_to((ROOT / "ui").resolve())
+                        and target.suffix == ".mjs"
+                    )
+                    or any(
+                        target.is_relative_to((ROOT / folder).resolve())
+                        for folder in ("assets/fonts", "assets/vendor")
+                    )
+                ):
+                    return self.send_error(404)
             return super().do_GET()
         except Exception as error:
             self.json({"error": str(error)}, 400)
@@ -343,6 +426,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if not self.same_origin():
             return self.json({"error": "请求来源不受支持。"}, 403)
+        if not self.authenticated():
+            return self.json({"error": "阅读会话已过期，请重新打开 App。"}, 401)
         route = urlsplit(self.path)
         query = parse_qs(route.query)
         try:
@@ -553,6 +638,20 @@ def main():
     parser.add_argument("--port", type=int, default=8779 if DEMO else 8778)
     parser.add_argument("--demo", action="store_true")
     arguments = parser.parse_args()
+    if APP_MODE:
+        import fcntl
+        import signal
+
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+        DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
+        instance_lock = (DATA / ".instance.lock").open("a")
+        try:
+            fcntl.flock(instance_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise SystemExit(
+                "此书库已由另一个页间进程使用，请先关闭已有窗口。"
+            ) from None
     build_native()
     if not (DATA / "library.json").exists():
         if DEMO:
@@ -564,6 +663,15 @@ def main():
     server = ThreadingHTTPServer(
         ("127.0.0.1", arguments.port), partial(Handler, directory=str(ROOT))
     )
+    parent = os.environ.pop("PAGE_BETWEEN_PARENT_PID", "")
+    if APP_MODE and parent.isdigit():
+
+        def follow_parent():
+            while os.getppid() == int(parent):
+                time.sleep(1)
+            os._exit(0)
+
+        threading.Thread(target=follow_parent, daemon=True).start()
     for book in library()["books"]:
         if (
             book["type"] == "pdf"
@@ -571,7 +679,10 @@ def main():
             and book.get("processing") == "pending"
         ):
             start_job(book["id"])
-    print(f"页间：http://127.0.0.1:{arguments.port}/", flush=True)
+    if APP_MODE:
+        print(json.dumps({"ready": True, "port": server.server_port}), flush=True)
+    else:
+        print(f"页间：http://127.0.0.1:{server.server_port}/", flush=True)
     server.serve_forever()
 
 

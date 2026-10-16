@@ -46,9 +46,18 @@ def configuration():
 
 def status():
     try:
-        config = configuration()
+        config = service_settings.effective("ai", read_key=False)
+        if not config["baseUrl"] or not config["model"]:
+            raise service_settings.SettingsError(
+                "请先在「设置 → AI 答疑」配置模型服务。"
+            )
+        config = service_settings.validated(
+            "ai",
+            {**config, "key": "present" if config["hasKey"] else ""},
+            require_key=True,
+        )
         return {"configured": True, "model": config["model"], "host": config["host"]}
-    except TutorError as error:
+    except service_settings.SettingsError as error:
         return {"configured": False, "message": str(error)}
 
 

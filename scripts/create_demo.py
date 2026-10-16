@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from book_import import import_book
+from book_import import import_book, url_for
 from paths import DATA, DEMO
 
 
@@ -237,7 +237,7 @@ def prepare():
                 ),
                 encoding="utf-8",
             )
-            book["cover"] = "/" + cover.relative_to(DATA.parent).as_posix()
+            book["cover"] = url_for(cover)
         (DATA / "books" / ident / "book.json").write_text(
             json.dumps(book, ensure_ascii=False), encoding="utf-8"
         )

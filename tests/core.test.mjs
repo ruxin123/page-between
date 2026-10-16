@@ -1,5 +1,43 @@
 import assert from "node:assert/strict";
-import { parseChapters, decodeBook, chapterProgress } from "../core.mjs";
+import {
+  parseChapters,
+  decodeBook,
+  chapterProgress,
+  shouldFollowPosition,
+} from "../core.mjs";
+
+const positionChange = {
+  revision: 4,
+  seen: 4,
+  remote: { updatedAt: 200 },
+  local: { updatedAt: 100 },
+};
+assert.equal(
+  shouldFollowPosition({ ...positionChange, allowed: false }),
+  false,
+);
+assert.equal(
+  shouldFollowPosition({ ...positionChange, allowed: true }),
+  true,
+  "After editing ends, an already observed remote position still applies.",
+);
+assert.equal(
+  shouldFollowPosition({ ...positionChange, revision: 3, allowed: true }),
+  false,
+  "An older response cannot replace a newer state.",
+);
+assert.equal(
+  shouldFollowPosition({
+    ...positionChange,
+    local: { updatedAt: 300 },
+    allowed: true,
+  }),
+  false,
+);
+assert.equal(
+  shouldFollowPosition({ ...positionChange, remote: undefined, allowed: true }),
+  false,
+);
 
 const chapters = parseChapters(
   "\ufeff书名\r\n\r\n第一章 雨夜\r\n第一段\r\n\r\n第二章 来信\r\n第二段",

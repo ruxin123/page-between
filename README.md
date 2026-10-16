@@ -10,6 +10,21 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
+## macOS App 构建（2.16）
+
+已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
+
+```sh
+python -m pip install -r requirements-build.txt
+python scripts/build_app.py
+# 匿名演示：python scripts/build_app.py --demo
+python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app"
+```
+
+构建结果默认位于用户的 `Library/Caches/Page Between/build/`。当前在 Apple Silicon、macOS 27.0.1 验证，签名为本机构建的 ad-hoc 签名；其他系统版本和正式分发尚待验收。旧书库可使用 `python scripts/migrate_library.py data` 复制到安装版，已有目标不会覆盖，原目录保留。
+
+当前 App 仍在持续开发：云解析、全书知识与引用、重排导出、应用内备份恢复等见 [完整验收清单](docs/APP_READINESS.md)。以下是从源码运行原型的方式。
+
 ## 快速开始
 
 已验证环境：Python 3.12、Node.js 22，以及 macOS 上的 Swift 工具链。阅读页面需要现代浏览器；PDF.js 和阅读字体已保存在仓库内，不依赖 CDN。

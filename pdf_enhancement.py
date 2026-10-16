@@ -12,19 +12,17 @@ import shutil
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from book_import import ROOT, safe_target
+from book_import import ROOT, path_for
 
-from paths import DATA, RUNTIME
+from paths import CACHE as CACHE_ROOT, RUNTIME
 
 OCR = RUNTIME / "ocr-page"
-CACHE = DATA / "cache/ocr-v2"
+CACHE = CACHE_ROOT / "ocr-v2"
 LOCKS = collections.defaultdict(threading.Lock)
 
 
 def source_path(book):
-    from urllib.parse import unquote
-
-    return safe_target(ROOT, unquote(book["url"]).lstrip("/"), ROOT)
+    return path_for(book["url"])
 
 
 def recognize(book, page, mode="full"):
@@ -48,7 +46,17 @@ def recognize(book, page, mode="full"):
             if not tesseract:
                 raise ValueError("英文扫描页需要先安装 Tesseract。")
             result = subprocess.run(
-                [tesseract, "stdin", "stdout", "-l", "eng", "--psm", "3", "tsv"],
+                [
+                    tesseract,
+                    "stdin",
+                    "stdout",
+                    "-l",
+                    "eng",
+                    "--psm",
+                    "3",
+                    "-c",
+                    "tessedit_create_tsv=1",
+                ],
                 input=stream.getvalue(),
                 capture_output=True,
                 timeout=120,
@@ -57,9 +65,20 @@ def recognize(book, page, mode="full"):
                 raise ValueError("本页文字识别失败，请重试。")
             width, height = image.size
             groups = {}
-            for word in csv.DictReader(
-                io.StringIO(result.stdout.decode()), delimiter="\t"
-            ):
+            rows = csv.DictReader(io.StringIO(result.stdout.decode()), delimiter="\t")
+            if not {
+                "level",
+                "text",
+                "left",
+                "top",
+                "width",
+                "height",
+                "block_num",
+                "par_num",
+                "line_num",
+            }.issubset(rows.fieldnames or []):
+                raise ValueError("文字识别结果格式异常，请重新尝试。")
+            for word in rows:
                 if word["level"] != "5" or not word["text"].strip():
                     continue
                 key = (word["block_num"], word["par_num"], word["line_num"])
@@ -111,7 +130,11 @@ def recognize(book, page, mode="full"):
                 raise ValueError("本页文字识别失败，可重试或继续阅读原页。")
             data = json.loads(result.stdout)
         if mode == "full" and book.get("enrichmentUrl"):
-            enrichment = ROOT / book["enrichmentUrl"].lstrip("/")
+            enrichment = (
+                ROOT / book["enrichmentUrl"].lstrip("/")
+                if book["enrichmentUrl"].startswith("/assets/")
+                else path_for(book["enrichmentUrl"])
+            )
             blocks = (
                 json.loads(enrichment.read_text()).get(str(page), {}).get("blocks", [])
             )

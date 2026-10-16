@@ -15,6 +15,14 @@ from server import Handler
 
 
 class Settings(unittest.TestCase):
+    def test_status_does_not_read_credentials_in_the_background(self):
+        import ai_tutor
+
+        settings.update("ai", self.config)
+        settings.keychain.reset_mock()
+        self.assertTrue(ai_tutor.status()["configured"])
+        settings.keychain.assert_not_called()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

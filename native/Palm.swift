@@ -19,11 +19,34 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     var commandNonce = ""
     var readerState: [String:Any] = [:]
     var lastHotkeyWasBackground = false
+    let standalone: Bool
+    let session: String
+    var showMainSettings: (() -> Void)?
 
-    init(address: URL, statusFile: URL) { self.address=address;self.statusFile=statusFile }
+    init(address: URL, statusFile: URL, standalone: Bool = true, session: String = "") {
+        self.address=address;self.statusFile=statusFile;self.standalone=standalone;self.session=session
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        show()
+    }
+
+    func request(_ url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        if !session.isEmpty { request.setValue(session, forHTTPHeaderField: "X-Page-Between-Session") }
+        return request
+    }
+
+    func show(_ url: URL? = nil) {
+        if let panel = panel {
+            closing=false
+            if let url=url, url != address { address=url;loaded=false;web.load(request(url)) }
+            else { web.evaluateJavaScript("window.dispatchEvent(new Event('palm-resume'))") }
+            panel.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
+            registerHotkeys();writeStatus();return
+        }
+        if let url=url { address=url }
+        if standalone { NSApp.setActivationPolicy(.accessory) }
         let screen=NSScreen.main?.visibleFrame ?? NSRect(x:0,y:0,width:1400,height:900)
         let frame=NSRect(x:screen.maxX-364,y:screen.minY+24,width:344,height:560)
         panel=ReaderPanel(contentRect:frame,styleMask:[.titled,.closable,.resizable,.miniaturizable,.fullSizeContentView],backing:.buffered,defer:false)
@@ -38,7 +61,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         panel.maxSize=NSSize(width:760,height:1100)
         panel.isReleasedWhenClosed=false
         panel.delegate=self
-        panel.setFrameAutosaveName("PageBetweenPalm")
+        panel.setFrameAutosaveName("PageBetweenPalm" + (standalone ? "Standalone" : "App"))
         let configuration=WKWebViewConfiguration()
         configuration.userContentController.add(self,name:"readerNative")
         web=WKWebView(frame:panel.contentView!.bounds,configuration:configuration)
@@ -46,21 +69,23 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         web.navigationDelegate=self
         web.setValue(false,forKey:"drawsBackground")
         panel.contentView=web
-        web.load(URLRequest(url:address))
+        web.load(request(address))
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(web)
         NSApp.activate(ignoringOtherApps:true)
         registerHotkeys()
         writeStatus()
-        Timer.scheduledTimer(withTimeInterval:0.5,repeats:true) { [weak self] _ in self?.readCommand() }
+        if standalone { Timer.scheduledTimer(withTimeInterval:0.5,repeats:true) { [weak self] _ in self?.readCommand() } }
     }
 
     func registerHotkeys() {
+        if !hotkeys.isEmpty { return }
         var type=EventTypeSpec(eventClass:OSType(kEventClassKeyboard),eventKind:UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _,event,context in
+        InstallEventHandler(GetApplicationEventTarget(), { next,event,context in
             guard let event=event,let context=context else { return noErr }
             var identity=EventHotKeyID()
             GetEventParameter(event,EventParamName(kEventParamDirectObject),EventParamType(typeEventHotKeyID),nil,MemoryLayout<EventHotKeyID>.size,nil,&identity)
+            guard identity.signature == 0x594A504D else { return CallNextEventHandler(next, event) }
             let delegate=Unmanaged<PalmDelegate>.fromOpaque(context).takeUnretainedValue()
             delegate.flip(identity.id==1 ? 1 : -1)
             return noErr
@@ -94,7 +119,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         }
         Task { @MainActor [weak self] in
             guard let self=self else { return }
-            self.address=url;self.loaded=false;self.web.load(URLRequest(url:url));self.writeStatus()
+            self.address=url;self.loaded=false;self.web.load(self.request(url));self.writeStatus()
         }
     }
 
@@ -116,13 +141,24 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         Task { @MainActor [weak self] in
             guard let self=self else { return }
             _ = try? await self.web.callAsyncJavaScript("if(window.readerFlush) await window.readerFlush();",arguments:[:],in:nil,contentWorld:.page)
-            self.panel.orderOut(nil);self.writeStatus();NSApp.terminate(nil)
+            self.panel.orderOut(nil);self.stopHotkeys();self.writeStatus()
+            if self.standalone { NSApp.terminate(nil) }
         }
         return false
     }
     func userContentController(_ userContentController:WKUserContentController,didReceive message:WKScriptMessage) {
+        guard message.frameInfo.isMainFrame,
+              message.frameInfo.securityOrigin.host == address.host,
+              message.frameInfo.securityOrigin.port == address.port else { return }
         guard let body=message.body as? [String:Any],let action=body["action"] as? String else { return }
         if action=="close" { panel.performClose(nil) }
+        if action=="settings" {
+            if let showMainSettings=showMainSettings { showMainSettings() }
+            else if var parts=URLComponents(url:address,resolvingAgainstBaseURL:false) {
+                parts.query=nil;parts.fragment="/settings/ai"
+                if let url=parts.url { NSWorkspace.shared.open(url) }
+            }
+        }
         if action=="reader-state",let state=body["reader"] as? [String:Any] { readerState=state;writeStatus() }
         if action=="resize",let compact=body["compact"] as? Bool {
             let size=compact ? NSSize(width:280,height:440) : NSSize(width:344,height:560)
@@ -139,15 +175,26 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         }
     }
     func applicationWillTerminate(_ notification:Notification) {
+        stopHotkeys()
+    }
+    func stopHotkeys() {
         for reference in hotkeys { if let reference=reference { UnregisterEventHotKey(reference) } }
+        hotkeys=[]
         if let eventHandler=eventHandler { RemoveEventHandler(eventHandler) }
+        eventHandler=nil
     }
 }
 
-let arguments=CommandLine.arguments
-let address=URL(string:arguments.count>1 ? arguments[1] : "http://127.0.0.1:8778/?mode=palm")!
-let status=URL(fileURLWithPath:arguments.count>2 ? arguments[2] : NSTemporaryDirectory()+"page-between-palm.json")
-let delegate=PalmDelegate(address:address,statusFile:status)
-let app=NSApplication.shared
-app.delegate=delegate
-app.run()
+#if PALM_STANDALONE
+@main struct PalmApplication {
+    static func main() {
+        let arguments=CommandLine.arguments
+        let address=URL(string:arguments.count>1 ? arguments[1] : "http://127.0.0.1:8778/?mode=palm")!
+        let status=URL(fileURLWithPath:arguments.count>2 ? arguments[2] : NSTemporaryDirectory()+"page-between-palm.json")
+        let delegate=PalmDelegate(address:address,statusFile:status)
+        let app=NSApplication.shared
+        app.delegate=delegate
+        withExtendedLifetime(delegate) { app.run() }
+    }
+}
+#endif

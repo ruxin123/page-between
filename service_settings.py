@@ -9,18 +9,14 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from paths import ROOT, RUNTIME, DEMO
+from paths import ROOT, RUNTIME, DEMO, SUPPORT
 from storage import load, save
 
 CONFIG = (
     Path(
         os.environ.get(
             "PAGE_BETWEEN_CONFIG_DIR",
-            str(
-                Path.home()
-                / "Library/Application Support/Page Between"
-                / ("Review Demo" if DEMO else "Personal")
-            ),
+            str(SUPPORT),
         )
     )
     / "services.json"

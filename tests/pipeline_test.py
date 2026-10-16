@@ -208,9 +208,7 @@ class SharedState(unittest.TestCase):
                     self.assertTrue(result["duplicate"])
                     self.assertEqual(importer.call_count, 1)
                     self.assertEqual(len(result["book"]["chapters"]), 2)
-                    content = book_import.ROOT / result["book"]["contentUrl"].lstrip(
-                        "/"
-                    )
+                    content = book_import.path_for(result["book"]["contentUrl"])
                     self.assertEqual(len(json.loads(content.read_text())), 2)
                 finally:
                     connection.close()

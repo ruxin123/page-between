@@ -1,12 +1,17 @@
 import * as pdfjs from "/assets/vendor/pdf.mjs";
-import { clamp, chapterProgress, palmTypography } from "/core.mjs";
+import {
+  clamp,
+  chapterProgress,
+  palmTypography,
+  shouldFollowPosition,
+} from "/core.mjs";
 import { escapeHTML, icon } from "/ui/shared.mjs";
 import { createLibraryView } from "/ui/library.mjs";
 import { createToasts } from "/ui/feedback.mjs";
 import { createTutor } from "/ui/tutor.mjs";
 import { createServiceSettings } from "/ui/settings.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.15";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.16";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -85,7 +90,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.15";
+document.body.dataset.readerBuild = "2.16";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -485,7 +490,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.15",
+        build: "2.16",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1867,8 +1872,24 @@ function showRoute() {
 
 async function openPalm(id) {
   try {
+    const book = books.find((book) => book.id === id);
+    if (
+      !book ||
+      book.type === "pdf" ||
+      ["comic", "pre-paginated"].includes(book.layout)
+    ) {
+      toast("掌上阅读适合可重排的文字书，请先选择小说或 EPUB。", {
+        kind: "warning",
+      });
+      return;
+    }
     await savePosition(true);
-    await post("/api/palm", { book: id });
+    if (window.webkit?.messageHandlers?.appNative) {
+      window.webkit.messageHandlers.appNative.postMessage({
+        action: "palm",
+        book: id,
+      });
+    } else await post("/api/palm", { book: id });
     toast("已打开掌上窗口。");
   } catch (error) {
     toast(error.message, { kind: "error" });
@@ -2418,6 +2439,15 @@ $("ask-selection").onclick = () => {
   $("selection-toolbar").hidden = true;
 };
 $("ai-open").onclick = tutor.showHistory;
+if (palm && native)
+  document.querySelector(".ai-settings-link").onclick = (event) => {
+    event.preventDefault();
+    window.webkit.messageHandlers.readerNative.postMessage({
+      action: "settings",
+    });
+  };
+window.addEventListener("app-import", openImport);
+window.addEventListener("app-palm", () => openPalm(current?.id));
 document.addEventListener("keydown", handleKeydown);
 document.addEventListener("copy", onCopy);
 attachPageGestures($("reading-viewport"));
@@ -2521,7 +2551,7 @@ function updateTimer() {
   $("timer-button").classList.toggle("running", timerRunning);
 }
 
-async function poll() {
+async function poll(resume = false) {
   try {
     const version = await api("/api/library-version");
     if (version.revision !== libraryRevision) {
@@ -2541,9 +2571,22 @@ async function poll() {
       }
     }
     const state = await api("/api/state");
-    if (state.revision <= stateRevision) return;
-    stateRevision = state.revision;
     const remote = current && state.positions?.[current.id];
+    const followingBook = current?.id;
+    const follow = shouldFollowPosition({
+      revision: state.revision,
+      seen: stateRevision,
+      remote,
+      local: location,
+      allowed:
+        route === "reader" &&
+        readerReady &&
+        !currentSelection &&
+        !document.activeElement?.matches("input,textarea,select") &&
+        (resume || Date.now() - lastInput > 1000),
+    });
+    if (state.revision <= stateRevision && !follow) return;
+    stateRevision = state.revision;
     positions = state.positions || positions;
     bookmarks = state.bookmarks || bookmarks;
     if (state.writer !== writer) {
@@ -2571,27 +2614,22 @@ async function poll() {
           }
         }
       }
-      if (
-        route === "reader" &&
-        remote?.updatedAt > (location?.updatedAt || 0) &&
-        !document.hasFocus() &&
-        Date.now() - lastInput > 1000
-      ) {
-        location = initialLocation(current);
-        if (location.index !== Number($("page-label").dataset.chapter))
-          renderCurrent(location);
-        else {
-          retainedAnchor = location.anchor || null;
-          restorePosition(() => {
-            if (current.type === "pdf") scrollPdfTo(location);
-            else revealPosition(location);
-          });
-          lastAnchor = retainedAnchor || captureAnchor();
-          updateProgress();
-        }
-      }
       if (route === "library") renderLibrary();
       renderBookmarks();
+    }
+    if (follow && current?.id === followingBook && route === "reader") {
+      location = initialLocation(current);
+      if (location.index !== Number($("page-label").dataset.chapter))
+        renderCurrent(location);
+      else {
+        retainedAnchor = location.anchor || null;
+        restorePosition(() => {
+          if (current.type === "pdf") scrollPdfTo(location);
+          else revealPosition(location);
+        });
+        lastAnchor = retainedAnchor || captureAnchor();
+        updateProgress();
+      }
     }
   } catch {}
 }
@@ -2626,12 +2664,15 @@ try {
   renderJobs();
   $("startup").hidden = true;
   showRoute();
+  window.webkit?.messageHandlers?.appNative?.postMessage({ action: "ready" });
   setInterval(updateTimer, 1000);
   setInterval(poll, 1800);
-  window.addEventListener("focus", poll);
+  window.addEventListener("focus", () => poll(true));
+  window.addEventListener("blur", () => savePosition(true).catch(() => {}));
 } catch (error) {
-  $("startup").textContent =
-    "新版需要本地阅读服务。请双击 start.command 启动，再刷新页面。 " +
-    error.message;
+  $("startup").textContent = window.webkit?.messageHandlers?.appNative
+    ? "暂时无法打开书库。请重新打开页间，已保存的资料会保留。 " + error.message
+    : "新版需要本地阅读服务。请双击 start.command 启动，再刷新页面。 " +
+      error.message;
   console.error(error);
 }

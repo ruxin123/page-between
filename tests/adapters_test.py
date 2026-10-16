@@ -113,7 +113,7 @@ class Adapters(unittest.TestCase):
         self.assertEqual(
             plain["chapters"][0]["sourceOffset"], normalized.index("第一章")
         )
-        content = book_import.ROOT / plain["contentUrl"].lstrip("/")
+        content = book_import.path_for(plain["contentUrl"])
         self.assertNotIn("\r", json.loads(content.read_text())[0]["body"])
 
     def test_docx_keeps_embedded_image(self):
@@ -141,7 +141,7 @@ class Adapters(unittest.TestCase):
         book = import_book(source)
         self.assertEqual(book["layout"], "comic")
         self.assertEqual(len(book["chapters"]), 3)
-        first = book_import.ROOT / book["chapters"][0]["url"].lstrip("/")
+        first = book_import.path_for(book["chapters"][0]["url"])
         self.assertIn("1.png", first.read_text())
 
     def test_other_common_formats(self):

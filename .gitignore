@@ -6,6 +6,7 @@
 !/QA.md
 !/THIRD_PARTY_NOTICES.md
 !/requirements.txt
+!/requirements-build.txt
 !/index.html
 !/app-v2.mjs
 !/core.mjs
@@ -29,6 +30,8 @@
 !/native/OCR.swift
 !/native/Palm.swift
 !/native/Secrets.swift
+!/native/App.swift
+!/native/Icon.swift
 !/scripts/
 !/ui/
 !/tests/
@@ -45,6 +48,7 @@
 !/tests/feedback.test.mjs
 !/tests/ai_tutor_test.py
 !/tests/settings_test.py
+!/tests/storage_test.py
 !/docs/
 !/assets/
 /assets/*

@@ -91,3 +91,13 @@ AI 入口复用选区和当前阅读位置，`ui/tutor.mjs` 管理问题、记�
 `service_settings.py` 负责旧 `.env` 兼容、配置校验、目标地址变更保护与持久化。普通设置放在 Application Support；`native/Secrets.swift` 通过 Security.framework 保存凭据。值仅经过后端与 helper 的管道，进程参数和日志中没有 Key。替换凭据时先创建新条目，再原子替换设置文件，最后清理旧条目；文件保存失败保留原设置与原凭据。
 
 更完整的前后端 App 化问题与交付门槛见 [APP_READINESS.md](APP_READINESS.md)。服务配置完成不等于 MinerU 任务、主窗口或安装包已经完成。
+
+## 2.16 的桌面宿主与数据边界
+
+`native/App.swift` 承担主窗口、菜单、文件面板、后端进程和全局掌上呼出。`Palm.swift` 同时可作为开发原型的独立窗口和 App 内的掌上窗口；原生消息限定主 frame 与预期来源。打包后的服务绑定动态回环端口，通过启动请求头建立 HttpOnly / SameSite 会话，普通网页无法直接读取书库。
+
+`paths.py` 分开磁盘位置与 HTTP 命名空间：开发原型仍读项目内数据，安装版使用 Application Support / Caches，书籍始终通过受控的 `/data/books/` 或 `/demo-data/books/` 地址读取。`book_import.path_for()` 校验资源边界，兼容 macOS 的 `/var` 与 `/private/var` 别名。服务仅提供前端资源和已登记书籍，不开放源码、目录列表或原始状态文件。
+
+JSON 写入使用独立临时文件、flush / fsync 和原子替换。迁移在独立目录复制、逐文件校验并确认源记录未改变后切换，旧目录不删除。App 退出先保存阅读位置，再结束自有服务；父进程意外退出也会触发服务清理。延迟退出从 RunLoop 发起，避免在 GCD 主队列回调中等待自身，造成退出卡住。
+
+窗口同步按每本书的位置时间戳判断，允许稍后应用已观察过的更新；不以整个状态最后写入者代替位置归属。输入与选择时暂缓同步，失焦时先提交本地位置，再在恢复焦点时读取最新位置。

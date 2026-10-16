@@ -13,7 +13,7 @@ from urllib.parse import quote, unquote, urlsplit
 from lxml import etree
 from pypdf import PdfReader
 
-from paths import ROOT, BOOK_ROOT
+from paths import ROOT, BOOK_ROOT, DATA_PREFIX
 
 XML = etree.XMLParser(resolve_entities=False, no_network=True)
 OPF = {"o": "http://www.idpf.org/2007/opf", "dc": "http://purl.org/dc/elements/1.1/"}
@@ -68,7 +68,19 @@ def extract_zip(source, destination):
 
 
 def url_for(path):
-    return "/" + quote(path.relative_to(ROOT).as_posix())
+    return (
+        DATA_PREFIX
+        + "/books/"
+        + quote(path.resolve().relative_to(BOOK_ROOT.resolve()).as_posix())
+    )
+
+
+def path_for(url):
+    path = urlsplit(url)
+    prefix = DATA_PREFIX + "/books/"
+    if path.scheme or path.netloc or not path.path.startswith(prefix):
+        raise ValueError("书籍资源地址无效。")
+    return safe_target(BOOK_ROOT, path.path[len(prefix) :], BOOK_ROOT)
 
 
 def epub_metadata(content):

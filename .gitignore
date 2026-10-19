@@ -17,6 +17,7 @@
 !/server.py
 !/ai_tutor.py
 !/service_settings.py
+!/mineru_api.py
 !/storage.py
 !/book_import.py
 !/pdf_enhancement.py
@@ -49,6 +50,8 @@
 !/tests/ai_tutor_test.py
 !/tests/settings_test.py
 !/tests/storage_test.py
+!/tests/mineru_test.py
+!/tests/clipboard.test.mjs
 !/docs/
 !/assets/
 /assets/*

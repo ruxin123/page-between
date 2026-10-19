@@ -10,8 +10,10 @@ import { createLibraryView } from "/ui/library.mjs";
 import { createToasts } from "/ui/feedback.mjs";
 import { createTutor } from "/ui/tutor.mjs";
 import { createServiceSettings } from "/ui/settings.mjs";
+import { createDocumentParsing, formatPages } from "/ui/mineru.mjs";
+import { copyPng } from "/ui/clipboard.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.16";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.17";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -90,7 +92,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.16";
+document.body.dataset.readerBuild = "2.17";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -113,6 +115,20 @@ function post(path, value) {
 }
 const toast = createToasts($("toasts"));
 const serviceSettings = createServiceSettings({ document, api, post, toast });
+const documentParsing = createDocumentParsing({
+  document,
+  api,
+  post,
+  toast,
+  getBook: (id) => books.find((book) => book.id === id),
+  getPosition: (id) =>
+    current?.id === id && readerReady ? makePosition() : positions[id],
+  refresh: async () => {
+    await refreshLibrary();
+    renderJobs();
+    if (route === "library") renderLibrary();
+  },
+});
 const libraryView = createLibraryView(document);
 function postState(patch) {
   stateQueue = stateQueue
@@ -202,7 +218,7 @@ function renderJobs() {
     entries
       .map(
         (job) =>
-          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "准备中" : job.status === "error" ? "待处理" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><div class="job-actions">${job.status === "error" ? `<button class="secondary-button" data-retry="${escapeHTML(job.book)}">重新解析</button><button class="secondary-button" data-options="${escapeHTML(job.book)}">书籍设置</button>` : ""}<button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></div></article>`,
+          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "处理中" : job.status === "error" ? "待处理" : job.status === "paused" ? "已暂停" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><div class="job-actions">${job.kind === "mineru" && job.status === "running" ? `<button class="secondary-button" data-pause-job="${escapeHTML(job.book)}">暂停</button>` : job.kind === "mineru" && ["paused", "error"].includes(job.status) ? `<button class="secondary-button" data-cloud="${escapeHTML(job.book)}" data-pages="${escapeHTML(formatPages(job.pages))}">继续任务</button>` : job.status === "error" ? `<button class="secondary-button" data-retry="${escapeHTML(job.book)}">重新解析</button><button class="secondary-button" data-options="${escapeHTML(job.book)}">书籍设置</button>` : ""}<button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></div></article>`,
       )
       .join("") ||
     '<div class="empty-state">还没有处理任务，导入一本书即可开始。</div>';
@@ -490,7 +506,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.16",
+        build: "2.17",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -518,6 +534,15 @@ function makePosition() {
     ...location,
     top:
       current.type === "pdf" ? pdfLocalTop() : $("reading-viewport").scrollTop,
+    pdfY:
+      current.type === "pdf"
+        ? clamp(
+            pdfLocalTop() /
+              Math.max(1, pdfPageElement(location.index)?.offsetHeight || 1),
+            0,
+            1,
+          )
+        : undefined,
     page: pagination?.page || 0,
     anchor: anchor ? { ...anchor } : null,
     sourceOffset,
@@ -788,6 +813,18 @@ function showToolbar(rectangle) {
   bar.style.left = `${Math.max(7, Math.min(innerWidth - bar.offsetWidth - 7, rectangle.left + rectangle.width / 2 - bar.offsetWidth / 2))}px`;
   bar.style.top = `${Math.max(7, Math.min(innerHeight - bar.offsetHeight - 38, rectangle.bottom + 8))}px`;
 }
+function refreshSelectionToolbar() {
+  const selected = document.querySelector(".pdf-object.selected");
+  if (currentSelection && selected) {
+    const rectangle = selected.getBoundingClientRect(),
+      viewport = $("reading-viewport").getBoundingClientRect();
+    if (rectangle.bottom > viewport.top && rectangle.top < viewport.bottom) {
+      showToolbar(rectangle);
+      return;
+    }
+  }
+  $("selection-toolbar").hidden = true;
+}
 function captureSelection(doc = document) {
   const selection = doc.defaultView.getSelection();
   if (!selection?.rangeCount || selection.isCollapsed) return;
@@ -838,23 +875,38 @@ async function copyText(text) {
 async function copyImage() {
   if (!currentSelection?.image) return;
   try {
-    const image = new Image();
-    image.src = currentSelection.image;
-    await image.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    canvas.getContext("2d").drawImage(image, 0, 0);
-    const blob = await new Promise((resolve) =>
-      canvas.toBlob(resolve, "image/png"),
-    );
-    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    await copyPng(currentSelection.image);
     toast("原图已复制。", { kind: "success" });
   } catch {
     toast("图片暂时无法复制，可在原书中查看完整图像。", { kind: "warning" });
   }
 }
 
+function pdfObjectImage(root, bbox) {
+  const source = root.parentElement?.querySelector("canvas");
+  if (!source?.width) return null;
+  const [x0, y0, x1, y1] = bbox;
+  const width = Math.max(1, Math.ceil((x1 - x0) * source.width)),
+    height = Math.max(1, Math.ceil((y1 - y0) * source.height));
+  const scale = Math.min(1, 2048 / Math.max(width, height));
+  const image = document.createElement("canvas");
+  image.width = Math.ceil(width * scale);
+  image.height = Math.ceil(height * scale);
+  image
+    .getContext("2d")
+    .drawImage(
+      source,
+      x0 * source.width,
+      y0 * source.height,
+      width,
+      height,
+      0,
+      0,
+      image.width,
+      image.height,
+    );
+  return image.toDataURL("image/png");
+}
 function renderObjects(blocks, viewport, root, page) {
   root.replaceChildren();
   for (const block of blocks.filter((block) =>
@@ -865,7 +917,11 @@ function renderObjects(blocks, viewport, root, page) {
     button.className = "pdf-object";
     button.setAttribute(
       "aria-label",
-      block.type === "equation" ? "选择完整公式" : "选择完整图表",
+      block.type === "equation"
+        ? "选择完整公式"
+        : block.type === "table"
+          ? "选择完整表格"
+          : "选择完整插图",
     );
     Object.assign(button.style, {
       left: `${x0 * viewport.width}px`,
@@ -879,9 +935,14 @@ function renderObjects(blocks, viewport, root, page) {
       currentSelection = {
         kind: block.type,
         text: block.text || "[完整图表]",
-        image: block.image,
+        image: pdfObjectImage(root, block.bbox) || block.image,
         format: block.type === "equation" ? "latex" : null,
-        position: { ...makePosition(), index: page },
+        position: {
+          ...makePosition(),
+          index: page,
+          top: y0 * viewport.height,
+          pdfY: y0,
+        },
         source: `《${current.title}》 · PDF 第 ${page} 页`,
       };
       showToolbar(button.getBoundingClientRect());
@@ -1004,12 +1065,12 @@ function pdfLocalTop() {
   return $("reading-viewport").scrollTop - pdfPageTop(location?.index || 1);
 }
 function scrollPdfTo(position) {
+  const height = pdfPageElement(position.index)?.offsetHeight || 1;
+  const top = Number.isFinite(position.pdfY)
+    ? position.pdfY * height
+    : position.top || 0;
   $("reading-viewport").scrollTop =
-    pdfPageTop(position.index) +
-    Math.min(
-      position.top || 0,
-      Math.max(0, (pdfPageElement(position.index)?.offsetHeight || 1) - 20),
-    );
+    pdfPageTop(position.index) + Math.min(top, Math.max(0, height - 20));
 }
 async function paintPdfPage(index, revision) {
   const root = pdfPageElement(index);
@@ -1055,6 +1116,17 @@ async function paintPdfPage(index, revision) {
     });
     await layer.render();
     root.dataset.ocr = "native";
+    if (current.parseEnabled && current.enrichmentUrl) {
+      try {
+        const data = await api(
+          `/api/enrichment?book=${current.id}&page=${index}`,
+        );
+        if (revision === renderRevision && root.isConnected)
+          renderObjects(data.blocks, viewport, objects, index);
+      } catch {
+        /* Original pages and native text stay available. */
+      }
+    }
   }
   root.dataset.rendered = "ready";
   root._viewport = viewport;
@@ -1972,18 +2044,19 @@ function openBookOptions(id) {
   $("book-form").innerHTML =
     `<label>书名<input id="book-name" type="text" value="${escapeHTML(book.title)}" maxlength="240"></label><label>书籍类别<select id="book-shelf"><option ${book.shelf === "小说" ? "selected" : ""}>小说</option><option ${book.shelf === "学习" ? "selected" : ""}>学习</option></select></label><label class="parse-toggle"><span>文档解析<small>${book.type === "pdf" ? "扫描文字按页准备，可补充原书目录" : book.type === "txt" ? "识别章、回、卷，建立章节导航" : "沿用原书内容，可额外补充结构索引"}</small></span><input id="book-parse" type="checkbox" ${book.parseEnabled ? "checked" : ""}></label>${book.type === "pdf" ? `<label>印刷书页到 PDF 页序的偏移<input id="book-offset" type="number" value="${book.pageOffset ?? ""}" placeholder="自动识别中；也可手动校正"></label><p class="setting-note">例如书页 3 位于 PDF 第 5 页，偏移填写 2。</p>` : ""}<div class="book-details">${escapeHTML(book.format)} · ${book.type === "pdf" ? book.pages + " 页" : book.chapters.length + " 个阅读单元"}<br>${escapeHTML(book.processingNote || "原文件保留在本机。")}</div>`;
   $("book-save-note").textContent = "更改不会修改原文件";
+  $("book-cloud").hidden = book.type !== "pdf";
   $("book-dialog").showModal();
 }
-async function saveBookOptions() {
-  await savePosition(true);
+async function saveBookOptions(forCloud = false) {
   const patch = {
     title: $("book-name").value.trim() || editingBook.title,
     shelf: $("book-shelf").value,
-    parseEnabled: $("book-parse").checked,
   };
+  if (!forCloud) patch.parseEnabled = $("book-parse").checked;
   if ($("book-offset")?.value !== " " && $("book-offset")?.value)
     patch.pageOffset = Number($("book-offset").value);
   try {
+    await savePosition(true);
     await post("/api/books/" + editingBook.id, patch);
     $("book-dialog").close();
     await refreshLibrary();
@@ -1992,8 +2065,10 @@ async function saveBookOptions() {
       renderCurrent(location);
     } else renderLibrary();
     toast("书籍设置已保存。");
+    return true;
   } catch (error) {
     $("book-save-note").textContent = error.message;
+    return false;
   }
 }
 
@@ -2154,7 +2229,10 @@ document.addEventListener("click", async (event) => {
   if (retry) {
     retry.disabled = true;
     try {
-      await post("/api/books/" + retry.dataset.retry, { parseEnabled: true });
+      await post("/api/books/" + retry.dataset.retry, {
+        parseEnabled: true,
+        reparse: true,
+      });
       await refreshLibrary();
       if (route === "library") renderLibrary();
       toast("已重新开始解析。", { kind: "success" });
@@ -2163,6 +2241,17 @@ document.addEventListener("click", async (event) => {
     } finally {
       retry.disabled = false;
     }
+    return;
+  }
+  const pauseJob = event.target.closest("[data-pause-job]");
+  if (pauseJob) {
+    documentParsing.pause(pauseJob.dataset.pauseJob);
+    return;
+  }
+  const cloudJob = event.target.closest("[data-cloud]");
+  if (cloudJob) {
+    const job = jobs.find((job) => job.book === cloudJob.dataset.cloud);
+    documentParsing.open(cloudJob.dataset.cloud, job?.pages);
     return;
   }
   const read = event.target.closest("[data-read]");
@@ -2271,7 +2360,11 @@ $("drop-zone").addEventListener("drop", (event) => {
   addFiles(event.dataTransfer.files);
 });
 $("import-submit").onclick = submitImport;
-$("book-save").onclick = saveBookOptions;
+$("book-save").onclick = () => saveBookOptions();
+$("book-cloud").onclick = async () => {
+  const id = editingBook.id;
+  if (await saveBookOptions(true)) documentParsing.open(id);
+};
 $("reader-home").onclick = () => {
   savePosition(true);
   window.location.hash = "#/library";
@@ -2465,7 +2558,7 @@ $("reading-viewport").addEventListener(
       updatePdfScroll();
     lastAnchor = retainedAnchor || captureAnchor();
     updateProgress();
-    $("selection-toolbar").hidden = true;
+    refreshSelectionToolbar();
     clearTimeout(saveTimer);
     if (!restoringPosition)
       saveTimer = setTimeout(() => savePosition().catch(() => {}), 250);
@@ -2557,6 +2650,7 @@ async function poll(resume = false) {
     if (version.revision !== libraryRevision) {
       libraryRevision = version.revision;
       const previousFlag = current?.parseEnabled,
+        previousEnhancement = current?.enhancementRevision,
         previousCount = current?.chapters?.length;
       await refreshLibrary();
       if (route === "library") renderLibrary();
@@ -2564,8 +2658,12 @@ async function poll(resume = false) {
         route === "reader" &&
         current &&
         (previousFlag !== current.parseEnabled ||
+          previousEnhancement !== current.enhancementRevision ||
           (current.type === "txt" && previousCount !== current.chapters.length))
       ) {
+        if (current.type === "pdf")
+          for (const key of ocrCache.keys())
+            if (key.startsWith(current.id + ":")) ocrCache.delete(key);
         location = initialLocation(current);
         renderCurrent(location);
       }

@@ -36,7 +36,7 @@ export function createServiceSettings({ document, api, post, toast }) {
       : "EPUB 沿用原书结构。扫描 PDF 可通过文档解析补足文字、公式与图表。";
     const container = $("settings-" + service);
     container.innerHTML = `<form class="service-form" data-service="${service}">
-      <div class="service-heading"><span class="service-symbol">${icon(ai ? "ask" : "pages")}</span><div><h2>${ai ? "模型服务" : "MinerU 云解析"}</h2><span class="service-badge" data-ready="${config.ready}">${ai ? (config.ready ? "已配置" : "尚未配置") : "云任务待接入"}</span></div></div>
+      <div class="service-heading"><span class="service-symbol">${icon(ai ? "ask" : "pages")}</span><div><h2>${ai ? "模型服务" : "MinerU 云解析"}</h2><span class="service-badge" data-ready="${config.ready}">${ai ? (config.ready ? "已配置" : "尚未配置") : config.ready ? "按需启用" : "尚未配置"}</span></div></div>
       <p class="service-description">${description}</p>
       <fieldset><legend class="visually-hidden">${ai ? "模型服务配置" : "MinerU 服务配置"}</legend>
         <label class="service-field">服务地址<input name="baseUrl" type="url" maxlength="2048" required spellcheck="false" autocomplete="off" placeholder="${ai ? "https://…/v1" : "https://mineru.net/api/v4"}" value="${escapeHTML(config.baseUrl)}"><small>${ai ? "使用兼容 Chat Completions 的接口；本机模型可用回环 HTTP 地址。" : "填写 MinerU 云服务的 API v4 根地址。"}</small></label>
@@ -47,7 +47,7 @@ export function createServiceSettings({ document, api, post, toast }) {
         <div class="service-actions"><button type="submit" class="primary-button">保存设置</button><button type="button" class="secondary-button" data-test>${ai ? "测试连接" : "检查配置"}</button><button type="button" class="service-reset" data-reset>还原修改</button></div>
       </fieldset><p class="service-result" data-result role="status" aria-live="polite"></p></form>
       <aside class="service-explainer"><small>${ai ? "陪你读懂" : "原书优先"}</small><h2>${title}</h2>
-        ${ai ? `<p>选中原文就能提问，也可以围绕当前页发起讨论。对话与出处保存在这台设备。</p><div class="service-note"><strong>发送范围由你掌握</strong><p>发问时会发送选段、附近文字和近期对话。阅读与复制在本机完成。</p></div><div class="service-note"><strong>先试一句，再开始阅读</strong><p>「测试连接」发送一句简短测试文字，使用当前表单配置。测试通过后请保存设置。</p></div>` : `<p>当前阅读器使用本机 OCR 增强 PDF 的目录和文字选择，导入时可以单独开关。</p><div class="service-note"><strong>云解析正在接入</strong><p>这里先保存云服务配置。「检查配置」只检查填写格式；Token 有效性和解析质量会在实际任务中验证。</p></div><div class="service-note"><strong>已有好格式，保留好排版</strong><p>EPUB 直接使用原书目录、插图与正文。MinerU 将用于扫描教材等复杂资料。</p></div>`}
+        ${ai ? `<p>选中原文就能提问，也可以围绕当前页发起讨论。对话与出处保存在这台设备。</p><div class="service-note"><strong>发送范围由你掌握</strong><p>发问时会发送选段、附近文字和近期对话。阅读与复制在本机完成。</p></div><div class="service-note"><strong>先试一句，再开始阅读</strong><p>「测试连接」发送一句简短测试文字，使用当前表单配置。测试通过后请保存设置。</p></div>` : `<p>当前阅读器使用本机 OCR 增强 PDF 的目录和文字选择，导入时可以单独开关。</p><div class="service-note"><strong>先选一小段，再增强整本</strong><p>在 PDF 的书籍设置里选择「精细解析」，可以指定页段、暂停并继续。这里只检查配置格式，Token 有效性在实际任务中确认。</p></div><div class="service-note"><strong>已有好格式，保留好排版</strong><p>EPUB 直接使用原书目录、插图与正文。MinerU 用于扫描教材等复杂资料。</p></div>`}
       </aside>`;
     const form = container.querySelector("form");
     form.onsubmit = (event) => {

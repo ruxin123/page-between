@@ -30,18 +30,25 @@ from book_import import (
     url_for,
     path_for,
 )
-from pdf_enhancement import build_contents, recognize
+from pdf_enhancement import build_contents, recognize, page_enrichment
 
 from paths import DATA, RUNTIME, DEMO, APP_MODE, DATA_PREFIX
 from storage import load, save
 import ai_tutor
 import service_settings
+import mineru_api
 
 MUTEX = threading.RLock()
 WORKERS = ThreadPoolExecutor(max_workers=2)
 RUNNING = set()
+CANCELS = {}
 IMPORT_LOCKS = defaultdict(threading.Lock)
 SESSION = os.environ.pop("PAGE_BETWEEN_SESSION", "")
+
+
+class ReaderServer(ThreadingHTTPServer):
+    # ES modules and fonts arrive together when a fresh window opens.
+    request_queue_size = 64
 
 
 def session_matches(value):
@@ -66,20 +73,31 @@ def update_book(ident, patch):
         return book
 
 
-def start_job(ident):
+def start_job(ident, kind="local", pages=None, fresh=False):
     with MUTEX:
         if ident in RUNNING:
-            return
+            return False
         data = library()
         book = next(book for book in data["books"] if book["id"] == ident)
         RUNNING.add(ident)
-        book.update({"processing": "pending", "processingNote": "准备文档解析"})
+        cancellation = threading.Event()
+        reset_id = (
+            fresh if isinstance(fresh, str) else uuid.uuid4().hex if fresh else None
+        )
+        CANCELS[ident] = cancellation
+        note = "准备云端精细解析" if kind == "mineru" else "准备文档解析"
+        book.update(
+            {"processing": "pending", "processingNote": note, "processingKind": kind}
+        )
         job = {
             "id": uuid.uuid4().hex,
             "book": ident,
             "title": book["title"],
             "status": "running",
-            "phase": "准备文档解析",
+            "phase": note,
+            "kind": kind,
+            "pages": pages or [],
+            "resetId": reset_id,
             "startedAt": time.time(),
         }
         data["jobs"] = [entry for entry in data["jobs"] if entry.get("book") != ident]
@@ -95,10 +113,21 @@ def start_job(ident):
                 (entry for entry in data["jobs"] if entry["id"] == job["id"]), None
             )
             book = next((book for book in data["books"] if book["id"] == ident), None)
-            if book and status in {"ready", "error"}:
+            if (
+                kind == "mineru"
+                and status == "running"
+                and (cancellation.is_set() or not book or not book["parseEnabled"])
+            ):
+                raise mineru_api.Paused("云解析已暂停，可稍后继续。")
+            if book and status in {"ready", "error", "paused"}:
                 if not book["parseEnabled"] and book["type"] != "txt":
                     text, status = "已关闭增强解析，保留原书阅读。", "ready"
-                book.update({"processing": status, "processingNote": text})
+                book.update(
+                    {
+                        "processing": "ready" if status == "paused" else status,
+                        "processingNote": text,
+                    }
+                )
                 save(BOOK_ROOT / ident / "book.json", book)
             if entry:
                 entry.update({"phase": text, "status": status})
@@ -110,7 +139,14 @@ def start_job(ident):
             if not book["parseEnabled"] and book["type"] != "txt":
                 phase("已关闭增强解析", "ready")
                 return
-            if book["type"] == "pdf":
+            if kind == "mineru":
+                patch = mineru_api.run(
+                    book, pages, phase, cancellation, fresh=reset_id or False
+                )
+                if book_for(ident)["parseEnabled"] and not cancellation.is_set():
+                    update_book(ident, patch)
+                phase(patch["processingNote"], "ready")
+            elif book["type"] == "pdf":
                 patch = build_contents(book, phase)
                 if book_for(ident)["parseEnabled"]:
                     update_book(ident, patch)
@@ -166,13 +202,17 @@ def start_job(ident):
                     },
                 )
                 phase("附加结构索引已准备；原书排版保留。", "ready")
+        except mineru_api.Paused as error:
+            phase(str(error), "paused")
         except Exception as error:
             phase(str(error), "error")
         finally:
             with MUTEX:
                 RUNNING.discard(ident)
+                CANCELS.pop(ident, None)
 
     WORKERS.submit(run)
+    return True
 
 
 def build_native():
@@ -373,6 +413,12 @@ class Handler(SimpleHTTPRequestHandler):
                 if not book["parseEnabled"]:
                     return self.json({"disabled": True, "lines": []})
                 return self.json(recognize(book, page))
+            if route.path == "/api/enrichment":
+                book = book_for(query.get("book", [""])[0])
+                page = int(query.get("page", ["0"])[0])
+                if not book or book["type"] != "pdf" or not 1 <= page <= book["pages"]:
+                    raise ValueError("原书页码无效。")
+                return self.json({"blocks": page_enrichment(book, page)})
             if route.path == "/api/palm-status":
                 return self.json(load(DATA / "palm-window.json", {}))
             requested = Path(unquote(route.path))
@@ -474,6 +520,36 @@ class Handler(SimpleHTTPRequestHandler):
                     finally:
                         shutil.rmtree(incoming, ignore_errors=True)
             payload = json.loads(self.request_body())
+            if route.path == "/api/jobs/mineru":
+                book = book_for(payload.get("book"))
+                if not book or book["type"] != "pdf":
+                    raise ValueError("请选择一本 PDF。")
+                pages = mineru_api.page_range(payload.get("pages"), book["pages"])
+                if type(payload.get("fresh", False)) is not bool:
+                    raise ValueError("解析选项无效。")
+                service_settings.validated(
+                    "mineru", service_settings.effective("mineru"), require_key=True
+                )
+                with MUTEX:
+                    if book["id"] in RUNNING:
+                        return self.json(
+                            {"error": "这本书已有任务进行中，请稍后再试。"}, 409
+                        )
+                    update_book(book["id"], {"parseEnabled": True})
+                    start_job(
+                        book["id"],
+                        kind="mineru",
+                        pages=pages,
+                        fresh=payload.get("fresh", False),
+                    )
+                return self.json({"book": book_for(book["id"]), "started": True})
+            if route.path == "/api/jobs/pause":
+                ident = payload.get("book")
+                with MUTEX:
+                    pausing = ident in CANCELS
+                    if ident in CANCELS:
+                        CANCELS[ident].set()
+                return self.json({"paused": pausing})
             if route.path in {"/api/settings/save", "/api/settings/test"}:
                 if not isinstance(payload, dict):
                     raise ValueError("服务配置无效。")
@@ -497,7 +573,7 @@ class Handler(SimpleHTTPRequestHandler):
                     )
                 return self.json(
                     {
-                        "message": "配置格式检查通过。云解析任务尚未接入，Token 有效性将在实际解析时确认。",
+                        "message": "配置格式检查通过。Token 有效性将在实际解析任务中确认。",
                         "verified": False,
                     }
                 )
@@ -567,6 +643,8 @@ class Handler(SimpleHTTPRequestHandler):
                     patch["parseEnabled"], bool
                 ):
                     raise ValueError("解析开关无效。")
+                if "reparse" in payload and type(payload["reparse"]) is not bool:
+                    raise ValueError("重试选项无效。")
                 if "pageOffset" in payload:
                     offset = int(payload["pageOffset"])
                     if abs(offset) > book.get("pages", 0):
@@ -581,8 +659,12 @@ class Handler(SimpleHTTPRequestHandler):
                             )
                     patch["toc"] = book["toc"]
                 result = update_book(ident, patch)
-                if "parseEnabled" in patch:
-                    if book["type"] == "txt" or patch["parseEnabled"]:
+                if (
+                    payload.get("reparse")
+                    or patch.get("parseEnabled", book["parseEnabled"])
+                    != book["parseEnabled"]
+                ):
+                    if book["type"] == "txt" or result["parseEnabled"]:
                         start_job(ident)
                 return self.json({"book": result})
             if route.path == "/api/palm":
@@ -633,6 +715,37 @@ class Handler(SimpleHTTPRequestHandler):
             self.json({"error": str(error)}, 400)
 
 
+def resume_pending_jobs():
+    for book in library()["books"]:
+        if book.get("processing") != "pending":
+            continue
+        if not book["parseEnabled"] and book["type"] != "txt":
+            update_book(
+                book["id"],
+                {
+                    "processing": "ready",
+                    "processingNote": "已关闭增强解析，保留原书阅读。",
+                },
+            )
+            continue
+        previous = next(
+            (job for job in library()["jobs"] if job.get("book") == book["id"]), {}
+        )
+        if (
+            book["type"] == "pdf"
+            and previous.get("kind") == "mineru"
+            and previous.get("pages")
+        ):
+            start_job(
+                book["id"],
+                kind="mineru",
+                pages=previous["pages"],
+                fresh=previous.get("resetId") or False,
+            )
+        else:
+            start_job(book["id"])
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8779 if DEMO else 8778)
@@ -660,7 +773,7 @@ def main():
             prepare()
         else:
             save(DATA / "library.json", {"books": [], "jobs": []})
-    server = ThreadingHTTPServer(
+    server = ReaderServer(
         ("127.0.0.1", arguments.port), partial(Handler, directory=str(ROOT))
     )
     parent = os.environ.pop("PAGE_BETWEEN_PARENT_PID", "")
@@ -672,13 +785,7 @@ def main():
             os._exit(0)
 
         threading.Thread(target=follow_parent, daemon=True).start()
-    for book in library()["books"]:
-        if (
-            book["type"] == "pdf"
-            and book["parseEnabled"]
-            and book.get("processing") == "pending"
-        ):
-            start_job(book["id"])
+    resume_pending_jobs()
     if APP_MODE:
         print(json.dumps({"ready": True, "port": server.server_port}), flush=True)
     else:

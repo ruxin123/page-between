@@ -60,6 +60,7 @@ def build(demo=False):
         "epub-reader.css",
         "parse_text.mjs",
         "normalize-headings.lua",
+        "scripts/demo-enhancement.json",
         "assets/favicon.svg",
         "THIRD_PARTY_NOTICES.md",
         "FONTS.md",

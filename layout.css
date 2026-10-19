@@ -2886,3 +2886,34 @@ body[data-mode="palm"] .text-host {
 #ai-quote {
   margin: 12px 0 0;
 }
+
+.cloud-dialog {
+  width: min(520px, calc(100vw - 32px));
+}
+.cloud-form {
+  padding: 24px;
+}
+.cloud-book-title {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+.cloud-form .service-field {
+  margin: 24px 0 12px;
+}
+.cloud-range-actions {
+  display: flex;
+  gap: 8px;
+}
+.cloud-form > a {
+  color: var(--accent);
+  font-size: 12px;
+}
+.cloud-footer {
+  margin-top: 24px;
+  display: flex;
+  justify-content: flex-end;
+}
+.job-label.paused {
+  color: var(--secondary);
+}

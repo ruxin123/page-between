@@ -194,7 +194,7 @@ def public_settings():
         "services": services,
         "keychainAvailable": sys.platform == "darwin"
         and (RUNTIME / "service-secrets").is_file(),
-        "mineruIntegrated": False,
+        "mineruIntegrated": True,
         "profile": "demo" if DEMO else "personal",
     }
 

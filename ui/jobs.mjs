@@ -9,11 +9,15 @@ export function taskEntries(books, jobs) {
       ? "ready"
       : book.processing === "pending"
         ? "running"
-        : ["ready", "error"].includes(book.processing)
-          ? book.processing
-          : job?.status || "ready";
+        : job?.status === "paused"
+          ? "paused"
+          : ["ready", "error"].includes(book.processing)
+            ? book.processing
+            : job?.status || "ready";
     return {
       book: book.id,
+      kind: job?.kind || "local",
+      pages: job?.pages || [],
       title: book.title,
       status,
       phase: disabled

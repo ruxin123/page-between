@@ -225,6 +225,15 @@ def prepare():
         book["onShelf"] = ident in {"demo-a", "demo-c"}
         if book["type"] == "pdf":
             book["language"] = "en"
+            fixture = Path(__file__).with_name("demo-enhancement.json")
+            if fixture.is_file():
+                enhancement = DATA / "books" / ident / "demo-enhancement.json"
+                enhancement.write_bytes(fixture.read_bytes())
+                book.update(
+                    enrichmentUrl=url_for(enhancement),
+                    enhancedPages=[1, 2, 3, 4],
+                    demoEnhancement=True,
+                )
         if not book.get("cover"):
             cover = DATA / "books" / ident / "cover.svg"
             cover.write_text(

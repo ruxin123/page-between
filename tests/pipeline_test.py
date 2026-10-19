@@ -57,6 +57,169 @@ class Contents(unittest.TestCase):
 
 
 class SharedState(unittest.TestCase):
+    def test_startup_recovers_text_and_cloud_jobs_without_restarting_disabled_books(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            books = [
+                {
+                    "id": "text",
+                    "type": "txt",
+                    "parseEnabled": False,
+                    "processing": "pending",
+                },
+                {
+                    "id": "epub",
+                    "type": "epub",
+                    "parseEnabled": True,
+                    "processing": "pending",
+                },
+                {
+                    "id": "cloud",
+                    "type": "pdf",
+                    "parseEnabled": True,
+                    "processing": "pending",
+                },
+                {
+                    "id": "disabled",
+                    "type": "pdf",
+                    "parseEnabled": False,
+                    "processing": "pending",
+                },
+            ]
+            with (
+                patch.object(server, "DATA", root),
+                patch.object(server, "BOOK_ROOT", root / "books"),
+                patch.object(server, "start_job") as start,
+            ):
+                server.save(
+                    root / "library.json",
+                    {
+                        "books": books,
+                        "jobs": [
+                            {
+                                "book": "cloud",
+                                "kind": "mineru",
+                                "pages": [2, 3],
+                                "resetId": "operation",
+                            }
+                        ],
+                    },
+                )
+                server.resume_pending_jobs()
+                self.assertEqual(start.call_count, 3)
+                self.assertEqual(
+                    start.call_args_list[-1].kwargs,
+                    {"kind": "mineru", "pages": [2, 3], "fresh": "operation"},
+                )
+                self.assertEqual(server.book_for("disabled")["processing"], "ready")
+
+    def test_cloud_job_pause_and_resume_preserve_kind_and_operation_identity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            queued = []
+            book = {
+                "id": "example",
+                "title": "自编样例",
+                "type": "pdf",
+                "pages": 4,
+                "parseEnabled": True,
+            }
+            with (
+                patch.object(server, "DATA", root),
+                patch.object(server, "BOOK_ROOT", root / "books"),
+                patch.object(server, "RUNNING", set()),
+                patch.object(server, "CANCELS", {}),
+                patch.object(server.WORKERS, "submit", side_effect=queued.append),
+            ):
+                server.save(root / "library.json", {"books": [book], "jobs": []})
+
+                def parse(book, pages, phase, cancel, **options):
+                    phase("云端处理中")
+                    return {
+                        "processingNote": "已增强 2 页",
+                        "enhancedPages": [1, 2],
+                        "enhancementRevision": 10,
+                    }
+
+                with patch.object(
+                    server.mineru_api, "run", side_effect=parse
+                ) as parser:
+                    self.assertTrue(
+                        server.start_job(
+                            "example", kind="mineru", pages=[1, 2], fresh="operation-id"
+                        )
+                    )
+                    self.assertFalse(
+                        server.start_job("example", kind="mineru", pages=[1, 2])
+                    )
+                    server.CANCELS["example"].set()
+                    queued.pop(0)()
+                    self.assertEqual(server.library()["jobs"][0]["status"], "paused")
+                    self.assertEqual(server.book_for("example")["processing"], "ready")
+                    self.assertFalse(server.RUNNING)
+                    server.start_job(
+                        "example", kind="mineru", pages=[1, 2], fresh="operation-id"
+                    )
+                    queued.pop(0)()
+                    self.assertEqual(parser.call_args.kwargs["fresh"], "operation-id")
+                    self.assertEqual(server.library()["jobs"][0]["status"], "ready")
+                    self.assertEqual(
+                        server.book_for("example")["enhancedPages"], [1, 2]
+                    )
+                    self.assertFalse(server.CANCELS)
+
+    def test_saving_unchanged_parse_switch_does_not_start_another_job(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with (
+                patch.object(server, "DATA", root),
+                patch.object(server, "BOOK_ROOT", root / "books"),
+                patch.object(server, "start_job") as start,
+            ):
+                server.save(
+                    root / "library.json",
+                    {
+                        "books": [
+                            {
+                                "id": "example",
+                                "title": "自编样例",
+                                "type": "pdf",
+                                "pages": 4,
+                                "parseEnabled": True,
+                            }
+                        ],
+                        "jobs": [],
+                    },
+                )
+                http = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+                worker = threading.Thread(target=http.serve_forever, daemon=True)
+                worker.start()
+                connection = HTTPConnection("127.0.0.1", http.server_port)
+                try:
+                    for payload in (
+                        {"parseEnabled": True},
+                        {"parseEnabled": True, "reparse": True},
+                    ):
+                        connection.request(
+                            "POST",
+                            "/api/books/example",
+                            json.dumps(payload),
+                            {"Content-Type": "application/json"},
+                        )
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 200)
+                        response.read()
+                        self.assertEqual(
+                            start.call_count, 1 if payload.get("reparse") else 0
+                        )
+                finally:
+                    connection.close()
+                    http.shutdown()
+                    http.server_close()
+                    worker.join()
+
     def test_failed_job_retry_replaces_history_and_returns_book_to_ready(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

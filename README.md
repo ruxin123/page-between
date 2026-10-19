@@ -10,7 +10,7 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（2.16）
+## macOS App 构建（前端 2.17）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -23,7 +23,7 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 
 构建结果默认位于用户的 `Library/Caches/Page Between/build/`。当前在 Apple Silicon、macOS 27.0.1 验证，签名为本机构建的 ad-hoc 签名；其他系统版本和正式分发尚待验收。旧书库可使用 `python scripts/migrate_library.py data` 复制到安装版，已有目标不会覆盖，原目录保留。
 
-当前 App 仍在持续开发：云解析、全书知识与引用、重排导出、应用内备份恢复等见 [完整验收清单](docs/APP_READINESS.md)。以下是从源码运行原型的方式。
+当前 App 仍在持续开发：全书知识与引用、重排导出、应用内备份恢复等见 [完整验收清单](docs/APP_READINESS.md)。以下是从源码运行原型的方式。
 
 ## 快速开始
 
@@ -78,11 +78,23 @@ python server.py
 
 普通服务设置保存在 `~/Library/Application Support/Page Between/Personal/services.json`；匿名演示保存在相邻 `Review Demo/` 目录，凭据也按模式隔离。文件只含地址、模型和钥匙串引用，不包含 Key。原有 `.env` 仍可使用；主动保存后应用配置优先，移除凭据后不恢复旧 `.env` Key。
 
-MinerU 页面可保存云 API v4 的地址、Token 与解析模型。目前云任务仍在接入；「检查配置」只检查填写格式，不宣称 Token 鉴权成功。当前 PDF 的日常目录与划词仍由本机 OCR 提供。参考 [MinerU 官方 API 文档](https://mineru.net/apiManage/docs)。
+MinerU 页面可保存云 API v4 的地址、Token 与解析模型。「检查配置」只检查填写格式；真实调用从 PDF 的「书籍设置 → 精细解析」发起，可选页段或整本，在处理面板暂停、继续。默认复用已完成页与未结束任务，只有勾选重新识别才重新提交。日常目录与划词可继续使用本机 OCR。参考 [MinerU 官方 API 文档](https://mineru.net/apiManage/docs)。
 
 ![匿名示例上的服务设置](docs/screenshots/services.png)
 
 模型设置截图使用本机模拟服务与虚构模型 ID，见 [设置示例](docs/screenshots/model-settings.png)。真实模型另行验证，截图不展示私人地址或凭据。
+
+## PDF 精细解析（2.17）
+
+原 PDF 始终是阅读主体。MinerU 返回的区块映射回原页，只有选中时显示操作；公式提供完整 LaTeX，表格提供可粘贴到电子表格的制表符文字，图表和公式均可复制原图。后台保存任务断点，退出后可继续，不需要保持解析对话框打开。
+
+云端只接收所选原页；每批最多 150 页，原文件保持不变。暂停表示停止本机后续操作，已提交的云任务可能继续，恢复时先查询原任务。解析额度与处理时间由服务方决定。识别与字符对齐仍可能有误，可随时对照原页。
+
+匿名演示内附四页自编资料的真实解析结果，无 Token 也可检查完整公式、表格和图片取用；不会静默发起云调用。
+
+![按页选择云解析](docs/screenshots/mineru-dialog.png)
+
+[暂停与继续](docs/screenshots/mineru-paused.png) · [原页完整表格取用](docs/screenshots/mineru-table-selection.png)
 
 ## 书内 AI 答疑
 

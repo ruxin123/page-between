@@ -17,12 +17,68 @@ from book_import import ROOT, path_for
 from paths import CACHE as CACHE_ROOT, RUNTIME
 
 OCR = RUNTIME / "ocr-page"
-CACHE = CACHE_ROOT / "ocr-v2"
+CACHE = CACHE_ROOT / "ocr-v3"
 LOCKS = collections.defaultdict(threading.Lock)
 
 
 def source_path(book):
     return path_for(book["url"])
+
+
+def enrichment_data(book):
+    if not book.get("parseEnabled") or not book.get("enrichmentUrl"):
+        return {}
+    path = (
+        ROOT / book["enrichmentUrl"].lstrip("/")
+        if book["enrichmentUrl"].startswith("/assets/")
+        else path_for(book["enrichmentUrl"])
+    )
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def page_enrichment(book, page):
+    return enrichment_data(book).get(str(page), {}).get("blocks", [])
+
+
+def apply_enrichment(data, book, page, mode):
+    if mode != "full":
+        return data
+    blocks = page_enrichment(book, page)
+    data["blocks"] = blocks
+    for block in blocks:
+        if block["type"] != "text":
+            continue
+        x0, y0, x1, y1 = block["bbox"]
+        words = [
+            word
+            for line in data["lines"]
+            for word in line["segments"]
+            if x0 <= (word["bbox"][0] + word["bbox"][2]) / 2 <= x1
+            and y0 <= (word["bbox"][1] + word["bbox"][3]) / 2 <= y1
+        ]
+        normal = lambda value: "".join(re.findall(r"\w+", value)).casefold()
+        reference = re.findall(r"\w+", block["text"])
+        comparison = SequenceMatcher(
+            None,
+            [normal(word["text"]) for word in words],
+            [normal(word) for word in reference],
+            autojunk=False,
+        )
+        for tag, a0, a1, b0, b1 in comparison.get_opcodes():
+            if (
+                tag == "replace"
+                and a1 - a0 == b1 - b0 == 1
+                and SequenceMatcher(
+                    None, normal(words[a0]["text"]), normal(reference[b0])
+                ).ratio()
+                >= 0.85
+            ):
+                suffix = re.search(r"[^\w]*$", words[a0]["text"]).group()
+                words[a0]["text"] = reference[b0] + suffix
+    return data
 
 
 def recognize(book, page, mode="full"):
@@ -33,7 +89,7 @@ def recognize(book, page, mode="full"):
     path = CACHE / book["id"] / f"{page}-{mode}{'-eng' if english else ''}.json"
     with LOCKS[key]:
         if path.is_file():
-            return json.loads(path.read_text())
+            return apply_enrichment(json.loads(path.read_text()), book, page, mode)
         if english:
             import pypdfium2 as pdfium
 
@@ -129,51 +185,11 @@ def recognize(book, page, mode="full"):
             if result.returncode:
                 raise ValueError("本页文字识别失败，可重试或继续阅读原页。")
             data = json.loads(result.stdout)
-        if mode == "full" and book.get("enrichmentUrl"):
-            enrichment = (
-                ROOT / book["enrichmentUrl"].lstrip("/")
-                if book["enrichmentUrl"].startswith("/assets/")
-                else path_for(book["enrichmentUrl"])
-            )
-            blocks = (
-                json.loads(enrichment.read_text()).get(str(page), {}).get("blocks", [])
-            )
-            data["blocks"] = blocks
-            for block in blocks:
-                if block["type"] != "text":
-                    continue
-                x0, y0, x1, y1 = block["bbox"]
-                words = [
-                    word
-                    for line in data["lines"]
-                    for word in line["segments"]
-                    if x0 <= (word["bbox"][0] + word["bbox"][2]) / 2 <= x1
-                    and y0 <= (word["bbox"][1] + word["bbox"][3]) / 2 <= y1
-                ]
-                normal = lambda value: "".join(re.findall(r"\w+", value)).casefold()
-                reference = re.findall(r"\w+", block["text"])
-                comparison = SequenceMatcher(
-                    None,
-                    [normal(word["text"]) for word in words],
-                    [normal(word) for word in reference],
-                    autojunk=False,
-                )
-                for tag, a0, a1, b0, b1 in comparison.get_opcodes():
-                    if (
-                        tag == "replace"
-                        and a1 - a0 == b1 - b0 == 1
-                        and SequenceMatcher(
-                            None, normal(words[a0]["text"]), normal(reference[b0])
-                        ).ratio()
-                        >= 0.85
-                    ):
-                        suffix = re.search(r"[^\w]*$", words[a0]["text"]).group()
-                        words[a0]["text"] = reference[b0] + suffix
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)
-        return data
+        return apply_enrichment(data, book, page, mode)
 
 
 def joined_rows(lines):

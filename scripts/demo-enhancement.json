@@ -1,0 +1,430 @@
+{
+  "1": {
+    "blocks": [
+      {
+        "id": "p1-b0",
+        "type": "text",
+        "text": "1. Concepts and examples",
+        "tableHtml": null,
+        "bbox": [
+          0.10185185185185185,
+          0.10540540540540541,
+          0.4962962962962963,
+          0.13378378378378378
+        ],
+        "headingLevel": 2,
+        "order": 0
+      },
+      {
+        "id": "p1-b1",
+        "type": "text",
+        "text": "This page is original demonstration material. It is included so that reviewers can inspect a fixed page, select its text, and navigate its outline without using a personal book.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.1608108108108108,
+          0.6962962962962963,
+          0.23378378378378378
+        ],
+        "headingLevel": null,
+        "order": 1
+      },
+      {
+        "id": "p1-b2",
+        "type": "text",
+        "text": "Definition 1.1. A relation describes how one quantity is associated with another. In the following example, the rule takes a number x and returns its square.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.26216216216216215,
+          0.7796296296296297,
+          0.33513513513513515
+        ],
+        "headingLevel": null,
+        "order": 2
+      },
+      {
+        "id": "p1-b3",
+        "type": "text",
+        "text": "Example. For x = 0, 1, 2, the corresponding values are 0, 1, 4. The table and drawing below present the same small example in two forms.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.36486486486486486,
+          0.75,
+          0.4135135135135135
+        ],
+        "headingLevel": null,
+        "order": 3
+      },
+      {
+        "id": "p1-b4",
+        "type": "equation",
+        "text": "f (x) = x \\text {   squared }",
+        "tableHtml": null,
+        "bbox": [
+          0.37777777777777777,
+          0.5256756756756756,
+          0.6148148148148148,
+          0.5554054054054054
+        ],
+        "headingLevel": null,
+        "order": 4
+      },
+      {
+        "id": "p1-b5",
+        "type": "table",
+        "text": "x\tf(x)\n0\t0\n1\t1\n2\t4",
+        "tableHtml": "<table><tr><td>x</td><td>f(x)</td></tr><tr><td>0</td><td>0</td></tr><tr><td>1</td><td>1</td></tr><tr><td>2</td><td>4</td></tr></table>",
+        "bbox": [
+          0.14074074074074075,
+          0.5932432432432433,
+          0.40185185185185185,
+          0.7378378378378379
+        ],
+        "headingLevel": null,
+        "order": 5
+      },
+      {
+        "id": "p1-b6",
+        "type": "image",
+        "text": "",
+        "tableHtml": null,
+        "bbox": [
+          0.5518518518518518,
+          0.5756756756756757,
+          0.8666666666666667,
+          0.7445945945945946
+        ],
+        "headingLevel": null,
+        "order": 6
+      }
+    ],
+    "engine": "mineru",
+    "size": [
+      540,
+      740
+    ]
+  },
+  "2": {
+    "blocks": [
+      {
+        "id": "p2-b0",
+        "type": "text",
+        "text": "2. A simple relation",
+        "tableHtml": null,
+        "bbox": [
+          0.10185185185185185,
+          0.10405405405405406,
+          0.40370370370370373,
+          0.13378378378378378
+        ],
+        "headingLevel": 2,
+        "order": 0
+      },
+      {
+        "id": "p2-b1",
+        "type": "text",
+        "text": "This page is original demonstration material. It is included so that reviewers can inspect a fixed page, select its text, and navigate its outline without using a personal book.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.1608108108108108,
+          0.6962962962962963,
+          0.23378378378378378
+        ],
+        "headingLevel": null,
+        "order": 1
+      },
+      {
+        "id": "p2-b2",
+        "type": "text",
+        "text": "Definition 1.1. A relation describes how one quantity is associated with another. In the following example, the rule takes a number x and returns its square.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.2635135135135135,
+          0.7796296296296297,
+          0.33513513513513515
+        ],
+        "headingLevel": null,
+        "order": 2
+      },
+      {
+        "id": "p2-b3",
+        "type": "text",
+        "text": "Example. For x = 0, 1, 2, the corresponding values are 0, 1, 4. The table and drawing below present the same small example in two forms.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.36486486486486486,
+          0.75,
+          0.4135135135135135
+        ],
+        "headingLevel": null,
+        "order": 3
+      },
+      {
+        "id": "p2-b4",
+        "type": "equation",
+        "text": "f (x) = x \\text {   squared }",
+        "tableHtml": null,
+        "bbox": [
+          0.37777777777777777,
+          0.5256756756756756,
+          0.6148148148148148,
+          0.5554054054054054
+        ],
+        "headingLevel": null,
+        "order": 4
+      },
+      {
+        "id": "p2-b5",
+        "type": "table",
+        "text": "x\tf(x)\n0\t0\n1\t1\n2\t4",
+        "tableHtml": "<table><tr><td>x</td><td>f(x)</td></tr><tr><td>0</td><td>0</td></tr><tr><td>1</td><td>1</td></tr><tr><td>2</td><td>4</td></tr></table>",
+        "bbox": [
+          0.14074074074074075,
+          0.5932432432432433,
+          0.40185185185185185,
+          0.7378378378378379
+        ],
+        "headingLevel": null,
+        "order": 5
+      },
+      {
+        "id": "p2-b6",
+        "type": "image",
+        "text": "",
+        "tableHtml": null,
+        "bbox": [
+          0.5518518518518518,
+          0.5756756756756757,
+          0.8666666666666667,
+          0.7445945945945946
+        ],
+        "headingLevel": null,
+        "order": 6
+      }
+    ],
+    "engine": "mineru",
+    "size": [
+      540,
+      740
+    ]
+  },
+  "3": {
+    "blocks": [
+      {
+        "id": "p3-b0",
+        "type": "text",
+        "text": "3. Reading a table",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.10405405405405406,
+          0.37962962962962965,
+          0.13378378378378378
+        ],
+        "headingLevel": 2,
+        "order": 0
+      },
+      {
+        "id": "p3-b1",
+        "type": "text",
+        "text": "This page is original demonstration material. It is included so that reviewers can inspect a fixed page, select its text, and navigate its outline without using a personal book.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.1608108108108108,
+          0.6962962962962963,
+          0.23378378378378378
+        ],
+        "headingLevel": null,
+        "order": 1
+      },
+      {
+        "id": "p3-b2",
+        "type": "text",
+        "text": "Definition 1.1. A relation describes how one quantity is associated with another. In the following example, the rule takes a number x and returns its square.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.2635135135135135,
+          0.7796296296296297,
+          0.33513513513513515
+        ],
+        "headingLevel": null,
+        "order": 2
+      },
+      {
+        "id": "p3-b3",
+        "type": "text",
+        "text": "Example. For x = 0, 1, 2, the corresponding values are 0, 1, 4. The table and drawing below present the same small example in two forms.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.36486486486486486,
+          0.75,
+          0.4135135135135135
+        ],
+        "headingLevel": null,
+        "order": 3
+      },
+      {
+        "id": "p3-b4",
+        "type": "equation",
+        "text": "f (x) = x \\text {   squared }",
+        "tableHtml": null,
+        "bbox": [
+          0.37777777777777777,
+          0.5256756756756756,
+          0.6148148148148148,
+          0.5554054054054054
+        ],
+        "headingLevel": null,
+        "order": 4
+      },
+      {
+        "id": "p3-b5",
+        "type": "table",
+        "text": "x\tf(x)\n0\t0\n1\t1\n2\t4",
+        "tableHtml": "<table><tr><td>x</td><td>f(x)</td></tr><tr><td>0</td><td>0</td></tr><tr><td>1</td><td>1</td></tr><tr><td>2</td><td>4</td></tr></table>",
+        "bbox": [
+          0.14074074074074075,
+          0.5932432432432433,
+          0.40185185185185185,
+          0.7378378378378379
+        ],
+        "headingLevel": null,
+        "order": 5
+      },
+      {
+        "id": "p3-b6",
+        "type": "image",
+        "text": "",
+        "tableHtml": null,
+        "bbox": [
+          0.5518518518518518,
+          0.5756756756756757,
+          0.8666666666666667,
+          0.7445945945945946
+        ],
+        "headingLevel": null,
+        "order": 6
+      }
+    ],
+    "engine": "mineru",
+    "size": [
+      540,
+      740
+    ]
+  },
+  "4": {
+    "blocks": [
+      {
+        "id": "p4-b0",
+        "type": "text",
+        "text": "4. Return to an earlier idea",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.10540540540540541,
+          0.5166666666666667,
+          0.13243243243243244
+        ],
+        "headingLevel": 2,
+        "order": 0
+      },
+      {
+        "id": "p4-b1",
+        "type": "text",
+        "text": "This page is original demonstration material. It is included so that reviewers can inspect a fixed page, select its text, and navigate its outline without using a personal book.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.1608108108108108,
+          0.6962962962962963,
+          0.23378378378378378
+        ],
+        "headingLevel": null,
+        "order": 1
+      },
+      {
+        "id": "p4-b2",
+        "type": "text",
+        "text": "Definition 1.1. A relation describes how one quantity is associated with another. In the following example, the rule takes a number x and returns its square.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.2635135135135135,
+          0.7796296296296297,
+          0.33513513513513515
+        ],
+        "headingLevel": null,
+        "order": 2
+      },
+      {
+        "id": "p4-b3",
+        "type": "text",
+        "text": "Example. For x = 0, 1, 2, the corresponding values are 0, 1, 4. The table and drawing below present the same small example in two forms.",
+        "tableHtml": null,
+        "bbox": [
+          0.1,
+          0.36486486486486486,
+          0.75,
+          0.4135135135135135
+        ],
+        "headingLevel": null,
+        "order": 3
+      },
+      {
+        "id": "p4-b4",
+        "type": "equation",
+        "text": "f (x) = x \\text {   squared }",
+        "tableHtml": null,
+        "bbox": [
+          0.37777777777777777,
+          0.5256756756756756,
+          0.6148148148148148,
+          0.5554054054054054
+        ],
+        "headingLevel": null,
+        "order": 4
+      },
+      {
+        "id": "p4-b5",
+        "type": "table",
+        "text": "x\tf(x)\n0\t0\n1\t1\n2\t4",
+        "tableHtml": "<table><tr><td>x</td><td>f(x)</td></tr><tr><td>0</td><td>0</td></tr><tr><td>1</td><td>1</td></tr><tr><td>2</td><td>4</td></tr></table>",
+        "bbox": [
+          0.14074074074074075,
+          0.5932432432432433,
+          0.40185185185185185,
+          0.7378378378378379
+        ],
+        "headingLevel": null,
+        "order": 5
+      },
+      {
+        "id": "p4-b6",
+        "type": "image",
+        "text": "",
+        "tableHtml": null,
+        "bbox": [
+          0.5518518518518518,
+          0.5756756756756757,
+          0.8666666666666667,
+          0.7445945945945946
+        ],
+        "headingLevel": null,
+        "order": 6
+      }
+    ],
+    "engine": "mineru",
+    "size": [
+      540,
+      740
+    ]
+  }
+}

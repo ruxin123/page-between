@@ -135,10 +135,23 @@ def source_for(book, source):
         key: value
         for key, value in position.items()
         if key
-        in {"index", "page", "top", "anchor", "sourceOffset", "fragment", "resource"}
+        in {
+            "index",
+            "page",
+            "top",
+            "pdfY",
+            "anchor",
+            "sourceOffset",
+            "fragment",
+            "resource",
+        }
     }
     if len(json.dumps(position)) > 6000:
         raise TutorError("原文位置记录过长。")
+    if "pdfY" in position and (
+        type(position["pdfY"]) not in {int, float} or not 0 <= position["pdfY"] <= 1
+    ):
+        raise TutorError("原页位置无效。")
     label = (
         f"PDF 第 {index} 页"
         if book["type"] == "pdf"

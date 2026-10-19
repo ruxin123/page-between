@@ -14,6 +14,7 @@ from lxml import etree
 from pypdf import PdfReader
 
 from paths import ROOT, BOOK_ROOT, DATA_PREFIX
+from storage import save
 
 XML = etree.XMLParser(resolve_entities=False, no_network=True)
 OPF = {"o": "http://www.idpf.org/2007/opf", "dc": "http://purl.org/dc/elements/1.1/"}
@@ -341,7 +342,7 @@ def text_metadata(source, destination, enabled):
     )
     chapters = json.loads(parsed.stdout)
     output = destination / "text.json"
-    output.write_text(json.dumps(chapters, ensure_ascii=False), encoding="utf-8")
+    save(output, chapters)
     toc = []
     for index, chapter in enumerate(chapters):
         item = {
@@ -602,7 +603,7 @@ def import_book(source, *, enabled=None, ident=None, title=None, shelf=None):
             "format": extension[1:].upper(),
             "parseEnabled": enabled,
             "shelf": shelf or ("学习" if extension == ".pdf" else "小说"),
-            "onShelf": extension == ".pdf" or ident == "mysteries",
+            "onShelf": extension == ".pdf",
             "originalUrl": url_for(original),
             "sourceHash": digest.hexdigest(),
             "processing": "pending"
@@ -614,7 +615,5 @@ def import_book(source, *, enabled=None, ident=None, title=None, shelf=None):
         metadata["language"] = (
             "zh" if re.search(r"[\u4e00-\u9fff]", metadata["title"]) else "en"
         )
-    (destination / "book.json").write_text(
-        json.dumps(metadata, ensure_ascii=False), encoding="utf-8"
-    )
+    save(destination / "book.json", metadata)
     return metadata

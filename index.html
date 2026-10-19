@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.16" />
+    <link rel="stylesheet" href="/layout.css?v=2.17" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -515,8 +515,54 @@
       <div id="book-form" class="book-form"></div>
       <div class="dialog-footer">
         <span id="book-save-note"></span
+        ><button id="book-cloud" class="secondary-button" hidden>
+          精细解析…</button
         ><button id="book-save" class="primary-button">保存设置</button>
       </div>
+    </dialog>
+    <dialog id="cloud-dialog" class="book-dialog cloud-dialog">
+      <form method="dialog" class="dialog-heading">
+        <h2>精细解析</h2>
+        <button class="icon-button" aria-label="关闭精细解析">
+          <i data-icon="close"></i>
+        </button>
+      </form>
+      <form id="cloud-form" class="cloud-form">
+        <p id="cloud-book-title" class="cloud-book-title"></p>
+        <p class="setting-note">
+          将所选原页交给 MinerU
+          云服务，提取文字、公式与图表。解析期间可以继续阅读原书。
+        </p>
+        <label class="service-field"
+          >PDF 文件页序<input
+            id="cloud-pages"
+            required
+            maxlength="2000"
+            placeholder="例如 29-34 或 2,5-8" /><small
+            id="cloud-page-count"
+          ></small
+        ></label>
+        <div class="cloud-range-actions">
+          <button type="button" id="cloud-current" class="secondary-button">
+            当前页附近</button
+          ><button type="button" id="cloud-all" class="secondary-button">
+            整本
+          </button>
+        </div>
+        <label class="setting-check"
+          >重新识别已有结果<input id="cloud-fresh" type="checkbox"
+        /></label>
+        <p class="setting-note">
+          默认复用已有结果与未完成任务。开始后会开启本书的文档解析；可在处理面板暂停。
+        </p>
+        <p id="cloud-status" class="setting-note" role="status"></p>
+        <a id="cloud-settings" href="#/settings/mineru">管理 MinerU 服务</a>
+        <div class="cloud-footer">
+          <button class="primary-button" id="cloud-start" type="submit">
+            开始解析
+          </button>
+        </div>
+      </form>
     </dialog>
     <dialog id="page-dialog" class="book-dialog">
       <form id="page-jump-form">
@@ -555,6 +601,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.16"></script>
+    <script type="module" src="/app-v2.mjs?v=2.17"></script>
   </body>
 </html>

@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import { taskEntries } from "../ui/jobs.mjs";
+import { formatPages } from "../ui/mineru.mjs";
+
+assert.equal(formatPages([1, 2, 3, 7, 9, 10]), "1-3,7,9-10");
+assert.equal(formatPages([6]), "6");
+assert.equal(formatPages([]), "");
 
 const books = [
   {
@@ -41,4 +46,18 @@ assert.equal(
   "ready",
   "Disabling enhancement clears its active alert.",
 );
+books[0].parseEnabled = true;
+books[0].processing = "ready";
+const paused = taskEntries(books, [
+  {
+    book: "a",
+    kind: "mineru",
+    status: "paused",
+    phase: "保留进度",
+    pages: [2, 3],
+  },
+])[0];
+assert.equal(paused.status, "paused");
+assert.equal(paused.kind, "mineru");
+assert.deepEqual(paused.pages, [2, 3]);
 console.log("任务按书聚合、历史失败恢复与关闭增强状态：通过。");

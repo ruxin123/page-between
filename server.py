@@ -31,12 +31,14 @@ from book_import import (
     path_for,
 )
 from pdf_enhancement import build_contents, recognize, page_enrichment
+from pdf_selection import align_spans
 
 from paths import DATA, RUNTIME, DEMO, APP_MODE, DATA_PREFIX
 from storage import load, save
 import ai_tutor
 import service_settings
 import mineru_api
+import book_index
 
 MUTEX = threading.RLock()
 WORKERS = ThreadPoolExecutor(max_workers=2)
@@ -520,6 +522,37 @@ class Handler(SimpleHTTPRequestHandler):
                     finally:
                         shutil.rmtree(incoming, ignore_errors=True)
             payload = json.loads(self.request_body())
+            if route.path == "/api/index/search":
+                book = book_for(payload.get("book"))
+                if not book:
+                    raise ValueError("找不到这本书。")
+                if type(payload.get("previousOnly", False)) is not bool:
+                    raise ValueError("检索范围无效。")
+                return self.json(
+                    book_index.search(
+                        book,
+                        payload.get("query", ""),
+                        position=payload.get("position"),
+                        previous_only=payload.get("previousOnly", False),
+                    )
+                )
+            if route.path == "/api/pdf/align":
+                book = book_for(payload.get("book"))
+                page = payload.get("page")
+                if (
+                    not book
+                    or book["type"] != "pdf"
+                    or type(page) is not int
+                    or not 1 <= page <= book["pages"]
+                ):
+                    raise ValueError("原书页码无效。")
+                return self.json(
+                    {
+                        "groups": align_spans(
+                            payload.get("spans"), page_enrichment(book, page)
+                        )
+                    }
+                )
             if route.path == "/api/jobs/mineru":
                 book = book_for(payload.get("book"))
                 if not book or book["type"] != "pdf":
@@ -577,12 +610,28 @@ class Handler(SimpleHTTPRequestHandler):
                         "verified": False,
                     }
                 )
-            if route.path == "/api/ai/ask":
+            if route.path == "/api/ai/cancel":
+                book = book_for(payload.get("book"))
+                if not book:
+                    raise ValueError("找不到这本书。")
+                return self.json(
+                    {
+                        "conversation": ai_tutor.cancel(
+                            payload.get("conversation"), book["id"]
+                        )
+                    }
+                )
+            if route.path in {"/api/ai/ask", "/api/ai/start"}:
                 book = book_for(payload.get("book"))
                 if not book:
                     raise ValueError("找不到这本书。")
                 try:
-                    return self.json({"conversation": ai_tutor.ask(book, payload)})
+                    action = (
+                        ai_tutor.start
+                        if route.path.endswith("/start")
+                        else ai_tutor.ask
+                    )
+                    return self.json({"conversation": action(book, payload)})
                 except ai_tutor.TutorError as error:
                     return self.json(
                         {"error": str(error), "conversation": error.conversation},

@@ -12,8 +12,10 @@ import { createTutor } from "/ui/tutor.mjs";
 import { createServiceSettings } from "/ui/settings.mjs";
 import { createDocumentParsing, formatPages } from "/ui/mineru.mjs";
 import { copyPng } from "/ui/clipboard.mjs";
+import { alignTextLayer, canonicalSelection } from "/ui/pdf-selection.mjs";
+import { createBookSearch, decorateReferences } from "/ui/knowledge.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.17";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.18";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -92,7 +94,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.17";
+document.body.dataset.readerBuild = "2.18";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -114,6 +116,17 @@ function post(path, value) {
   });
 }
 const toast = createToasts($("toasts"));
+const bookSearch = createBookSearch({
+  post,
+  toast,
+  getContext: () =>
+    current && readerReady
+      ? { book: current.id, type: current.type, position: makePosition() }
+      : null,
+  openSource: (book, position) => {
+    if (current?.id === book) navigate(position.index, position);
+  },
+});
 const serviceSettings = createServiceSettings({ document, api, post, toast });
 const documentParsing = createDocumentParsing({
   document,
@@ -506,7 +519,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.17",
+        build: "2.18",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -836,14 +849,51 @@ function captureSelection(doc = document) {
         ? $("pdf-paper")
         : $("chapter-body");
   if (!root?.contains(range.commonAncestorContainer)) return;
-  const text = selection.toString().trim();
+  const text =
+    current.type === "pdf"
+      ? canonicalSelection(range, root)
+      : selection.toString().trim();
   if (!text) return;
   const pdfPage =
     range.startContainer.parentElement?.closest(".pdf-page")?.dataset.page;
+  const position = {
+    ...makePosition(),
+    index: Number(pdfPage) || location.index,
+  };
+  if (pdfPage) {
+    const page = pdfPageElement(Number(pdfPage));
+    const rectangle = page.getBoundingClientRect(),
+      selected = range.getClientRects()[0];
+    if (selected && rectangle.height)
+      position.pdfY = clamp(
+        (selected.top - rectangle.top) / rectangle.height,
+        0,
+        1,
+      );
+  } else {
+    const elements = readingElements(),
+      element = elements
+        .filter((element) => element.contains(range.startContainer))
+        .at(-1);
+    if (element) {
+      const before = doc.createRange();
+      before.selectNodeContents(element);
+      before.setEnd(range.startContainer, range.startOffset);
+      position.anchor = {
+        index: elements.indexOf(element),
+        quote: element.textContent.trim().slice(0, 60),
+        charOffset: before.toString().length,
+        pixels: 0,
+      };
+      if (current.type === "txt")
+        position.sourceOffset =
+          Number(element.dataset.sourceOffset) + position.anchor.charOffset;
+    }
+  }
   currentSelection = {
     text,
     kind: "text",
-    position: { ...makePosition(), index: Number(pdfPage) || location.index },
+    position,
     source: pdfPage
       ? `《${current.title}》 · PDF 第 ${pdfPage} 页`
       : selectionContext(),
@@ -908,6 +958,7 @@ function pdfObjectImage(root, bbox) {
   return image.toDataURL("image/png");
 }
 function renderObjects(blocks, viewport, root, page) {
+  root.parentElement._readerBlocks = blocks;
   root.replaceChildren();
   for (const block of blocks.filter((block) =>
     ["equation", "image", "table"].includes(block.type),
@@ -951,6 +1002,7 @@ function renderObjects(blocks, viewport, root, page) {
   }
 }
 function renderOCR(data, viewport, root) {
+  delete root._canonical;
   root.replaceChildren();
   root.lang = current.language;
   const measure = document.createElement("canvas").getContext("2d");
@@ -997,6 +1049,8 @@ async function prepareOcr(book, page, viewport, revision, root) {
     }
     return;
   }
+  if (root.dataset.ocr === "loading") return;
+  root.dataset.ocr = "loading";
   const key = book.id + ":" + page;
   if (page === location.index) {
     $("ocr-status").textContent = "正在准备本页可选文字…";
@@ -1019,6 +1073,14 @@ async function prepareOcr(book, page, viewport, revision, root) {
     )
       return;
     renderOCR(data, viewport, root.querySelector(".textLayer"));
+    await alignTextLayer(
+      root.querySelector(".textLayer"),
+      data.blocks,
+      post,
+      book.id,
+      page,
+    );
+    if (revision !== renderRevision || !root.isConnected) return;
     if (data.blocks)
       renderObjects(
         data.blocks,
@@ -1121,8 +1183,10 @@ async function paintPdfPage(index, revision) {
         const data = await api(
           `/api/enrichment?book=${current.id}&page=${index}`,
         );
-        if (revision === renderRevision && root.isConnected)
+        if (revision === renderRevision && root.isConnected) {
           renderObjects(data.blocks, viewport, objects, index);
+          await alignTextLayer(text, data.blocks, post, current.id, index);
+        }
       } catch {
         /* Original pages and native text stay available. */
       }
@@ -1498,6 +1562,7 @@ async function renderEpub(position, revision) {
     flow.id = "reader-flow";
     flow.append(...doc.body.childNodes);
     doc.body.append(flow);
+    decorateReferences(flow);
     attachPageGestures(doc);
     doc.addEventListener("mouseup", () =>
       setTimeout(() => captureSelection(doc), 10),
@@ -1541,6 +1606,12 @@ async function renderEpub(position, revision) {
   updateProgress();
 }
 function onEpubClick(event) {
+  const reference = event.target.closest("[data-book-reference]");
+  if (reference) {
+    event.preventDefault();
+    bookSearch.open(reference.dataset.bookReference);
+    return;
+  }
   const anchor = event.target.closest?.("a"),
     href = anchor
       ? (anchor.getAttribute("href") ?? anchor.getAttribute("xlink:href"))
@@ -1653,6 +1724,7 @@ async function renderText(position, revision) {
         return p;
       }),
   );
+  decorateReferences($("chapter-body"));
   if (Number.isFinite(position.sourceOffset)) {
     const paragraphs = [...$("chapter-body").children],
       index = paragraphs.findLastIndex(
@@ -1691,6 +1763,8 @@ async function renderCurrent(position) {
   readerReady = false;
   $("reading-viewport").setAttribute("aria-busy", "true");
   $("bookmark-button").disabled = true;
+  $("ai-open").disabled = true;
+  $("knowledge-open").disabled = true;
   retainedAnchor = position.anchor || null;
   pendingAnchor = null;
   lastAnchor = null;
@@ -1772,6 +1846,8 @@ async function renderCurrent(position) {
     if (revision === renderRevision) {
       $("reading-viewport").setAttribute("aria-busy", "false");
       $("bookmark-button").disabled = !readerReady;
+      $("ai-open").disabled = !readerReady;
+      $("knowledge-open").disabled = !readerReady;
     }
   }
 }
@@ -2162,6 +2238,11 @@ function handleKeydown(event) {
   }
   if (route !== "reader" || editing) return;
   if (event.target.closest?.(".question-panel")) return;
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    bookSearch.open();
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "g") {
     event.preventDefault();
     openPageDialog();
@@ -2201,6 +2282,8 @@ function onCopy(event) {
   const inTutor =
     event.target.closest?.(".question-panel") ||
     selection?.anchorNode?.parentElement?.closest(".question-panel");
+  if (!inTutor && selection?.rangeCount && !selection.isCollapsed)
+    captureSelection(event.target.ownerDocument || document);
   if (
     currentSelection &&
     !inTutor &&
@@ -2225,6 +2308,12 @@ function setFocus(value) {
 }
 
 document.addEventListener("click", async (event) => {
+  const reference = event.target.closest("[data-book-reference]");
+  if (reference) {
+    event.preventDefault();
+    bookSearch.open(reference.dataset.bookReference);
+    return;
+  }
   const retry = event.target.closest("[data-retry]");
   if (retry) {
     retry.disabled = true;
@@ -2482,18 +2571,25 @@ $("selection-toolbar").onmousedown = (event) => event.preventDefault();
 $("copy-selection").onclick = () =>
   currentSelection && copyText(currentSelection.text);
 $("copy-image").onclick = copyImage;
+$("knowledge-open").onclick = () => bookSearch.open();
+$("search-selection").onclick = () => {
+  if (currentSelection) bookSearch.open(currentSelection.text.slice(0, 6000));
+};
 function tutorContext(selection = null) {
   if (!current || !readerReady) return null;
   const position = selection?.position || makePosition();
   let context,
     quote = selection?.text;
   if (current.type === "pdf") {
-    context = [
-      ...(pdfPageElement(position.index)?.querySelectorAll(".textLayer span") ||
-        []),
-    ]
-      .map((node) => node.textContent)
-      .join(" ");
+    const page = pdfPageElement(position.index);
+    context = page?._readerBlocks?.length
+      ? page._readerBlocks
+          .map((block) => block.text || "")
+          .filter(Boolean)
+          .join("\n\n")
+      : [...(page?.querySelectorAll(".textLayer span") || [])]
+          .map((node) => node.textContent)
+          .join(" ");
     quote ||= context.slice(0, 6000);
   } else {
     const elements = readingElements();

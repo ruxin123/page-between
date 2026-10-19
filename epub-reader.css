@@ -3,6 +3,11 @@
   font-display: swap;
   src: url("/assets/fonts/han-serif.otf");
 }
+.reader-reference {
+  color: inherit !important;
+  text-decoration: underline dotted !important;
+  text-underline-offset: 3px;
+}
 @font-face {
   font-family: ReaderWenKai;
   font-display: swap;

@@ -21,6 +21,8 @@
 !/storage.py
 !/book_import.py
 !/pdf_enhancement.py
+!/pdf_selection.py
+!/book_index.py
 !/paths.py
 !/normalize-headings.lua
 !/start.command
@@ -52,6 +54,10 @@
 !/tests/storage_test.py
 !/tests/mineru_test.py
 !/tests/clipboard.test.mjs
+!/tests/pdf_selection_test.py
+!/tests/pdf-selection.test.mjs
+!/tests/book_index_test.py
+!/tests/knowledge.test.mjs
 !/docs/
 !/assets/
 /assets/*

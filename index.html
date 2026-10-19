@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.17" />
+    <link rel="stylesheet" href="/layout.css?v=2.18" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -188,6 +188,14 @@
           </div>
         </div>
         <div class="reader-actions">
+          <button
+            class="icon-button"
+            id="knowledge-open"
+            aria-label="书内检索与引用"
+            title="书内检索与引用 · ⌘F"
+          >
+            <i data-icon="search"></i>
+          </button>
           <button
             class="icon-button"
             id="ai-open"
@@ -389,7 +397,39 @@
         <i data-icon="copy"></i><span id="copy-label">复制</span></button
       ><button id="copy-image" hidden><i data-icon="image"></i>复制原图</button
       ><button id="ask-selection"><i data-icon="ask"></i>提问</button>
+      <button id="search-selection"><i data-icon="search"></i>查书内</button>
     </div>
+    <dialog id="knowledge-dialog" class="knowledge-dialog">
+      <header class="aside-head">
+        <strong>书内检索与引用</strong
+        ><button
+          id="knowledge-close"
+          class="icon-button"
+          aria-label="关闭书内检索"
+        >
+          <i data-icon="close"></i>
+        </button>
+      </header>
+      <form id="knowledge-form" class="knowledge-form">
+        <label for="knowledge-query">查找术语、原文或定理编号</label>
+        <div>
+          <input
+            id="knowledge-query"
+            type="search"
+            maxlength="6000"
+            placeholder="例如：Definition 1.1、连续函数"
+          /><button class="primary-button" type="submit">查找</button>
+        </div>
+        <label class="knowledge-scope"
+          ><input
+            id="knowledge-previous"
+            type="checkbox"
+          />只看当前位置之前的内容</label
+        >
+      </form>
+      <p id="knowledge-status" class="setting-note" role="status"></p>
+      <div id="knowledge-results" class="knowledge-results"></div>
+    </dialog>
     <aside
       id="question-panel"
       class="question-panel"
@@ -428,6 +468,13 @@
         <div id="ai-messages" class="ai-messages" aria-live="polite"></div>
         <p id="ai-progress" class="setting-note" role="status" hidden></p>
         <form id="ai-question-form">
+          <label class="knowledge-scope"
+            ><input
+              id="ai-previous-knowledge"
+              type="checkbox"
+              checked
+            />检索本书当前位置之前的知识</label
+          >
           <label for="question-input">你想了解什么？</label
           ><textarea
             id="question-input"
@@ -438,12 +485,14 @@
           <div class="ai-form-actions">
             <button id="ai-submit" class="primary-button" type="submit">
               发送提问</button
+            ><button id="ai-stop" class="secondary-button" type="button" hidden>
+              停止生成</button
             ><button id="copy-question" class="secondary-button" type="button">
               复制出处与对话
             </button>
           </div>
           <p class="setting-note">
-            发送时会将原文选段与附近文字交给已配置的模型服务。对话保存在本机；点击出处可返回原文。
+            发送时会将选段、附近文字及勾选检索后找到的此前资料交给配置的模型。对话与引用保存在本机。
           </p>
         </form>
       </div>
@@ -601,6 +650,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.17"></script>
+    <script type="module" src="/app-v2.mjs?v=2.18"></script>
   </body>
 </html>

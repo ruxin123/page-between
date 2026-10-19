@@ -9,7 +9,6 @@ import statistics
 import csv
 import io
 import shutil
-from difflib import SequenceMatcher
 from pathlib import Path
 
 from book_import import ROOT, path_for
@@ -46,38 +45,7 @@ def page_enrichment(book, page):
 def apply_enrichment(data, book, page, mode):
     if mode != "full":
         return data
-    blocks = page_enrichment(book, page)
-    data["blocks"] = blocks
-    for block in blocks:
-        if block["type"] != "text":
-            continue
-        x0, y0, x1, y1 = block["bbox"]
-        words = [
-            word
-            for line in data["lines"]
-            for word in line["segments"]
-            if x0 <= (word["bbox"][0] + word["bbox"][2]) / 2 <= x1
-            and y0 <= (word["bbox"][1] + word["bbox"][3]) / 2 <= y1
-        ]
-        normal = lambda value: "".join(re.findall(r"\w+", value)).casefold()
-        reference = re.findall(r"\w+", block["text"])
-        comparison = SequenceMatcher(
-            None,
-            [normal(word["text"]) for word in words],
-            [normal(word) for word in reference],
-            autojunk=False,
-        )
-        for tag, a0, a1, b0, b1 in comparison.get_opcodes():
-            if (
-                tag == "replace"
-                and a1 - a0 == b1 - b0 == 1
-                and SequenceMatcher(
-                    None, normal(words[a0]["text"]), normal(reference[b0])
-                ).ratio()
-                >= 0.85
-            ):
-                suffix = re.search(r"[^\w]*$", words[a0]["text"]).group()
-                words[a0]["text"] = reference[b0] + suffix
+    data["blocks"] = page_enrichment(book, page)
     return data
 
 

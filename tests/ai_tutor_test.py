@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +22,7 @@ class Tutor(unittest.TestCase):
             patch.object(tutor.service_settings, "ROOT", self.root),
             patch.object(tutor.service_settings, "CONFIG", self.root / "services.json"),
             patch.object(tutor, "ACTIVE", set()),
+            patch.object(tutor, "CANCELLATIONS", {}),
             patch.dict(
                 tutor.service_settings.os.environ,
                 {
@@ -244,6 +246,128 @@ class Tutor(unittest.TestCase):
             http.shutdown()
             http.server_close()
             worker.join()
+
+    def test_streaming_transport_exposes_partial_text_and_can_be_stopped(self):
+        sent = []
+
+        class Provider(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                sent.append(body)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                try:
+                    for part in ["从定义开始", "，然后推导结论。[3]"]:
+                        self.wfile.write(
+                            (
+                                "data: "
+                                + json.dumps(
+                                    {"choices": [{"delta": {"content": part}}]}
+                                )
+                                + "\n\n"
+                            ).encode()
+                        )
+                        self.wfile.flush()
+                        time.sleep(0.03)
+                    self.wfile.write(b"data: [DONE]\n\n")
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        http = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+        worker = threading.Thread(target=http.serve_forever, daemon=True)
+        worker.start()
+        try:
+            with patch.dict(
+                tutor.service_settings.os.environ,
+                {"AI_BASE_URL": f"http://127.0.0.1:{http.server_port}/v1"},
+            ):
+                progress = []
+                answer = tutor.complete(
+                    tutor.configuration(),
+                    [{"role": "user", "content": "示例"}],
+                    on_delta=progress.append,
+                )
+                self.assertEqual(progress[0], "从定义开始")
+                self.assertEqual(progress[-1], answer)
+                self.assertTrue(sent[0]["stream"])
+                control = {"event": threading.Event(), "socket": None}
+                with self.assertRaises(tutor.TutorError):
+                    tutor.complete(
+                        tutor.configuration(),
+                        [],
+                        on_delta=lambda text: control["event"].set(),
+                        control=control,
+                    )
+        finally:
+            http.shutdown()
+            http.server_close()
+            worker.join()
+
+    def test_previous_references_are_saved_per_answer_and_cancellation_keeps_partial(
+        self,
+    ):
+        book = {
+            **self.book,
+            "url": "/example",
+            "chapters": [{"title": "第一章"}, {"title": "第二章"}],
+        }
+        source = {
+            **self.payload["source"],
+            "position": {"index": 2, "anchor": {"index": 4}},
+        }
+        entry = {
+            "id": 1,
+            "label": "定义 1.1",
+            "text": "函数每个输入只有一个输出。",
+            "citation": "自编示例 · 第一章",
+            "position": {"index": 1},
+        }
+        captured = []
+
+        def provider(config, prompt, **options):
+            captured.extend(prompt)
+            options["on_delta"]("保留这段尚未完成的回答")
+            tutor.cancel(ident[0], book["id"])
+            return "不应覆盖停止状态"
+
+        prepared = tutor.prepare(book, {**self.payload, "source": source})
+        ident = [prepared[1]]
+        with (
+            patch.object(
+                tutor.book_index,
+                "search",
+                return_value={
+                    "status": {
+                        "covered": 2,
+                        "total": 2,
+                        "unit": "章",
+                        "partial": False,
+                    },
+                    "results": [entry],
+                },
+            ) as search,
+            patch.object(tutor, "complete", side_effect=provider),
+        ):
+            result = tutor.finish(book, prepared)
+        self.assertTrue(search.call_args.kwargs["previous_only"])
+        self.assertEqual(search.call_args.kwargs["position"], source["position"])
+        self.assertIn("[3] 本书此前资料", captured[1]["content"])
+        message = result["messages"][-1]
+        self.assertEqual(message["status"], "stopped")
+        self.assertEqual(message["content"], "保留这段尚未完成的回答")
+        self.assertEqual(message["references"][0]["number"], 3)
+        self.assertEqual(
+            tutor.conversation(result["id"], book["id"])["messages"][-1]["references"][
+                0
+            ]["position"],
+            {"index": 1},
+        )
+        self.assertFalse(tutor.ACTIVE)
+        self.assertFalse(tutor.CANCELLATIONS)
 
 
 if __name__ == "__main__":

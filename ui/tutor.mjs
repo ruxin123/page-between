@@ -38,10 +38,10 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
           if (message.role === "user")
             return `<article class="ai-message ai-user"><small>你</small><div>${escapeHTML(message.content)}</div></article>`;
           if (message.status === "generating")
-            return '<article class="ai-message"><small>AI</small><p role="status">正在理解原文并生成回答…</p></article>';
-          if (message.status === "error")
-            return `<article class="ai-message ai-error"><small>本次未完成</small><p>${escapeHTML(message.error)}</p>${index === active.messages.length - 1 ? '<button class="secondary-button" data-ai-retry>重新生成</button>' : ""}</article>`;
-          return `<article class="ai-message"><small>AI</small><div class="ai-answer">${message.html || escapeHTML(message.content)}</div></article>`;
+            return `<article class="ai-message"><small>AI · 正在生成</small>${references(message, index)}<div class="ai-stream">${escapeHTML(message.content || "正在检索原文并组织回答…")}</div></article>`;
+          if (message.status === "error" || message.status === "stopped")
+            return `<article class="ai-message ai-error"><small>${message.status === "stopped" ? "已停止" : "本次未完成"}</small><p>${escapeHTML(message.error)}</p><div class="ai-answer">${message.html || escapeHTML(message.content)}</div>${references(message, index)}${index === active.messages.length - 1 ? '<button class="secondary-button" data-ai-retry>重新生成</button>' : ""}</article>`;
+          return `<article class="ai-message"><small>AI</small><div class="ai-answer">${message.html || escapeHTML(message.content)}</div>${references(message, index)}</article>`;
         })
         .join("");
     $("ai-submit").disabled =
@@ -51,12 +51,30 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
       : active
         ? "继续提问"
         : "发送提问";
-    $("ai-progress").hidden = !pending;
+    const generating = active?.messages.at(-1)?.status === "generating";
+    $("ai-stop").hidden = !generating;
+    $("ai-progress").hidden = !pending && !generating;
     if (
       active?.messages.at(-1)?.status === "generating" &&
       !$("question-panel").hidden
     )
       pollAnswer();
+  }
+  function references(message, messageIndex) {
+    const status = message.indexStatus;
+    return (
+      (message.indexWarning
+        ? `<p class="setting-note">${escapeHTML(message.indexWarning)}</p>`
+        : status
+          ? `<p class="setting-note">此前资料 · 可检索 ${status.covered} / ${status.total} ${escapeHTML(status.unit)}${status.partial ? "，未解析页未纳入" : ""}</p>`
+          : "") +
+      (message.references || [])
+        .map(
+          (source, index) =>
+            `<button class="ai-reference" data-ai-reference="${messageIndex}:${index}" title="预览并前往来源">[${source.number}] ${escapeHTML(source.label || source.citation)}</button>`,
+        )
+        .join("")
+    );
   }
   function pollAnswer() {
     const version = revision,
@@ -68,12 +86,11 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
         const data = await api(url(ident));
         if (version !== revision) return;
         active = data.conversation;
-        if (active.messages.at(-1)?.status === "generating") pollAnswer();
-        else showConversation();
+        showConversation();
       } catch {
         if (version === revision) pollAnswer();
       }
-    }, 1500);
+    }, 600);
   }
   async function configuration() {
     try {
@@ -122,7 +139,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
         ? data.conversations
             .map(
               (item) =>
-                `<button class="ai-history-item" data-ai-conversation="${escapeHTML(item.id)}"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.citation)}</span><small>${item.status === "generating" ? "生成中" : item.status === "error" ? "可重新生成" : "已保存"}</small></button>`,
+                `<button class="ai-history-item" data-ai-conversation="${escapeHTML(item.id)}"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.citation)}</span><small>${item.status === "generating" ? "生成中" : item.status === "error" ? "可重新生成" : item.status === "stopped" ? "已停止" : "已保存"}</small></button>`,
             )
             .join("")
         : '<div class="empty-state">这本书还没有对话。选中原文提问，或围绕当前页开始。</div>';
@@ -171,14 +188,15 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     pending = true;
     showConversation();
     $("ai-progress").textContent =
-      "正在生成，可以关闭面板继续阅读；回答完成后会保存在本书记录中。";
+      "回答逐段显示，可停止或继续阅读；内容与引用保存在本书记录中。";
     try {
-      const data = await post("/api/ai/ask", {
+      const data = await post("/api/ai/start", {
         book,
         conversation: active?.id,
         source,
         question,
         retry,
+        previousKnowledge: $("ai-previous-knowledge").checked,
       });
       if (
         sendingBook === book &&
@@ -216,6 +234,49 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
   $("ai-messages").onclick = (event) => {
     if (event.target.closest("[data-ai-retry]"))
       send(true).catch((error) => toast(error.message, { kind: "error" }));
+    const button = event.target.closest("[data-ai-reference]");
+    if (button) {
+      const [message, index] = button.dataset.aiReference
+        .split(":")
+        .map(Number);
+      const source = active?.messages[message]?.references?.[index];
+      if (!source) return;
+      let preview = button.nextElementSibling;
+      if (preview?.classList.contains("ai-reference-preview")) {
+        preview.remove();
+        return;
+      }
+      preview = document.createElement("div");
+      preview.className = "ai-reference-preview";
+      const text = document.createElement("p");
+      text.textContent = source.text;
+      const jump = document.createElement("button");
+      jump.className = "secondary-button";
+      jump.textContent = "前往原文";
+      jump.onclick = () => {
+        $("question-panel").hidden = true;
+        openSource(book, source.position);
+      };
+      preview.append(text, jump);
+      button.after(preview);
+    }
+  };
+  $("ai-stop").onclick = async () => {
+    if (!active) return;
+    const ident = active.id,
+      version = revision;
+    $("ai-stop").disabled = true;
+    try {
+      const data = await post("/api/ai/cancel", { book, conversation: ident });
+      if (version === revision && active?.id === ident) {
+        active = data.conversation;
+        showConversation();
+      }
+    } catch (error) {
+      toast(error.message, { kind: "error" });
+    } finally {
+      $("ai-stop").disabled = false;
+    }
   };
   $("ai-history-list").onclick = (event) => {
     const button = event.target.closest("[data-ai-conversation]");

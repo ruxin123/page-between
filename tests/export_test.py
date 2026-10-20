@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,6 +13,7 @@ import book_import
 import epub_export
 from scripts.create_demo import make_epub, make_pdf, make_scan
 from storage import save
+from lxml import etree
 
 
 class Export(unittest.TestCase):
@@ -31,14 +34,98 @@ class Export(unittest.TestCase):
         self.temp.cleanup()
 
     def output(self, result):
-        return self.root / "cache/exports" / result["id"]
+        target = self.root / "cache/exports" / result["id"]
+        checker = os.environ.get("EPUBCHECK_JAR")
+        if checker:
+            checked = subprocess.run(
+                ["java", "-jar", checker, str(target), "--failonwarnings"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        return target
 
-    def test_native_epub_is_preserved_and_text_export_has_real_chapters(self):
+    def test_legacy_package_is_repaired_without_changing_original_or_content(self):
+        source = self.root / "legacy.epub"
+        make_epub(source)
+        with zipfile.ZipFile(source) as archive:
+            content = {name: archive.read(name) for name in archive.namelist()}
+        content["META-INF/container.xml"] = (
+            content["META-INF/container.xml"]
+            .replace(b' version="1.0"', b"")
+            .replace(b' media-type="application/oebps-package+xml"', b"")
+        )
+        content["OPS/book.opf"] = (
+            content["OPS/book.opf"]
+            .replace(
+                b'<meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>', b""
+            )
+            .replace(b' properties="mathml"', b"")
+        )
+        with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, body in content.items():
+                archive.writestr(name, body)
+        original = source.read_bytes()
+        book = book_import.import_book(source)
+        result = epub_export.build(book)
+        self.assertTrue(result["compatibilityUpdated"])
+        self.assertEqual(source.read_bytes(), original)
+        self.assertEqual(
+            book_import.path_for(book["originalUrl"]).read_bytes(), original
+        )
+        output = self.output(result)
+        with zipfile.ZipFile(output) as archive:
+            self.assertEqual(archive.infolist()[0].filename, "mimetype")
+            self.assertEqual(archive.infolist()[0].compress_type, zipfile.ZIP_STORED)
+            self.assertFalse(archive.infolist()[0].extra)
+            for name, body in content.items():
+                if name not in {"META-INF/container.xml", "OPS/book.opf"}:
+                    self.assertEqual(archive.read(name), body)
+            package = etree.fromstring(archive.read("OPS/book.opf"))
+            self.assertEqual(
+                len(
+                    package.xpath(
+                        '//*[local-name()="meta"][@property="dcterms:modified"]'
+                    )
+                ),
+                1,
+            )
+            self.assertTrue(
+                package.xpath(
+                    '//*[local-name()="item"][@id="chapter-2"][@properties="mathml"]'
+                )
+            )
+        completed = output.read_bytes()
+        self.assertFalse(epub_export.complete_package(output))
+        self.assertEqual(output.read_bytes(), completed)
+
+    def test_broken_native_package_is_not_published_as_a_successful_export(self):
         source = self.root / "sample.epub"
         make_epub(source)
         book = book_import.import_book(source)
-        result = epub_export.build(book)
-        self.assertEqual(self.output(result).read_bytes(), source.read_bytes())
+        original = book_import.path_for(book["originalUrl"])
+        with zipfile.ZipFile(original) as archive:
+            content = {
+                name: archive.read(name)
+                for name in archive.namelist()
+                if name != "OPS/nav.xhtml"
+            }
+        with zipfile.ZipFile(original, "w") as archive:
+            for name, body in content.items():
+                archive.writestr(name, body)
+        with self.assertRaisesRegex(ValueError, "缺少正文或目录资源"):
+            epub_export.build(book)
+        self.assertEqual(list((self.root / "cache/exports").glob("*")), [])
+
+    def test_native_epub_is_preserved_and_text_export_has_real_chapters(self):
+        source = self.root / "sample.epub"
+        for language in ("zh", "en"):
+            make_epub(source, language=language)
+            book = book_import.import_book(source)
+            result = epub_export.build(book)
+            self.assertFalse(result["compatibilityUpdated"])
+            self.assertEqual(self.output(result).read_bytes(), source.read_bytes())
         source = self.root / "novel.txt"
         source.write_text(
             "第一章 起点\n\n这是第一章，价格 $100。\n\n第二章 继续\n\n这是第二章。"
@@ -65,6 +152,9 @@ class Export(unittest.TestCase):
         fixture = json.loads(
             (book_import.ROOT / "scripts/demo-enhancement.json").read_text()
         )
+        fixture["2"]["blocks"][2]["text"] = (
+            "Using Definition 1.1, compare the following values."
+        )
         save(self.root / "books" / book["id"] / "enhancement.json", fixture)
         book["enrichmentUrl"] = book_import.url_for(
             self.root / "books" / book["id"] / "enhancement.json"
@@ -81,6 +171,8 @@ class Export(unittest.TestCase):
             self.assertIn("<table", content)
             self.assertIn("<img", content)
             self.assertIn("pdf-page-2", content)
+            self.assertIn('id="p1-b2"', content)
+            self.assertIn('href="ch001.xhtml#p1-b2"', content)
             self.assertEqual(
                 json.loads(archive.read("META-INF/page-between.json"))["sourceHash"],
                 book["sourceHash"],

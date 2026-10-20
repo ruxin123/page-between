@@ -2,6 +2,7 @@
 
 import html
 import json
+import posixpath
 import re
 import shutil
 import subprocess
@@ -9,7 +10,9 @@ import tempfile
 import uuid
 import zipfile
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from lxml import etree
 from pypdf import PdfReader
@@ -19,6 +22,150 @@ from book_index import REFERENCE, references
 from paths import CACHE
 from pdf_enhancement import enrichment_data, PDF_LOCK, open_pdf
 from storage import load
+
+
+def complete_package(path):
+    """Check local package links and fill missing packaging metadata, not book content.
+
+    This is an export preflight, not a replacement for EPUBCheck. A compliant native
+    book stays byte-for-byte unchanged. Repairs only affect the exported copy.
+    """
+    container_ns = "urn:oasis:names:tc:opendocument:xmlns:container"
+    opf_ns = "http://www.idpf.org/2007/opf"
+    xml = etree.XMLParser(resolve_entities=False, no_network=True)
+    replacements = {}
+    temporary = path.with_suffix(".packaging.tmp")
+    try:
+        with zipfile.ZipFile(path) as source:
+            entries = source.infolist()
+            names = {item.filename for item in entries}
+            if len(names) != len(entries):
+                raise ValueError("EPUB 包内存在重复文件，无法安全导出。")
+
+            def read_xml(name):
+                return etree.fromstring(source.read(name), xml)
+
+            def local_resource(base, href):
+                link = urlsplit(href or "")
+                if link.scheme or link.netloc or link.path.startswith("/"):
+                    raise ValueError("EPUB 正文入口必须是包内文件。")
+                name = posixpath.normpath(posixpath.join(base, unquote(link.path)))
+                if name.startswith("../") or name not in names:
+                    raise ValueError("EPUB 缺少正文或目录资源，无法导出完整副本。")
+                return name
+
+            container = read_xml("META-INF/container.xml")
+            if container.tag != f"{{{container_ns}}}container":
+                raise ValueError("EPUB 容器格式无法读取。")
+            changed = False
+            if not container.get("version"):
+                container.set("version", "1.0")
+                changed = True
+            roots = container.findall(
+                f"{{{container_ns}}}rootfiles/{{{container_ns}}}rootfile"
+            )
+            if not roots:
+                raise ValueError("EPUB 缺少正文入口。")
+            packages = 0
+            for root in roots:
+                if not root.get("media-type"):
+                    root.set("media-type", "application/oebps-package+xml")
+                    changed = True
+                if root.get("media-type") != "application/oebps-package+xml":
+                    continue
+                packages += 1
+                name = local_resource("", root.get("full-path"))
+                package = read_xml(name)
+                if package.tag != f"{{{opf_ns}}}package":
+                    raise ValueError("EPUB 出版信息无法读取。")
+                metadata = package.find(f"{{{opf_ns}}}metadata")
+                manifest = package.find(f"{{{opf_ns}}}manifest")
+                spine = package.find(f"{{{opf_ns}}}spine")
+                if (
+                    metadata is None
+                    or manifest is None
+                    or spine is None
+                    or not len(spine)
+                ):
+                    raise ValueError("EPUB 缺少出版信息或阅读顺序。")
+                items = {item.get("id"): item for item in manifest}
+                for item in spine:
+                    if item.get("idref") not in items:
+                        raise ValueError("EPUB 阅读顺序引用了缺失的章节。")
+                package_changed = False
+                epub3 = package.get("version", "").startswith("3.")
+                if epub3 and not metadata.findall(
+                    f"{{{opf_ns}}}meta[@property='dcterms:modified']"
+                ):
+                    modified = etree.SubElement(
+                        metadata, f"{{{opf_ns}}}meta", property="dcterms:modified"
+                    )
+                    modified.text = datetime.now(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    )
+                    package_changed = True
+                for item in manifest:
+                    if item.get("media-type") != "application/xhtml+xml":
+                        continue
+                    chapter = read_xml(
+                        local_resource(posixpath.dirname(name), item.get("href"))
+                    )
+                    if epub3:
+                        properties = item.get("properties", "").split()
+                        for flag, namespace in (
+                            ("mathml", "http://www.w3.org/1998/Math/MathML"),
+                            ("svg", "http://www.w3.org/2000/svg"),
+                        ):
+                            if flag not in properties and chapter.xpath(
+                                "boolean(//*[namespace-uri()=$ns])", ns=namespace
+                            ):
+                                properties.append(flag)
+                                item.set("properties", " ".join(properties))
+                                package_changed = True
+                if package_changed:
+                    replacements[name] = etree.tostring(
+                        package, encoding="UTF-8", xml_declaration=True
+                    )
+            if not packages:
+                raise ValueError("EPUB 容器没有声明可读取的正文入口。")
+            if changed:
+                replacements["META-INF/container.xml"] = etree.tostring(
+                    container, encoding="UTF-8", xml_declaration=True
+                )
+            mimetype_ok = (
+                bool(entries)
+                and entries[0].filename == "mimetype"
+                and entries[0].compress_type == zipfile.ZIP_STORED
+                and not entries[0].extra
+                and source.read("mimetype") == b"application/epub+zip"
+            )
+            if not replacements and mimetype_ok:
+                return False
+            if "META-INF/signatures.xml" in names:
+                raise ValueError("此 EPUB 带有数字签名，无法自动调整其出版信息。")
+            with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as target:
+                target.writestr(
+                    "mimetype",
+                    b"application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED,
+                )
+                for item in entries:
+                    if item.filename == "mimetype":
+                        continue
+                    if item.filename in replacements:
+                        target.writestr(item, replacements[item.filename])
+                    else:
+                        with (
+                            source.open(item) as incoming,
+                            target.open(item, "w") as outgoing,
+                        ):
+                            shutil.copyfileobj(incoming, outgoing)
+        temporary.replace(path)
+        return True
+    except (KeyError, etree.XMLSyntaxError, zipfile.BadZipFile):
+        raise ValueError("EPUB 包结构不完整，无法导出；请检查原文件。") from None
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def filename(title, extension):
@@ -170,12 +317,18 @@ def build(book, pages=None):
     ident = uuid.uuid4().hex
     output = directory / (ident + ".epub")
     if book["type"] == "epub" and package_original(book, output):
+        try:
+            compatibility_updated = complete_package(output)
+        except (ValueError, OSError):
+            output.unlink(missing_ok=True)
+            raise
         return {
             "id": output.name,
             "name": filename(book["title"], ".epub"),
             "fallbackPages": [],
             "fallbackObjects": 0,
             "pages": 0,
+            "compatibilityUpdated": compatibility_updated,
         }
     pandoc = shutil.which("pandoc")
     if not pandoc:
@@ -387,6 +540,7 @@ def build(book, pages=None):
                         ensure_ascii=False,
                     ),
                 )
+        compatibility_updated = complete_package(work / "result.epub")
         shutil.move(work / "result.epub", output)
     return {
         "id": output.name,
@@ -394,4 +548,5 @@ def build(book, pages=None):
         "fallbackPages": fallback,
         "fallbackObjects": fallback_objects,
         "pages": len(pages or []),
+        "compatibilityUpdated": compatibility_updated,
     }

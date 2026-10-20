@@ -71,7 +71,9 @@ export function createBookExport({ post, getBook, toast }) {
         ? `已准备 EPUB，其中 ${result.fallbackPages.length} 页保留原图。`
         : result.fallbackObjects
           ? `EPUB 已准备，其中 ${result.fallbackObjects} 个复杂区块保留原图。`
-          : "EPUB 已准备，可以保存。";
+          : result.compatibilityUpdated
+            ? "EPUB 已准备，已保留正文与目录并补齐兼容信息，可以保存。"
+            : "EPUB 已准备，可以保存。";
     } catch (error) {
       $("export-status").textContent = error.message;
     } finally {

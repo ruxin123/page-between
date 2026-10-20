@@ -326,7 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     guard
       path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup)$", options: .regularExpression)
         != nil,
-      let base = base, let url = URL(string: path, relativeTo: base)?.absoluteURL
+      base != nil
     else { return }
     let panel = NSSavePanel()
     panel.title = "保存导出文件"
@@ -336,21 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       guard response == .OK, let destination = panel.url, let self = self else { return }
       Task { @MainActor in
         do {
-          var request = self.request(url)
-          request.timeoutInterval = 300
-          let (temporary, response) = try await URLSession.shared.download(for: request)
-          guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw NSError(domain: "Export", code: 1)
-          }
-          let staged = destination.deletingLastPathComponent().appendingPathComponent(
-            "." + UUID().uuidString + ".download")
-          defer { try? FileManager.default.removeItem(at: staged) }
-          try FileManager.default.copyItem(at: temporary, to: staged)
-          if FileManager.default.fileExists(atPath: destination.path) {
-            _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged)
-          } else {
-            try FileManager.default.moveItem(at: staged, to: destination)
-          }
+          try await self.writeExport(path: path, destination: destination)
           _ = try? await self.web.evaluateJavaScript(
             "window.dispatchEvent(new Event('native-file-saved'))")
         } catch {
@@ -360,6 +346,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
           await alert.beginSheetModal(for: self.window)
         }
       }
+    }
+  }
+
+  func writeExport(path: String, destination: URL) async throws {
+    guard destination.isFileURL,
+      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup)$", options: .regularExpression)
+        != nil,
+      let base = base, let url = URL(string: path, relativeTo: base)?.absoluteURL
+    else {
+      throw NSError(domain: "Export", code: 0)
+    }
+    var request = self.request(url)
+    request.timeoutInterval = 300
+    let (temporary, response) = try await URLSession.shared.download(for: request)
+    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+      throw NSError(domain: "Export", code: 1)
+    }
+    let staged = destination.deletingLastPathComponent().appendingPathComponent(
+      "." + UUID().uuidString + ".download")
+    defer { try? FileManager.default.removeItem(at: staged) }
+    try FileManager.default.copyItem(at: temporary, to: staged)
+    if FileManager.default.fileExists(atPath: destination.path) {
+      _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged)
+    } else {
+      try FileManager.default.moveItem(at: staged, to: destination)
     }
   }
 

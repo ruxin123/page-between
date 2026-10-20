@@ -41,7 +41,7 @@ def make_epub(path, label="示例书籍 A", language="zh"):
     english = language == "en"
     paragraphs = ENGLISH if english else PARAGRAPHS
     files = {
-        "META-INF/container.xml": '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>',
+        "META-INF/container.xml": '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>',
         "OPS/style.css": "body{font-family:serif}h1{font-size:1.45em;font-weight:normal;margin:0 0 1.4em}p{margin:0 0 1em;text-align:justify}a{color:#537d68}figure{margin:1.4em 0}figcaption{font-size:.65em;text-align:center;opacity:.6}table{border-collapse:collapse;width:100%;font-size:.8em}td,th{padding:.6em;border-bottom:1px solid #aab9ad}math{margin:1.1em auto}",
         "OPS/cover.svg": cover_svg(
             "EPUB · D" if english else "EPUB · A",
@@ -100,12 +100,14 @@ def make_epub(path, label="示例书籍 A", language="zh"):
         + "</ol></nav></body></html>"
     )
     manifest = "".join(
-        f'<item id="chapter-{i}" href="chapter-{i}.xhtml" media-type="application/xhtml+xml"/>'
+        f'<item id="chapter-{i}" href="chapter-{i}.xhtml" media-type="application/xhtml+xml"'
+        + (' properties="mathml"' if i == 2 else "")
+        + "/>"
         for i in range(1, 7)
     )
     spine = "".join(f'<itemref idref="chapter-{i}"/>' for i in range(1, 7))
     files["OPS/book.opf"] = (
-        f'<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">page-between-original-demo-{language}</dc:identifier><dc:title>{escape(label)}</dc:title><dc:creator>演示作者</dc:creator><dc:language>{language}</dc:language></metadata><manifest><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="cover-image" href="cover.svg" media-type="image/svg+xml" properties="cover-image"/><item id="figure" href="figure.svg" media-type="image/svg+xml"/><item id="style" href="style.css" media-type="text/css"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="notes" href="notes.xhtml" media-type="application/xhtml+xml"/>{manifest}</manifest><spine><itemref idref="cover"/>{spine}<itemref idref="notes" linear="no"/></spine></package>'
+        f'<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">page-between-original-demo-{language}</dc:identifier><dc:title>{escape(label)}</dc:title><dc:creator>演示作者</dc:creator><dc:language>{language}</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta></metadata><manifest><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="cover-image" href="cover.svg" media-type="image/svg+xml" properties="cover-image"/><item id="figure" href="figure.svg" media-type="image/svg+xml"/><item id="style" href="style.css" media-type="text/css"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="notes" href="notes.xhtml" media-type="application/xhtml+xml"/>{manifest}</manifest><spine><itemref idref="cover"/>{spine}<itemref idref="notes" linear="no"/></spine></package>'
     )
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(

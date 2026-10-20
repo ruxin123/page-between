@@ -12,10 +12,13 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 
-def verify(app):
+def verify(app, epubcheck=None):
     app = app.resolve()
+    if epubcheck is not None:
+        epubcheck = epubcheck.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="page-between-app-check-") as temporary:
         root = Path(temporary).resolve()
         session = "SyntheticVerificationSession2026"
@@ -87,6 +90,50 @@ def verify(app):
                     ) from None
                 raise
 
+        def check_epub(body, name):
+            with zipfile.ZipFile(io.BytesIO(body)) as archive:
+                first = archive.infolist()[0]
+                assert (
+                    first.filename == "mimetype"
+                    and first.compress_type == zipfile.ZIP_STORED
+                )
+                assert (
+                    not first.extra and archive.read(first) == b"application/epub+zip"
+                )
+                container = ET.fromstring(archive.read("META-INF/container.xml"))
+                assert container.get("version") == "1.0"
+                package = container.find("{*}rootfiles/{*}rootfile")
+                assert package.get("media-type") == "application/oebps-package+xml"
+                metadata = ET.fromstring(archive.read(package.get("full-path")))
+                assert (
+                    len(
+                        metadata.findall(
+                            "{*}metadata/{*}meta[@property='dcterms:modified']"
+                        )
+                    )
+                    == 1
+                )
+            if epubcheck is not None:
+                path = root / (name + ".epub")
+                path.write_bytes(body)
+                checked = subprocess.run(
+                    ["java", "-jar", str(epubcheck), str(path), "--failonwarnings"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                assert checked.returncode == 0, checked.stdout + checked.stderr
+
+        def export_epub(ident):
+            prepared = json.loads(
+                request(
+                    "/api/export/epub",
+                    json.dumps({"book": ident}).encode(),
+                    content_type="application/json",
+                )[2]
+            )
+            return prepared, request(prepared["download"])[2]
+
         try:
             base = start()
             assert request("/api/health", authenticated=False)[0] == 200
@@ -115,6 +162,36 @@ def verify(app):
             ]
             assert len(book["chapters"]) == 2
             assert "😀" in json.loads(request(book["contentUrl"])[2])[0]["body"]
+            check_epub(export_epub(book["id"])[1], "text")
+            for ident in ("demo-a", "demo-d"):
+                result, body = export_epub(ident)
+                assert not result["compatibilityUpdated"]
+                check_epub(body, ident)
+            # Reproduce an existing 0.4.0 demo library, not just fresh fixtures.
+            legacy = io.BytesIO()
+            with (
+                zipfile.ZipFile(io.BytesIO(export_epub("demo-a")[1])) as source,
+                zipfile.ZipFile(legacy, "w", zipfile.ZIP_DEFLATED) as target,
+            ):
+                for item in source.infolist():
+                    body = source.read(item)
+                    if item.filename == "META-INF/container.xml":
+                        body = body.replace(b' version="1.0"', b"").replace(
+                            b' media-type="application/oebps-package+xml"', b""
+                        )
+                    if item.filename == "OPS/book.opf":
+                        body = body.replace(
+                            b'<meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>',
+                            b"",
+                        ).replace(b' properties="mathml"', b"")
+                    target.writestr(item.filename, body)
+            legacy_book = json.loads(
+                request("/api/import?name=legacy.epub&parse=0", legacy.getvalue())[2]
+            )["book"]
+            repaired, body = export_epub(legacy_book["id"])
+            assert repaired["compatibilityUpdated"]
+            check_epub(body, "legacy-repaired")
+            assert request(legacy_book["originalUrl"])[2] == legacy.getvalue()
             ocr = json.loads(request("/api/ocr?book=demo-e&page=1")[2])
             assert ocr["lines"] and ocr["engine"] == "tesseract-eng"
             search = json.loads(
@@ -142,6 +219,7 @@ def verify(app):
                 )[2]
             )
             epub = request(export["download"])[2]
+            check_epub(epub, "pdf-reflow")
             with zipfile.ZipFile(io.BytesIO(epub)) as archive:
                 text = "".join(
                     archive.read(name).decode()
@@ -173,7 +251,7 @@ def verify(app):
             process.wait(timeout=10)
             base = start()
             assert json.loads(request("/api/state")[2])["prefs"]["fontSize"] == 23
-            assert len(json.loads(request("/api/library")[2])["books"]) == 7
+            assert len(json.loads(request("/api/library")[2])["books"]) == 8
             information = json.loads(request("/api/data/info")[2])
             assert (
                 information["lastRestore"]["restored"]
@@ -192,6 +270,9 @@ def verify(app):
                 "restartPersistence": True,
                 "bookSearch": True,
                 "epubExport": True,
+                "legacyEpubRepair": True,
+                "epubPackaging": True,
+                "epubcheck": epubcheck is not None,
                 "originalPageMapping": True,
                 "verifiedBackupRestore": True,
                 "signature": "ad-hoc verified",
@@ -206,4 +287,10 @@ def verify(app):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
-    print(json.dumps(verify(parser.parse_args().app), ensure_ascii=False))
+    parser.add_argument(
+        "--epubcheck",
+        type=Path,
+        help="EPUBCheck JAR; reject errors and warnings in actual frozen exports",
+    )
+    args = parser.parse_args()
+    print(json.dumps(verify(args.app, args.epubcheck), ensure_ascii=False))

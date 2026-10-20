@@ -10,7 +10,7 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（前端 2.19）
+## macOS App 构建（0.4.1 / 前端 2.20）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -19,6 +19,8 @@ python -m pip install -r requirements-build.txt
 python scripts/build_app.py
 # 匿名演示：python scripts/build_app.py --demo
 python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app"
+# 发布前另下载官方 EPUBCheck，并验证实际安装包的各条导出路径：
+python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app" --epubcheck /path/to/epubcheck.jar
 ```
 
 构建结果默认位于用户的 `Library/Caches/Page Between/build/`。当前在 Apple Silicon、macOS 27.0.1 验证，签名为本机构建的 ad-hoc 签名；其他系统版本和正式分发尚待验收。旧书库可使用 `python scripts/migrate_library.py data` 复制到安装版，已有目标不会覆盖，原目录保留。
@@ -117,6 +119,10 @@ MinerU 页面可保存云 API v4 的地址、Token 与解析模型。「检查�
 ## 导出与书库备份（2.19）
 
 书籍设置中可以「导出 EPUB」。原生 EPUB 保留原书副本；TXT 导出章节；PDF 可以选择页段或整本，把已解析内容转为正文、MathML 公式、表格和插图。尚无文字的扫描页和无法排版的复杂公式保留原图。导出的 EPUB 重新导入后，在原 PDF 仍在书库时可一键查看对应原页，并返回继续阅读。
+
+0.4.1 修复旧演示 EPUB 缺少容器类型、修改日期和 MathML 声明导致 Apple 图书无法读取的问题。导出前检查正文 / 目录入口，按需补齐副本的包信息和 ZIP 类型项，正文、插图与原文件保持不变；缺失正文资源会明确报错。符合这些检查的原生 EPUB 仍逐字节保留，不强制重排。应用内的结构预检不等同于完整标准校验；发布验证另外使用 [EPUBCheck](https://www.w3.org/publishing/epubcheck/)，不要求使用者安装 Java。
+
+源码导出回归也可启用同一检查器：`EPUBCHECK_JAR=/path/to/epubcheck.jar python -m unittest discover -s tests -p 'export_test.py' -v`。它覆盖中英文示例、旧包修复、TXT、MathML / 表格 / 原图回退，遇到校验错误或警告即失败。
 
 「设置 → 书库与数据」提供完整备份、恢复校验、取消、确认后重启恢复，以及找回恢复前的书库。备份包含图书与阅读积累，凭据继续留在本机钥匙串。未确认的备份不会在重启时启用；恢复失败保留原书库。
 

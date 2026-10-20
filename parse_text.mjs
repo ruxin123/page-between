@@ -11,6 +11,8 @@ const chapters = enabled
         body: normalized.trim(),
         volume: "",
         sourceOffset: normalized.indexOf(normalized.trim()),
+        sourceEnd:
+          normalized.indexOf(normalized.trim()) + normalized.trim().length,
       },
     ];
 process.stdout.write(

@@ -7,16 +7,69 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import book_import
+from scripts import create_demo as demo
+from storage import load, save
 from scripts.create_demo import make_epub, make_pdf, make_scan
 from scripts.check_publication import findings
 from pypdf import PdfReader
 
 
 class ReviewMaterial(unittest.TestCase):
+    def test_old_owned_review_examples_gain_objects_without_replacing_reading_records(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with (
+                patch.object(demo, "DATA", root),
+                patch.object(demo, "DEMO", True),
+                patch.object(book_import, "BOOK_ROOT", root / "books"),
+            ):
+                demo.prepare()
+                collection = load(root / "library.json", {})
+                for book in collection["books"]:
+                    if book["id"] in {"demo-c", "demo-e"}:
+                        for field in (
+                            "enrichmentUrl",
+                            "enhancedPages",
+                            "demoEnhancement",
+                        ):
+                            book.pop(field, None)
+                        book["title"] = "用户调整的示例名称"
+                save(root / "library.json", collection)
+                state = (root / "state.json").read_bytes()
+                originals = {
+                    p: p.read_bytes() for p in (root / "books").glob("*/original.*")
+                }
+                self.assertEqual(demo.upgrade(), 2)
+                self.assertEqual(demo.upgrade(), 0)
+                self.assertEqual((root / "state.json").read_bytes(), state)
+                self.assertTrue(
+                    all(path.read_bytes() == body for path, body in originals.items())
+                )
+                books = load(root / "library.json", {})["books"]
+                self.assertTrue(
+                    all(
+                        book["demoEnhancement"]
+                        and book["title"] == "用户调整的示例名称"
+                        for book in books
+                        if book["id"] in {"demo-c", "demo-e"}
+                    )
+                )
+                collection = load(root / "library.json", {})
+                for book in collection["books"]:
+                    if book["id"] in {"demo-c", "demo-e"}:
+                        book.pop("enrichmentUrl")
+                        if book["id"] == "demo-c":
+                            book["sourceHash"] = "0" * 64
+                collection["jobs"] = [
+                    {"book": "demo-e", "kind": "mineru", "status": "paused"}
+                ]
+                save(root / "library.json", collection)
+                self.assertEqual(demo.upgrade(), 0)
+
     def test_generated_epub_keeps_images_math_and_non_linear_notes(self):
-        with tempfile.TemporaryDirectory(
-            dir=book_import.ROOT / "tmp", ignore_cleanup_errors=True
-        ) as folder:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
             root = Path(folder)
             source = root / "sample.epub"
             make_epub(source)

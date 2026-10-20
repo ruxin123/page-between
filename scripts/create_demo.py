@@ -1,13 +1,16 @@
 """Generate original, fictional material for screenshots and independent reviews."""
 
 import json
+import hashlib
+import tempfile
 import textwrap
 import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from book_import import import_book, url_for
+from book_import import import_book, url_for, path_for
 from paths import DATA, DEMO
+from storage import load, save
 
 
 PARAGRAPHS = [
@@ -189,6 +192,57 @@ def make_scan(source, destination):
         page.close()
     output.save()
     document.close()
+
+
+def upgrade():
+    """Only upgrade byte-verified, publisher-owned review PDFs in existing demo libraries."""
+    if not DEMO:
+        return 0
+    collection = load(DATA / "library.json", {"books": [], "jobs": []})
+    eligible = [
+        book
+        for book in collection["books"]
+        if book.get("id") in {"demo-c", "demo-e"}
+        and book.get("type") == "pdf"
+        and not book.get("enrichmentUrl")
+        and not any(
+            job.get("book") == book["id"] and job.get("kind") == "mineru"
+            for job in collection.get("jobs", [])
+        )
+    ]
+    if not eligible:
+        return 0
+    fixture = load(Path(__file__).with_name("demo-enhancement.json"), None)
+    if not fixture:
+        return 0
+    updated = 0
+    with tempfile.TemporaryDirectory(prefix=".demo-upgrade-", dir=DATA) as folder:
+        directory = Path(folder)
+        make_pdf(directory / "demo-c.pdf")
+        if any(book["id"] == "demo-e" for book in eligible):
+            make_scan(directory / "demo-c.pdf", directory / "demo-e.pdf")
+        for book in eligible:
+            source = directory / (book["id"] + ".pdf")
+            expected = hashlib.sha256(source.read_bytes()).hexdigest()
+            original = path_for(book["originalUrl"])
+            if (
+                not original.is_file()
+                or book.get("sourceHash") != expected
+                or hashlib.sha256(original.read_bytes()).hexdigest() != expected
+            ):
+                continue
+            target = original.parent / "demo-enhancement.json"
+            save(target, fixture)
+            book.update(
+                enrichmentUrl=url_for(target),
+                enhancedPages=[1, 2, 3, 4],
+                demoEnhancement=True,
+            )
+            save(original.parent / "book.json", book)
+            updated += 1
+    if updated:
+        save(DATA / "library.json", collection)
+    return updated
 
 
 def prepare():

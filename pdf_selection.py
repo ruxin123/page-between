@@ -62,6 +62,16 @@ def align_spans(spans, blocks):
         raise ValueError("页面文字层过大。")
     total = 0
     groups = {}
+    orders = {id(block): order for order, block in enumerate(blocks)}
+    for block in blocks:
+        if block.get("type") in {"equation", "table"} and block.get("text"):
+            groups[block.get("id") or str(block["bbox"])] = {
+                "text": block["text"],
+                "spans": [],
+                "whole": True,
+                "bbox": block["bbox"],
+                "order": orders[id(block)],
+            }
     for index, span in enumerate(spans):
         if not isinstance(span, dict) or not isinstance(span.get("text"), str):
             raise ValueError("页面文字层无效。")
@@ -81,7 +91,7 @@ def align_spans(spans, blocks):
         candidates = [
             block
             for block in blocks
-            if block.get("type") == "text"
+            if block.get("type") in {"text", "equation", "table"}
             and block.get("text")
             and block["bbox"][0] - 0.003 <= x <= block["bbox"][2] + 0.003
             and block["bbox"][1] - 0.003 <= y <= block["bbox"][3] + 0.003
@@ -93,12 +103,29 @@ def align_spans(spans, blocks):
             key=lambda b: (b["bbox"][2] - b["bbox"][0]) * (b["bbox"][3] - b["bbox"][1]),
         )
         key = block.get("id") or str(block["bbox"])
-        groups.setdefault(key, {"text": block["text"], "spans": []})["spans"].append(
-            (index, span["text"])
-        )
+        groups.setdefault(
+            key,
+            {
+                "text": block["text"],
+                "spans": [],
+                "whole": block.get("type") in {"equation", "table"},
+                "order": orders[id(block)],
+            },
+        )["spans"].append((index, span["text"]))
     result = []
-    for group in groups.values():
+    for group in sorted(groups.values(), key=lambda group: group["order"]):
         canonical = group["text"]
+        if group["whole"]:
+            result.append(
+                {
+                    "text": canonical,
+                    "whole": True,
+                    "spans": [{"index": index} for index, _ in group["spans"]],
+                    "bbox": group["bbox"],
+                    "order": group["order"],
+                }
+            )
+            continue
         mapping = character_map("".join(text for _, text in group["spans"]), canonical)
         if mapping is None:
             continue
@@ -110,6 +137,7 @@ def align_spans(spans, blocks):
         result.append(
             {
                 "text": canonical,
+                "order": group["order"],
                 "spans": mapped,
                 "math": [
                     [utf16(canonical[: m.start()]), utf16(canonical[: m.end()])]

@@ -1,16 +1,21 @@
 """Exercise the frozen service with isolated data and only the bundled tools on PATH."""
 
 import argparse
+import base64
 import io
 import json
 import os
 import queue
 import subprocess
+import struct
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -42,6 +47,7 @@ def verify(app, epubcheck=None):
         ):
             env.pop(name, None)
         process = None
+        provider = None
         log = (root / "service.log").open("w")
 
         def start():
@@ -72,7 +78,11 @@ def verify(app, epubcheck=None):
             return "http://127.0.0.1:" + str(value["port"])
 
         def request(
-            path, data=None, authenticated=True, content_type="application/octet-stream"
+            path,
+            data=None,
+            authenticated=True,
+            content_type="application/octet-stream",
+            expected_status=200,
         ):
             headers = {"X-Page-Between-Session": session} if authenticated else {}
             if data is not None:
@@ -84,6 +94,8 @@ def verify(app, epubcheck=None):
                 ) as response:
                     return response.status, response.headers, response.read()
             except urllib.error.HTTPError as error:
+                if error.code == expected_status:
+                    return error.code, error.headers, error.read()
                 if authenticated:
                     raise RuntimeError(
                         path + ": " + error.read().decode()[:1500]
@@ -162,6 +174,131 @@ def verify(app, epubcheck=None):
             ]
             assert len(book["chapters"]) == 2
             assert "😀" in json.loads(request(book["contentUrl"])[2])[0]["body"]
+            for _ in range(100):
+                book = next(
+                    item
+                    for item in json.loads(request("/api/library")[2])["books"]
+                    if item["id"] == book["id"]
+                )
+                if book["processing"] != "pending":
+                    break
+                time.sleep(0.1)
+            revision = book.get("structureRevision", "")
+            chapters_path = "/api/books/" + book["id"] + "/chapters"
+            book = json.loads(
+                request(
+                    chapters_path,
+                    json.dumps(
+                        {
+                            "action": "rename",
+                            "index": 1,
+                            "title": "原生章节调整验证",
+                            "revision": revision,
+                        }
+                    ).encode(),
+                    content_type="application/json",
+                )[2]
+            )["book"]
+            assert book["chapters"][0]["title"] == "原生章节调整验证"
+            assert (
+                request(
+                    chapters_path,
+                    json.dumps(
+                        {
+                            "action": "rename",
+                            "index": 1,
+                            "title": "旧窗口不应覆盖",
+                            "revision": revision,
+                        }
+                    ).encode(),
+                    content_type="application/json",
+                    expected_status=409,
+                )[0]
+                == 409
+            )
+
+            received = []
+
+            class ImageProvider(BaseHTTPRequestHandler):
+                def log_message(self, *args):
+                    pass
+
+                def do_POST(self):
+                    received.append(
+                        json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                    )
+                    body = '{"choices":[{"message":{"content":"Image transport verified. [1]"}}]}'.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+            provider = ThreadingHTTPServer(("127.0.0.1", 0), ImageProvider)
+            provider_thread = threading.Thread(
+                target=provider.serve_forever, daemon=True
+            )
+            provider_thread.start()
+            request(
+                "/api/settings/save",
+                json.dumps(
+                    {
+                        "service": "ai",
+                        "config": {
+                            "baseUrl": f"http://127.0.0.1:{provider.server_port}/v1",
+                            "model": "synthetic-vision",
+                            "supportsImages": True,
+                            "key": "",
+                        },
+                    }
+                ).encode(),
+                content_type="application/json",
+            )
+
+            # A valid noisy PNG exercises a real image request larger than the JSON default limit.
+            def chunk(kind, body):
+                return (
+                    struct.pack(">I", len(body))
+                    + kind
+                    + body
+                    + struct.pack(">I", zlib.crc32(kind + body))
+                )
+
+            pixels = b"".join(b"\x00" + os.urandom(1000 * 3) for _ in range(800))
+            png = (
+                b"\x89PNG\r\n\x1a\n"
+                + chunk(b"IHDR", struct.pack(">IIBBBBB", 1000, 800, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(pixels))
+                + chunk(b"IEND", b"")
+            )
+            image_payload = json.dumps(
+                {
+                    "book": book["id"],
+                    "question": "验证图像请求",
+                    "sendImage": True,
+                    "previousKnowledge": False,
+                    "source": {
+                        "quote": "",
+                        "context": "",
+                        "position": {"index": 1},
+                        "image": "data:image/png;base64,"
+                        + base64.b64encode(png).decode(),
+                    },
+                }
+            ).encode()
+            assert len(image_payload) > 2 * 1024**2
+            conversation = json.loads(
+                request("/api/ai/ask", image_payload, content_type="application/json")[
+                    2
+                ]
+            )["conversation"]
+            assert (
+                conversation["messages"][-1]["status"] == "ready"
+                and conversation["messages"][0]["imageAttached"]
+            )
+            assert received[0]["messages"][1]["content"][1]["type"] == "image_url"
+            image_url = conversation["source"]["image"]
+            image_bytes = request(image_url)[2]
             check_epub(export_epub(book["id"])[1], "text")
             for ident in ("demo-a", "demo-d"):
                 result, body = export_epub(ident)
@@ -252,11 +389,43 @@ def verify(app, epubcheck=None):
             base = start()
             assert json.loads(request("/api/state")[2])["prefs"]["fontSize"] == 23
             assert len(json.loads(request("/api/library")[2])["books"]) == 8
+            restored = json.loads(
+                request(
+                    "/api/ai/conversations?book="
+                    + book["id"]
+                    + "&id="
+                    + conversation["id"]
+                )[2]
+            )["conversation"]
+            assert (
+                restored["source"]["image"] == image_url
+                and request(image_url)[2] == image_bytes
+            )
             information = json.loads(request("/api/data/info")[2])
             assert (
                 information["lastRestore"]["restored"]
                 and information["previousAvailable"]
             )
+            process.terminate()
+            process.wait(timeout=10)
+            collection = json.loads((root / "Library/library.json").read_text())
+            before_state = (root / "Library/state.json").read_bytes()
+            for sample in collection["books"]:
+                if sample["id"] in {"demo-c", "demo-e"}:
+                    for field in ("enrichmentUrl", "enhancedPages", "demoEnhancement"):
+                        sample.pop(field, None)
+            (root / "Library/library.json").write_text(
+                json.dumps(collection, ensure_ascii=False)
+            )
+            base = start()
+            assert (root / "Library/state.json").read_bytes() == before_state
+            for ident in ("demo-c", "demo-e"):
+                blocks = json.loads(
+                    request("/api/enrichment?book=" + ident + "&page=1")[2]
+                )["blocks"]
+                assert {"equation", "table", "image"} <= {
+                    block["type"] for block in blocks
+                }
             subprocess.run(
                 ["codesign", "--verify", "--deep", "--strict", str(app)], check=True
             )
@@ -270,6 +439,10 @@ def verify(app, epubcheck=None):
                 "restartPersistence": True,
                 "bookSearch": True,
                 "epubExport": True,
+                "manualChapters": True,
+                "imageRequestOver2MB": True,
+                "imageBackupRestore": True,
+                "ownedDemoUpgrade": True,
                 "legacyEpubRepair": True,
                 "epubPackaging": True,
                 "epubcheck": epubcheck is not None,
@@ -282,6 +455,10 @@ def verify(app, epubcheck=None):
                 process.terminate()
                 process.wait(timeout=10)
             log.close()
+            if provider is not None:
+                provider.shutdown()
+                provider.server_close()
+                provider_thread.join()
 
 
 if __name__ == "__main__":

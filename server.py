@@ -43,6 +43,7 @@ import mineru_api
 import book_index
 import epub_export
 import library_data
+import chapter_edit
 
 MUTEX = threading.RLock()
 WORKERS = ThreadPoolExecutor(max_workers=2)
@@ -75,8 +76,8 @@ def update_book(ident, patch):
         data = library()
         book = next(book for book in data["books"] if book["id"] == ident)
         book.update(patch)
-        save(DATA / "library.json", data)
         save(BOOK_ROOT / ident / "book.json", book)
+        save(DATA / "library.json", data)
         return book
 
 
@@ -164,11 +165,33 @@ def start_job(ident, kind="local", pages=None, fresh=False):
             elif book["type"] == "txt":
                 while True:
                     book = book_for(ident)
-                    metadata = text_metadata(
-                        BOOK_ROOT / ident / ("original." + book["format"].lower()),
-                        BOOK_ROOT / ident,
-                        book["parseEnabled"],
+                    custom = (
+                        book.get("customContentsUrl") if book["parseEnabled"] else None
                     )
+                    if custom:
+                        metadata = chapter_edit.structure(
+                            load(path_for(custom), []), custom, True
+                        )
+                        metadata["language"] = book.get("language", "zh")
+                    else:
+                        with tempfile.TemporaryDirectory(
+                            prefix=".text-", dir=BOOK_ROOT / ident
+                        ) as temporary:
+                            metadata = text_metadata(
+                                BOOK_ROOT
+                                / ident
+                                / ("original." + book["format"].lower()),
+                                Path(temporary),
+                                book["parseEnabled"],
+                            )
+                            target = (
+                                BOOK_ROOT
+                                / ident
+                                / ("text-" + uuid.uuid4().hex + ".json")
+                            )
+                            (Path(temporary) / "text.json").replace(target)
+                            metadata["contentUrl"] = url_for(target)
+                        metadata["manualContents"] = False
                     with MUTEX:
                         if book_for(ident)["parseEnabled"] != book["parseEnabled"]:
                             continue
@@ -184,9 +207,15 @@ def start_job(ident, kind="local", pages=None, fresh=False):
                                     "language",
                                 ]
                             }
-                            | {"processing": "ready"},
+                            | {
+                                "processing": "ready",
+                                "manualContents": metadata["manualContents"],
+                                "lastRenderedContentUrl": book["contentUrl"],
+                                "structureRevision": uuid.uuid4().hex,
+                            },
                         )
                         break
+                chapter_edit.cleanup(book_for(ident))
                 phase("章节索引已更新。", "ready")
             else:
                 # Additional structure is derived without changing EPUB documents or native navigation.
@@ -576,7 +605,32 @@ class Handler(SimpleHTTPRequestHandler):
                         return self.json({"book": book})
                 finally:
                     shutil.rmtree(incoming, ignore_errors=True)
-            payload = json.loads(self.request_body())
+            payload = json.loads(
+                self.request_body(
+                    8 * 1024 * 1024
+                    if route.path in {"/api/ai/start", "/api/ai/ask"}
+                    else 2 * 1024 * 1024
+                )
+            )
+            if re.fullmatch(
+                r"/api/books/[A-Za-z0-9][A-Za-z0-9_-]{0,80}/chapters", route.path
+            ):
+                ident = route.path.split("/")[-2]
+                with MUTEX:
+                    book = book_for(ident)
+                    if not book:
+                        raise ValueError("找不到这本书。")
+                    if ident in RUNNING:
+                        return self.json(
+                            {"error": "这本书正在整理，请稍后再调整章节。"}, 409
+                        )
+                    if payload.get("revision", "") != book.get("structureRevision", ""):
+                        return self.json(
+                            {"error": "目录已在其他窗口更新，请重新打开后调整。"}, 409
+                        )
+                    updated = update_book(ident, chapter_edit.stage(book, payload))
+                    chapter_edit.cleanup(updated)
+                    return self.json({"book": updated})
             if route.path == "/api/data/backup":
                 with MUTEX, ai_tutor.LOCK:
                     snapshot = {
@@ -916,6 +970,13 @@ def main():
             prepare()
         else:
             save(DATA / "library.json", {"books": [], "jobs": []})
+    if DEMO:
+        from scripts.create_demo import upgrade
+
+        try:
+            upgrade()
+        except (OSError, ValueError):
+            print("演示增强资料暂未更新，已有书库保留。", file=sys.stderr)
     server = ReaderServer(
         ("127.0.0.1", arguments.port), partial(Handler, directory=str(ROOT))
     )

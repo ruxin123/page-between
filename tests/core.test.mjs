@@ -4,7 +4,14 @@ import {
   decodeBook,
   chapterProgress,
   shouldFollowPosition,
+  textChapterIndex,
+  sliceText,
 } from "../core.mjs";
+
+assert.equal(sliceText("a😀b", 0, 2), "a😀");
+assert.equal(sliceText("a😀b", 2, 4), "😀b");
+assert.equal(sliceText("a😀b", 2, 2), "");
+assert.equal(sliceText("a".repeat(59) + "😀后文", 0, 60).isWellFormed(), true);
 
 const positionChange = {
   revision: 4,
@@ -47,6 +54,25 @@ assert.equal(chapters[0].title, "卷首");
 assert.equal(chapters[1].body, "第一段");
 assert.equal(chapters[2].title, "第二章 来信");
 assert.equal(parseChapters("第一章介绍了集合。\n这是正文。").length, 1);
+assert.deepEqual(
+  parseChapters("第一章雨夜\n夜色。\n第二章来信\n来信。").map(
+    ({ title }) => title,
+  ),
+  ["第一章雨夜", "第二章来信"],
+);
+assert.equal(parseChapters("第一章雨夜\n\n正文。")[0].title, "第一章雨夜");
+const duplicateContents = parseChapters(
+  "目录\n第一章雨夜\n第二章来信\n\n第一章雨夜\n正文 A。\n第二章来信\n正文 B。",
+);
+assert.deepEqual(
+  duplicateContents
+    .filter((chapter) => chapter.title !== "卷首")
+    .map(({ title, body }) => ({ title, body })),
+  [
+    { title: "第一章雨夜", body: "正文 A。" },
+    { title: "第二章来信", body: "正文 B。" },
+  ],
+);
 assert.equal(
   parseChapters("Chapter I — Arrival\nText\nChapter II: Morning\nMore").length,
   2,
@@ -107,6 +133,15 @@ const text = expected
   )
   .join("\n");
 const parsed = parseChapters(text);
+assert.equal(
+  textChapterIndex([{ sourceOffset: 10 }, { sourceOffset: 100 }], 120),
+  2,
+);
+assert.equal(
+  textChapterIndex([{ sourceOffset: 10 }, { sourceOffset: 100 }], 50),
+  1,
+);
+assert.equal(textChapterIndex([{ sourceOffset: 10 }], 0), 1);
 assert.equal(parsed.length, 120);
 assert.deepEqual(
   parsed.map(({ title, volume, body }) => ({ title, volume, body })),
@@ -119,6 +154,11 @@ for (const chapter of parsed)
       chapter.sourceOffset,
       chapter.sourceOffset + chapter.body.length,
     ),
+    chapter.body,
+  );
+for (const chapter of parsed)
+  assert.equal(
+    text.slice(chapter.sourceOffset, chapter.sourceEnd),
     chapter.body,
   );
 console.log("章节、编码、生成长书的 120 章／8 卷、正文边界与进度：通过。");

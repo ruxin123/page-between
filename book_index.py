@@ -13,7 +13,7 @@ from contextlib import closing
 from lxml import etree
 from pypdf import PdfReader
 
-from book_import import path_for, XML
+from book_import import path_for, XML, text_chapter_index
 from paths import CACHE
 from pdf_enhancement import enrichment_data
 from pdf_selection import utf16
@@ -74,7 +74,7 @@ def fingerprint(book):
     return hashlib.sha256(
         json.dumps(
             [
-                4,
+                6,
                 book.get("sourceHash"),
                 book.get("enhancementRevision"),
                 book.get("enrichmentUrl"),
@@ -158,6 +158,7 @@ def text_units(book):
                     "fragment": fragment,
                     "anchor": {
                         "index": anchor_number,
+                        "sourceNode": anchor_number,
                         "quote": text[:60],
                         "charOffset": 0,
                         "pixels": 0,
@@ -178,7 +179,7 @@ def text_units(book):
                                 index,
                                 int(y * 100000),
                                 block["text"],
-                                {"index": index, "pdfY": y},
+                                {"index": index, "pdfY": y, "blockOrder": number},
                                 block.get("type", "text"),
                             )
                     continue
@@ -207,7 +208,7 @@ def text_units(book):
 
 
 def connection(book):
-    directory = CACHE / "book-index-v1"
+    directory = CACHE / "book-index-v2"
     directory.mkdir(parents=True, exist_ok=True)
     database = sqlite3.connect(directory / (book["id"] + ".sqlite"), timeout=60)
     database.row_factory = sqlite3.Row
@@ -225,7 +226,7 @@ def ensure(book):
             return json.loads(previous["status"])
         with db:
             db.execute(
-                "CREATE TABLE IF NOT EXISTS chunks (id INTEGER PRIMARY KEY, idx INTEGER, ordinal INTEGER, text TEXT, position TEXT, kind TEXT, label TEXT, label_key TEXT)"
+                "CREATE TABLE IF NOT EXISTS chunks (id INTEGER PRIMARY KEY, idx INTEGER, ordinal INTEGER, text TEXT, position TEXT, kind TEXT, label TEXT, label_key TEXT, source_offset INTEGER, source_end INTEGER)"
             )
             db.execute(
                 "CREATE INDEX IF NOT EXISTS reference_labels ON chunks(label_key)"
@@ -254,8 +255,11 @@ def ensure(book):
                             **source["anchor"],
                             "charOffset": utf16(text[:offset]),
                         }
+                    if "sourceOffset" in source:
+                        source["sourceOffset"] += utf16(text[:offset])
+                    source_offset = source.get("sourceOffset")
                     row = db.execute(
-                        "INSERT INTO chunks(idx,ordinal,text,position,kind,label,label_key) VALUES(?,?,?,?,?,?,?)",
+                        "INSERT INTO chunks(idx,ordinal,text,position,kind,label,label_key,source_offset,source_end) VALUES(?,?,?,?,?,?,?,?,?)",
                         (
                             index,
                             ordinal,
@@ -264,6 +268,10 @@ def ensure(book):
                             kind,
                             label,
                             key,
+                            source_offset,
+                            source_offset + utf16(part)
+                            if source_offset is not None
+                            else None,
                         ),
                     )
                     db.execute(
@@ -308,6 +316,15 @@ def search(book, query="", *, position=None, previous_only=False, limit=20):
         raise ValueError("检索文字过长。")
     clause, parameters = "1=1", []
     if previous_only:
+        if (
+            book["type"] == "txt"
+            and isinstance(position, dict)
+            and "sourceOffset" in position
+        ):
+            position = {
+                **position,
+                "index": text_chapter_index(book, position["sourceOffset"]),
+            }
         total = book.get("pages", len(book.get("chapters", [])))
         if (
             not isinstance(position, dict)
@@ -328,9 +345,27 @@ def search(book, query="", *, position=None, previous_only=False, limit=20):
             or not 0 <= y <= 1
         ):
             raise ValueError("阅读位置无效。")
-        ordinal = int(y * 100000) if book["type"] == "pdf" else anchor.get("index", 0)
+        ordinal = (
+            int(y * 100000)
+            if book["type"] == "pdf"
+            else anchor.get("sourceNode", anchor.get("index", 0))
+        )
+        if type(ordinal) is not int or ordinal < 0:
+            raise ValueError("原文锚点无效。")
         clause = "(idx<? OR (idx=? AND ordinal<?))"
         parameters = [position["index"], position["index"], ordinal]
+        if book["type"] == "pdf":
+            order = position.get("blockOrder", -1)
+            if type(order) is not int or not -1 <= order <= 5000:
+                raise ValueError("原文区块位置无效。")
+            # A page coordinate alone cannot establish reading order across columns.
+            clause = "(idx<? OR (idx=? AND json_extract(position,'$.blockOrder')<?))"
+            parameters = [position["index"], position["index"], order]
+        if book["type"] == "txt" and "sourceOffset" in position:
+            offset = position["sourceOffset"]
+            if type(offset) is not int or not 0 <= offset <= 1000000000:
+                raise ValueError("原文字符位置无效。")
+            clause, parameters = "source_end<=?", [offset]
     status = ensure(book)
     with closing(connection(book)) as db:
         candidates = []

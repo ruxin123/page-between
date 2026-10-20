@@ -4,6 +4,8 @@ import {
   chapterProgress,
   palmTypography,
   shouldFollowPosition,
+  textChapterIndex,
+  sliceText,
 } from "/core.mjs";
 import { escapeHTML, icon } from "/ui/shared.mjs";
 import { createLibraryView } from "/ui/library.mjs";
@@ -12,12 +14,17 @@ import { createTutor } from "/ui/tutor.mjs";
 import { createServiceSettings } from "/ui/settings.mjs";
 import { createDocumentParsing, formatPages } from "/ui/mineru.mjs";
 import { copyPng } from "/ui/clipboard.mjs";
-import { alignTextLayer, canonicalSelection } from "/ui/pdf-selection.mjs";
+import {
+  alignTextLayer,
+  canonicalSelection,
+  canonicalPosition,
+} from "/ui/pdf-selection.mjs";
 import { createBookSearch, decorateReferences } from "/ui/knowledge.mjs";
 import { createBookExport } from "/ui/export.mjs";
 import { createDataSettings } from "/ui/data.mjs";
+import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.20";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.21";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -96,7 +103,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.20";
+document.body.dataset.readerBuild = "2.21";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -123,6 +130,23 @@ const bookExport = createBookExport({
   post,
   getBook: (id) => books.find((book) => book.id === id),
   toast,
+});
+const chapterEditor = createChapterEditor({
+  post,
+  toast,
+  getBook: (id) => books.find((book) => book.id === id),
+  beforeChange: async (id) => {
+    const position =
+      current?.id === id && readerReady ? makePosition() : positions[id];
+    await savePosition(true);
+    return position;
+  },
+  changed: async (id, position) => {
+    await refreshLibrary();
+    if (route === "reader" && current?.id === id)
+      await renderCurrent(position || initialLocation(current));
+    else if (route === "library") renderLibrary();
+  },
 });
 const bookSearch = createBookSearch({
   post,
@@ -182,10 +206,7 @@ function initialLocation(book) {
   const saved = positions[book.id] || {};
   let index = clamp(saved.index || 1, 1, count(book));
   if (book.type === "txt" && Number.isFinite(saved.sourceOffset)) {
-    const found = book.chapters.findLastIndex(
-      (chapter) => (chapter.sourceOffset || 0) <= saved.sourceOffset,
-    );
-    if (found >= 0) index = found + 1;
+    index = textChapterIndex(book.chapters, saved.sourceOffset);
   }
   return {
     ...saved,
@@ -410,7 +431,10 @@ function captureAnchor() {
         const char = Math.max(0, lo - 1);
         return {
           index,
-          quote: element.textContent.trim().slice(0, 60),
+          sourceNode: element.dataset.sourceNode
+            ? Number(element.dataset.sourceNode)
+            : undefined,
+          quote: sliceText(element.textContent.trim(), 0, 60),
           charOffset: offset + char,
           pixels: top - view.top,
         };
@@ -434,7 +458,15 @@ function restoreAnchor(anchor) {
   if (!anchor || !readerReady) return;
   const elements = readingElements();
   let element = elements[anchor.index];
+  const sourceElement =
+    current.type === "epub" && Number.isSafeInteger(anchor.sourceNode)
+      ? frameDocument()?.querySelector(
+          `[data-source-node="${anchor.sourceNode}"]`,
+        )
+      : null;
+  if (sourceElement) element = sourceElement;
   if (
+    !sourceElement &&
     anchor.quote &&
     (!element || !element.textContent.trim().startsWith(anchor.quote))
   )
@@ -527,7 +559,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.20",
+        build: "2.21",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -553,6 +585,8 @@ function makePosition() {
   }
   return {
     ...location,
+    blockOrder: undefined,
+    blockOffset: undefined,
     top:
       current.type === "pdf" ? pdfLocalTop() : $("reading-viewport").scrollTop,
     pdfY:
@@ -683,6 +717,7 @@ function renderToc() {
     "pdf-outline": "PDF 原有书签",
     "ocr-contents": "从扫描目录识别",
     "txt-rules": "从章节标题识别",
+    "txt-manual": "已调整的章节目录",
     text: "纯文本阅读",
     "html-headings": "文档原有标题",
     "image-order": "图像页序",
@@ -695,14 +730,22 @@ function renderToc() {
     (current.tocSource === "ocr-contents" && current.pageOffset === null
       ? " · 请在书籍设置中校正页码"
       : "");
+  $("toc-edit").hidden = current.type !== "txt";
   renderBookmarks();
 }
 function samePlace(a, b) {
+  if (
+    current.type === "txt" &&
+    Number.isFinite(a.sourceOffset) &&
+    Number.isFinite(b.sourceOffset)
+  )
+    return Math.abs(a.sourceOffset - b.sourceOffset) < 20;
   if (a.index !== b.index) return false;
   if (current.type === "pdf" || !a.anchor || !b.anchor)
     return Math.abs((a.top || 0) - (b.top || 0)) < 80;
   return (
-    a.anchor.index === b.anchor.index &&
+    (a.anchor.sourceNode ?? a.anchor.index) ===
+      (b.anchor.sourceNode ?? b.anchor.index) &&
     Math.abs((a.anchor.charOffset || 0) - (b.anchor.charOffset || 0)) < 20
   );
 }
@@ -823,6 +866,10 @@ function showToolbar(rectangle) {
   bar.hidden = false;
   $("copy-selection").hidden = currentSelection.kind === "image";
   $("copy-image").hidden = !currentSelection.image;
+  $("chapter-start").hidden =
+    current.type !== "txt" ||
+    !current.parseEnabled ||
+    !Number.isFinite(currentSelection.position?.sourceOffset);
   $("copy-label").textContent =
     currentSelection.format === "latex"
       ? "复制 LaTeX"
@@ -870,6 +917,7 @@ function captureSelection(doc = document) {
   };
   if (pdfPage) {
     const page = pdfPageElement(Number(pdfPage));
+    Object.assign(position, canonicalPosition(range, page));
     const rectangle = page.getBoundingClientRect(),
       selected = range.getClientRects()[0];
     if (selected && rectangle.height)
@@ -889,7 +937,10 @@ function captureSelection(doc = document) {
       before.setEnd(range.startContainer, range.startOffset);
       position.anchor = {
         index: elements.indexOf(element),
-        quote: element.textContent.trim().slice(0, 60),
+        sourceNode: element.dataset.sourceNode
+          ? Number(element.dataset.sourceNode)
+          : undefined,
+        quote: sliceText(element.textContent.trim(), 0, 60),
         charOffset: before.toString().length,
         pixels: 0,
       };
@@ -999,6 +1050,8 @@ function renderObjects(blocks, viewport, root, page) {
         position: {
           ...makePosition(),
           index: page,
+          blockOrder: blocks.indexOf(block),
+          blockOffset: 0,
           top: y0 * viewport.height,
           pdfY: y0,
         },
@@ -1383,6 +1436,10 @@ function configureTextLayout() {
   }
 }
 function revealPosition(position) {
+  if (position.anchor) {
+    restoreAnchor(position.anchor);
+    return;
+  }
   if (position.fragment) {
     const doc = current.type === "epub" ? frameDocument() : document,
       target =
@@ -1566,6 +1623,11 @@ async function renderEpub(position, revision) {
     const doc = frameDocument();
     if (revision !== renderRevision) return;
     doc.documentElement.lang = current.language || "zh";
+    [...doc.body.querySelectorAll("p,h1,h2,h3,h4,blockquote,figure,table")]
+      .filter((element) => !element.closest("nav"))
+      .forEach((element, index) => {
+        element.dataset.sourceNode = index;
+      });
     const flow = doc.createElement("div");
     flow.id = "reader-flow";
     flow.append(...doc.body.childNodes);
@@ -1693,12 +1755,32 @@ function onEpubClick(event) {
       : "data:image/svg+xml;charset=utf-8," +
         encodeURIComponent(new XMLSerializer().serializeToString(element));
   }
+  const elements = readingElements();
+  const owner = elements
+    .filter((item) => item === element || item.contains(element))
+    .at(-1);
+  const position = makePosition();
+  if (owner) {
+    const before = element.ownerDocument.createRange();
+    before.selectNodeContents(owner);
+    if (owner !== element) before.setEndBefore(element);
+    else before.collapse(true);
+    position.anchor = {
+      index: elements.indexOf(owner),
+      sourceNode: owner.dataset.sourceNode
+        ? Number(owner.dataset.sourceNode)
+        : undefined,
+      quote: sliceText(owner.textContent.trim(), 0, 60),
+      charOffset: before.toString().length,
+      pixels: 0,
+    };
+  }
   currentSelection = {
     kind,
     image,
     text: text || "[完整图像]",
     format,
-    position: makePosition(),
+    position,
     source: selectionContext(),
   };
   showToolbar(rect);
@@ -1732,7 +1814,11 @@ async function renderText(position, revision) {
         const p = document.createElement("p");
         p.textContent = text.trim();
         offset = chapter.body.indexOf(text, offset);
-        p.dataset.sourceOffset = (chapter.sourceOffset || 0) + offset;
+        p.dataset.sourceOffset =
+          (chapter.sourceOffset || 0) +
+          offset +
+          text.length -
+          text.trimStart().length;
         p.dataset.paragraph = index;
         offset += text.length;
         return p;
@@ -1749,7 +1835,7 @@ async function renderText(position, revision) {
       const element = paragraphs[index];
       position.anchor = {
         index,
-        quote: element.textContent.trim().slice(0, 60),
+        quote: sliceText(element.textContent.trim(), 0, 60),
         charOffset: clamp(
           position.sourceOffset - Number(element.dataset.sourceOffset),
           0,
@@ -1770,6 +1856,13 @@ async function renderText(position, revision) {
   updateProgress();
 }
 async function renderCurrent(position) {
+  if (current?.type === "txt" && Number.isFinite(position.sourceOffset)) {
+    position = {
+      ...position,
+      index: textChapterIndex(current.chapters, position.sourceOffset),
+    };
+    location = position;
+  }
   clearTimeout(saveTimer);
   pagination?.destroy();
   pagination = null;
@@ -2144,6 +2237,7 @@ function openBookOptions(id) {
     `<label>书名<input id="book-name" type="text" value="${escapeHTML(book.title)}" maxlength="240"></label><label>书籍类别<select id="book-shelf"><option ${book.shelf === "小说" ? "selected" : ""}>小说</option><option ${book.shelf === "学习" ? "selected" : ""}>学习</option></select></label><label class="parse-toggle"><span>文档解析<small>${book.type === "pdf" ? "扫描文字按页准备，可补充原书目录" : book.type === "txt" ? "识别章、回、卷，建立章节导航" : "沿用原书内容，可额外补充结构索引"}</small></span><input id="book-parse" type="checkbox" ${book.parseEnabled ? "checked" : ""}></label>${book.type === "pdf" ? `<label>印刷书页到 PDF 页序的偏移<input id="book-offset" type="number" value="${book.pageOffset ?? ""}" placeholder="自动识别中；也可手动校正"></label><p class="setting-note">例如书页 3 位于 PDF 第 5 页，偏移填写 2。</p>` : ""}<div class="book-details">${escapeHTML(book.format)} · ${book.type === "pdf" ? book.pages + " 页" : book.chapters.length + " 个阅读单元"}<br>${escapeHTML(book.processingNote || "原文件保留在本机。")}</div>`;
   $("book-save-note").textContent = "更改不会修改原文件";
   $("book-cloud").hidden = book.type !== "pdf";
+  $("book-chapters").hidden = book.type !== "txt";
   $("book-dialog").showModal();
 }
 async function saveBookOptions(forCloud = false) {
@@ -2525,6 +2619,12 @@ $("bookmarks-list").addEventListener("click", async (event) => {
 $("bookmark-button").onclick = toggleBookmark;
 $("palm-open").onclick = () => openPalm(current.id);
 $("book-options").onclick = () => openBookOptions(current.id);
+$("book-chapters").onclick = () => {
+  const id = editingBook?.id;
+  $("book-dialog").close();
+  chapterEditor.open(id, current?.id === id ? makePosition() : positions[id]);
+};
+$("toc-edit").onclick = () => chapterEditor.open(current.id, makePosition());
 $("book-export").onclick = () => {
   const id = editingBook?.id;
   $("book-dialog").close();
@@ -2603,11 +2703,11 @@ $("palm-close").onclick = async () => {
 $("palm-bar").hidden = !palm;
 $("palm-footer").hidden = !palm;
 document.addEventListener("mouseup", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
   if (
     route === "reader" &&
-    !event.target.closest(
-      ".selection-toolbar,.pdf-object,.reader-settings,.question-panel",
-    )
+    !target?.closest(".selection-toolbar,.reader-settings,.question-panel") &&
+    (!target?.closest(".pdf-object") || !window.getSelection()?.isCollapsed)
   )
     setTimeout(() => captureSelection(), 10);
 });
@@ -2615,44 +2715,109 @@ $("selection-toolbar").onmousedown = (event) => event.preventDefault();
 $("copy-selection").onclick = () =>
   currentSelection && copyText(currentSelection.text);
 $("copy-image").onclick = copyImage;
+$("chapter-start").onclick = () => {
+  if (!currentSelection || current?.type !== "txt") return;
+  const selected = currentSelection;
+  chapterEditor.open(current.id, selected.position, {
+    offset: selected.position.sourceOffset,
+    title: selected.text.length <= 40 ? selected.text : "新章节",
+    text: selected.text.slice(0, 180),
+  });
+  clearSelection();
+};
 $("knowledge-open").onclick = () => bookSearch.open();
 $("search-selection").onclick = () => {
-  if (currentSelection) bookSearch.open(currentSelection.text.slice(0, 6000));
+  if (currentSelection)
+    bookSearch.open(sliceText(currentSelection.text, 0, 6000));
 };
 function tutorContext(selection = null) {
   if (!current || !readerReady) return null;
   const position = selection?.position || makePosition();
-  let context,
-    quote = selection?.text;
+  let units = [],
+    separator = "\n\n",
+    unitIndex = 0,
+    offset = 0;
+  let quote = selection?.text;
   if (current.type === "pdf") {
     const page = pdfPageElement(position.index);
-    context = page?._readerBlocks?.length
-      ? page._readerBlocks
-          .map((block) => block.text || "")
-          .filter(Boolean)
-          .join("\n\n")
-      : [...(page?.querySelectorAll(".textLayer span") || [])]
-          .map((node) => node.textContent)
-          .join(" ");
-    quote ||= context.slice(0, 6000);
+    if (page?._readerBlocks?.length) {
+      const entries = page._readerBlocks
+        .map((block, order) => ({ text: block.text || "", order }))
+        .filter((entry) => entry.text);
+      units = entries.map((entry) => entry.text);
+      if (selection && position.blockOrder >= 0) {
+        unitIndex = entries.findIndex(
+          (entry) => entry.order >= position.blockOrder,
+        );
+        if (unitIndex < 0) unitIndex = entries.length;
+        if (entries[unitIndex]?.order === position.blockOrder)
+          offset = position.blockOffset || 0;
+      }
+    } else {
+      separator = " ";
+      units = [...(page?.querySelectorAll(".textLayer span") || [])]
+        .filter(
+          (node) => node.firstChild?.nodeType === 3 && node.textContent.trim(),
+        )
+        .map((node) => node.textContent);
+      if (selection) {
+        unitIndex = position._textOrdinal || 0;
+        offset = position._textOffset || 0;
+      }
+    }
+    quote ||= sliceText(units.join(separator), 0, 6000);
   } else {
     const elements = readingElements();
-    const anchor = retainedAnchor || lastAnchor || captureAnchor();
-    quote ||= elements[anchor?.index || 0]?.textContent.trim();
-    context = elements
-      .map((element) => element.textContent.trim())
-      .join("\n\n");
+    const anchor =
+      position.anchor || retainedAnchor || lastAnchor || captureAnchor();
+    const target = Number.isSafeInteger(anchor?.sourceNode)
+      ? elements.find(
+          (element) => Number(element.dataset.sourceNode) === anchor.sourceNode,
+        )
+      : elements[anchor?.index || 0];
+    const leaves = elements.filter(
+      (element) =>
+        !element.querySelector("p,h1,h2,h3,h4,blockquote,figure,table"),
+    );
+    unitIndex = Math.max(
+      0,
+      leaves.findIndex(
+        (element) => element === target || target?.contains(element),
+      ),
+    );
+    units = leaves.map((element) => element.textContent.trim());
+    const raw = leaves[unitIndex]?.textContent || "";
+    const charOffset =
+      leaves[unitIndex] === target
+        ? Math.max(
+            0,
+            (anchor?.charOffset || 0) - raw.length + raw.trimStart().length,
+          )
+        : 0;
+    offset =
+      selection || (units[unitIndex]?.length || 0) > 6000 ? charOffset : 0;
+    quote ||= sliceText(units[unitIndex] || "", offset, offset + 1800);
   }
   quote ||= "";
-  const start = Math.max(0, context.indexOf(quote) - 4000);
+  unitIndex = Math.min(units.length, unitIndex);
+  const context = units.join(separator);
+  const cursor = Math.min(
+    context.length,
+    units
+      .slice(0, unitIndex)
+      .reduce((sum, unit) => sum + unit.length + separator.length, 0) + offset,
+  );
+  const start = Math.max(0, cursor - 4000);
   return {
     book: current.id,
     source: {
-      quote: quote.slice(0, 6000),
-      context: context.slice(start, start + 18000),
+      quote: sliceText(quote, 0, 6000),
+      context: sliceText(context, start, start + 18000),
+      contextBefore: sliceText(context, start, cursor),
       position,
       citation: selection?.source || selectionContext(),
       image: selection?.image,
+      kind: selection?.kind || "text",
     },
   };
 }
@@ -2794,6 +2959,7 @@ async function poll(resume = false) {
       libraryRevision = version.revision;
       const previousFlag = current?.parseEnabled,
         previousEnhancement = current?.enhancementRevision,
+        previousStructure = current?.structureRevision,
         previousCount = current?.chapters?.length;
       await refreshLibrary();
       if (route === "library") renderLibrary();
@@ -2802,8 +2968,10 @@ async function poll(resume = false) {
         current &&
         (previousFlag !== current.parseEnabled ||
           previousEnhancement !== current.enhancementRevision ||
+          previousStructure !== current.structureRevision ||
           (current.type === "txt" && previousCount !== current.chapters.length))
       ) {
+        if (current.type === "txt") current.loaded = false;
         if (current.type === "pdf")
           for (const key of ocrCache.keys())
             if (key.startsWith(current.id + ":")) ocrCache.delete(key);

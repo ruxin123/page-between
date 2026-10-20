@@ -8,10 +8,67 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import book_index
 import book_import
+import chapter_edit
+from ai_tutor import source_for
+from pdf_selection import utf16
 from scripts.create_demo import make_epub, make_pdf, make_scan
 
 
 class BookIndex(unittest.TestCase):
+    def test_pdf_previous_scope_uses_reading_order_and_excludes_unknown_current_page(
+        self,
+    ):
+        native = self.root / "columns.pdf"
+        make_pdf(native)
+        book = book_import.import_book(native)
+        blocks = {
+            "1": {
+                "blocks": [
+                    {
+                        "type": "text",
+                        "text": "Definition 1.1. Earlier left column material.",
+                        "bbox": [0.1, 0.7, 0.45, 0.85],
+                    },
+                    {
+                        "type": "text",
+                        "text": "Definition 2.1. Later right column material.",
+                        "bbox": [0.55, 0.1, 0.9, 0.25],
+                    },
+                ]
+            }
+        }
+        with patch.object(book_index, "enrichment_data", return_value=blocks):
+            earlier = book_index.search(
+                book,
+                "Definition 2.1",
+                position={"index": 1, "blockOrder": 0, "pdfY": 0.8},
+                previous_only=True,
+            )
+            self.assertEqual(earlier["results"], [])
+            current = book_index.search(
+                book,
+                "Definition 1.1",
+                position={"index": 1, "blockOrder": 1, "pdfY": 0.1},
+                previous_only=True,
+            )
+            self.assertTrue(current["results"])
+            self.assertEqual(current["results"][0]["position"]["blockOrder"], 0)
+        book["parseEnabled"] = False
+        first_page = book_index.search(
+            book,
+            "Definition 1.1",
+            position={"index": 1, "pdfY": 0.95},
+            previous_only=True,
+        )
+        self.assertEqual(first_page["results"], [])
+        previous_page = book_index.search(
+            book, "Definition 1.1", position={"index": 2}, previous_only=True
+        )
+        self.assertTrue(previous_page["results"])
+        self.assertTrue(
+            all(item["position"]["index"] == 1 for item in previous_page["results"])
+        )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -89,7 +146,8 @@ class BookIndex(unittest.TestCase):
             self.assertEqual(result["status"]["covered"], 1)
             self.assertTrue(result["status"]["partial"])
             self.assertEqual(
-                result["results"][0]["position"], {"index": 1, "pdfY": 0.2}
+                result["results"][0]["position"],
+                {"index": 1, "pdfY": 0.2, "blockOrder": 0},
             )
 
     def test_reference_normalization_and_ambiguous_numbers_preserve_candidates(self):
@@ -112,6 +170,51 @@ class BookIndex(unittest.TestCase):
                     position=position,
                     previous_only=True,
                 )
+
+    def test_manual_merge_rebases_saved_sources_and_previous_knowledge(self):
+        source = self.root / "merge.txt"
+        source.write_text(
+            "第一章 起点\n定义 1.1 连续函数的含义。\n第二章 中途\n此前资料与😀。\n第三章 当前\n这里引用定义 1.1。"
+        )
+        book = book_import.import_book(source)
+        old_position = {"index": 3, "sourceOffset": book["chapters"][2]["sourceOffset"]}
+        book.update(chapter_edit.stage(book, {"action": "merge", "index": 2}))
+        result = book_index.search(
+            book, "定义 1.1", position=old_position, previous_only=True
+        )
+        self.assertTrue(result["results"])
+        self.assertTrue(
+            all(item["position"]["index"] == 1 for item in result["results"])
+        )
+        anchored = source_for(
+            book,
+            {"position": old_position, "quote": "这里引用定义 1.1。", "context": ""},
+        )
+        self.assertEqual(anchored["position"]["index"], 2)
+        self.assertEqual(
+            anchored["position"]["sourceOffset"], old_position["sourceOffset"]
+        )
+
+    def test_long_paragraph_previous_filter_uses_utf16_chunk_end(self):
+        source = self.root / "long.txt"
+        paragraph = (
+            "定义 1.1 连续函数。😀" + "已读资料" * 600 + "未来定义 2.1 尚未读到。"
+        )
+        source.write_text("第一章 起点\n\n" + paragraph)
+        book = book_import.import_book(source)
+        start = book["chapters"][0]["sourceOffset"]
+        position = {"index": 1, "sourceOffset": start + utf16(paragraph[:1850])}
+        earlier = book_index.search(
+            book, "定义 1.1", position=position, previous_only=True
+        )
+        self.assertTrue(earlier["results"])
+        self.assertNotIn("未来定义", json.dumps(earlier, ensure_ascii=False))
+        later = book_index.search(
+            book, "未来定义 2.1", position=position, previous_only=True
+        )
+        self.assertTrue(
+            all("未来定义" not in item["text"] for item in later["results"])
+        )
 
 
 if __name__ == "__main__":

@@ -1,10 +1,19 @@
 // Keep the visible PDF and its selectable glyph geometry unchanged.
 export async function alignTextLayer(layer, blocks, post, book, page) {
-  if (!blocks?.some((block) => block.type === "text")) return;
+  if (
+    !blocks?.some(
+      (block) =>
+        ["text", "equation", "table"].includes(block.type) && block.text,
+    )
+  )
+    return;
   const revision = (layer._alignmentRevision || 0) + 1;
   layer._alignmentRevision = revision;
   const nodes = [...layer.querySelectorAll("span")].filter(
-    (node) => node.firstChild?.nodeType === 3 && node.textContent.trim(),
+    (node) =>
+      !node.dataset.canonicalObject &&
+      node.firstChild?.nodeType === 3 &&
+      node.textContent.trim(),
   );
   const rectangle = layer.getBoundingClientRect();
   if (!rectangle.width || !rectangle.height) return;
@@ -34,7 +43,52 @@ export async function alignTextLayer(layer, blocks, post, book, page) {
       for (const span of group.spans)
         mapped.set(nodes[span.index], { group, map: span.map });
     }
-    layer._canonical = { nodes, mapped };
+    layer
+      .querySelectorAll("[data-canonical-object]")
+      .forEach((node) => node.remove());
+    for (const group of groups.filter(
+      (group) => group.whole && !group.nodes.length,
+    )) {
+      // OCR can omit every glyph in a table; one transparent character keeps it in the selection order.
+      const node = layer.ownerDocument.createElement("span");
+      node.dataset.canonicalObject = "true";
+      node.textContent = "\uFFFC";
+      const [left, top, right, bottom] = group.bbox;
+      Object.assign(node.style, {
+        left: `${left * 100}%`,
+        top: `${top * 100}%`,
+        fontSize: `${(bottom - top) * rectangle.height}px`,
+        height: `${(bottom - top) * rectangle.height}px`,
+        lineHeight: "1",
+        userSelect: "all",
+      });
+      const next =
+        nodes.find((item) => mapped.get(item)?.group.order > group.order) ||
+        nodes.find(
+          (_, index) =>
+            spans[index].bbox[1] >= bottom &&
+            spans[index].bbox[2] >= left &&
+            spans[index].bbox[0] <= right,
+        );
+      let reference = next;
+      while (reference?.parentElement && reference.parentElement !== layer)
+        reference = reference.parentElement;
+      layer.insertBefore(
+        node,
+        reference || layer.querySelector(".endOfContent"),
+      );
+      const width = node.getBoundingClientRect().width;
+      if (width)
+        node.style.transform = `scaleX(${((right - left) * rectangle.width) / width})`;
+      group.nodes = [node];
+      mapped.set(node, { group });
+    }
+    layer._canonical = {
+      nodes: [...layer.querySelectorAll("span")].filter(
+        (node) => node.firstChild?.nodeType === 3 && node.textContent.trim(),
+      ),
+      mapped,
+    };
   } catch {
     // Uncertain or unavailable alignment leaves the original selection usable.
   }
@@ -57,8 +111,50 @@ export function mappedFragment(text, map, start, end, math = []) {
   return [lo, hi];
 }
 
+export function canonicalPosition(range, root) {
+  for (const layer of root.querySelectorAll(".textLayer")) {
+    if (!range.intersectsNode(layer)) continue;
+    const model = layer._canonical;
+    const nodes =
+      model?.nodes ||
+      [...layer.querySelectorAll("span")].filter(
+        (node) => node.firstChild?.nodeType === 3 && node.textContent.trim(),
+      );
+    for (const [index, node] of nodes.entries()) {
+      if (!range.intersectsNode(node)) continue;
+      let start = 0;
+      if (node.contains(range.startContainer)) {
+        const before = node.ownerDocument.createRange();
+        before.selectNodeContents(node);
+        before.setEnd(range.startContainer, range.startOffset);
+        start = before.toString().length;
+      }
+      if (start >= node.textContent.length) continue;
+      const entry = model?.mapped.get(node);
+      const interval =
+        entry && !entry.group.whole
+          ? mappedFragment(
+              node.textContent,
+              entry.map,
+              start,
+              node.textContent.length,
+              entry.group.math,
+            )
+          : null;
+      return {
+        blockOrder: entry?.group.order ?? -1,
+        blockOffset: entry?.group.whole ? 0 : interval?.[0] || 0,
+        _textOrdinal: index,
+        _textOffset: start,
+      };
+    }
+  }
+  return { blockOrder: -1 };
+}
+
 export function canonicalSelection(range, root) {
   const pieces = [];
+  const emittedObjects = new Set();
   let corrected = false;
   for (const layer of root.querySelectorAll(".textLayer")) {
     const model = layer._canonical;
@@ -105,6 +201,13 @@ export function canonicalSelection(range, root) {
       )
         last++;
       const items = selected.slice(index, last);
+      if (group?.whole) {
+        if (!emittedObjects.has(group)) pieces.push(group.text);
+        emittedObjects.add(group);
+        corrected = true;
+        index = last;
+        continue;
+      }
       const intervals =
         group &&
         items.map((item) =>

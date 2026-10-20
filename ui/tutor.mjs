@@ -1,4 +1,5 @@
 import { escapeHTML } from "./shared.mjs";
+import { prepareQuestionImage } from "./book-images.mjs";
 
 export function createTutor({ api, post, toast, getContext, openSource }) {
   const $ = (id) => document.getElementById(id);
@@ -8,6 +9,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     pending = false,
     revision = 0,
     historyMode = false,
+    supportsImages = false,
     pollTimer;
   const url = (id) =>
     "/api/ai/conversations?book=" +
@@ -22,12 +24,14 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     $("ai-history-toggle").textContent = "本书记录";
     const original = active?.source || source;
     $("question-source").textContent = original
-      ? original.citation + " · 返回原文"
+      ? "[1] " + original.citation + " · 返回原文"
       : "";
     $("ai-quote").textContent = original?.quote || "";
+    $("ai-quote").hidden =
+      !!original?.image && /^\[完整图(?:像|表)\]$/.test(original.quote || "");
     $("question-source").disabled = !original;
-    $("question-image").hidden = !source?.image || !!active;
-    if (source?.image && !active) $("question-image").src = source.image;
+    $("question-image").hidden = !original?.image;
+    if (original?.image) $("question-image").src = original.image;
     else $("question-image").removeAttribute("src");
     $("ai-messages").innerHTML =
       (active?.storageWarning
@@ -36,7 +40,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
       (active?.messages || [])
         .map((message, index) => {
           if (message.role === "user")
-            return `<article class="ai-message ai-user"><small>你</small><div>${escapeHTML(message.content)}</div></article>`;
+            return `<article class="ai-message ai-user"><small>你${message.imageAttached ? " · 已附原图" : ""}</small><div>${escapeHTML(message.content)}</div></article>`;
           if (message.status === "generating")
             return `<article class="ai-message"><small>AI · 正在生成</small>${references(message, index)}<div class="ai-stream">${escapeHTML(message.content || "正在检索原文并组织回答…")}</div></article>`;
           if (message.status === "error" || message.status === "stopped")
@@ -54,19 +58,40 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     const generating = active?.messages.at(-1)?.status === "generating";
     $("ai-stop").hidden = !generating;
     $("ai-progress").hidden = !pending && !generating;
+    imageControls();
     if (
       active?.messages.at(-1)?.status === "generating" &&
       !$("question-panel").hidden
     )
       pollAnswer();
   }
+  function imageControls() {
+    const original = active?.source || source;
+    $("ai-image-option").hidden = !original?.image;
+    $("ai-image-status").hidden = !original?.image;
+    $("ai-send-image").disabled =
+      !supportsImages ||
+      pending ||
+      active?.messages.at(-1)?.status === "generating";
+    $("ai-image-status").textContent = !supportsImages
+      ? "当前模型按文字模式使用；可在模型设置中启用图像能力。"
+      : $("ai-send-image").checked
+        ? "本次会将原图交给模型，并随对话保存在本机。"
+        : "本次仅发送文字，原图留在本机。";
+  }
   function references(message, messageIndex) {
     const status = message.indexStatus;
     return (
+      (message.citationWarning
+        ? `<p class="ai-citation-warning">${escapeHTML(message.citationWarning)}</p>`
+        : "") +
+      (message.nearbyText
+        ? `<details class="ai-nearby"><summary>[2] 本次附近文字</summary><p>${escapeHTML(message.nearbyText)}</p></details>`
+        : "") +
       (message.indexWarning
         ? `<p class="setting-note">${escapeHTML(message.indexWarning)}</p>`
         : status
-          ? `<p class="setting-note">此前资料 · 可检索 ${status.covered} / ${status.total} ${escapeHTML(status.unit)}${status.partial ? "，未解析页未纳入" : ""}</p>`
+          ? `<p class="setting-note">本书索引 · 可检索 ${status.covered} / ${status.total} ${escapeHTML(status.unit)}${status.partial ? "，未解析页未纳入" : ""}</p>`
           : "") +
       (message.references || [])
         .map(
@@ -95,6 +120,9 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
   async function configuration() {
     try {
       const config = await api("/api/ai/status");
+      supportsImages = !!config.supportsImages;
+      if (!supportsImages) $("ai-send-image").checked = false;
+      imageControls();
       $("ai-model-status").textContent = config.configured
         ? "已配置模型 · 对话保存在本机"
         : config.message;
@@ -112,6 +140,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     $("question-panel").dataset.book = book;
     source = context.source;
     active = null;
+    $("ai-send-image").checked = source.kind === "image";
     $("question-panel").hidden = false;
     $("question-input").value = "";
     configuration();
@@ -154,6 +183,9 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
       if (version !== revision) return;
       active = data.conversation;
       source = null;
+      $("ai-send-image").checked = !!active.messages
+        .filter((message) => message.role === "user")
+        .at(-1)?.imageAttached;
       $("question-input").value = "";
       showConversation();
     } catch (error) {
@@ -177,26 +209,52 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
       toast(config.message, { kind: "warning" });
       return;
     }
-    if (!active && (!source?.quote || /^\[.*图.*\]$/.test(source.quote))) {
-      toast("当前提问需要文字或公式内容，原图可以继续在本机查看。", {
-        kind: "warning",
-      });
+    const original = active?.source || source;
+    const sendImage =
+      !!original?.image &&
+      $("ai-send-image").checked &&
+      !!config.supportsImages;
+    if (
+      !active &&
+      (!source?.quote || /^\[.*图.*\]$/.test(source.quote)) &&
+      !sendImage
+    ) {
+      toast(
+        config.supportsImages
+          ? "请勾选附带原图，或重新选择文字提问。"
+          : "当前选取只有原图，请在模型设置中启用支持图像的模型。",
+        {
+          kind: "warning",
+        },
+      );
       return;
     }
     const version = revision,
-      sendingBook = book;
+      sendingBook = book,
+      conversation = active?.id,
+      outgoing = !active && source ? { ...source } : undefined,
+      previousKnowledge = $("ai-previous-knowledge").checked;
     pending = true;
     showConversation();
     $("ai-progress").textContent =
       "回答逐段显示，可停止或继续阅读；内容与引用保存在本书记录中。";
     try {
+      if (outgoing) {
+        if (sendImage)
+          outgoing.image = await prepareQuestionImage(
+            outgoing.image,
+            sendingBook,
+          );
+        else delete outgoing.image;
+      }
       const data = await post("/api/ai/start", {
-        book,
-        conversation: active?.id,
-        source,
+        book: sendingBook,
+        conversation,
+        source: outgoing,
         question,
         retry,
-        previousKnowledge: $("ai-previous-knowledge").checked,
+        previousKnowledge,
+        sendImage,
       });
       if (
         sendingBook === book &&
@@ -221,6 +279,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     event.preventDefault();
     send().catch((error) => toast(error.message, { kind: "error" }));
   };
+  $("ai-send-image").onchange = imageControls;
   $("question-input").onkeydown = (event) => {
     if (
       !event.isComposing &&
@@ -309,7 +368,9 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
         .filter((message) => message.content)
         .map(
           (message) =>
-            (message.role === "user" ? "问题：" : "回答：") + message.content,
+            (message.role === "user" ? "问题：" : "回答：") +
+            message.content +
+            (message.citationWarning ? "\n" + message.citationWarning : ""),
         ),
       $("question-input").value,
     ]

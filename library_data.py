@@ -278,13 +278,24 @@ def normalize_recovery(root):
         ):
             raise ValueError("备份中的对话结构无效。")
         book = books[item["book"]]
-        item["source"] = source_for(book, item.get("source"))
+        original_source = item.get("source")
+        item["source"] = source_for(book, original_source, resource_root=root / "books")
+        if (
+            isinstance(original_source.get("citation"), str)
+            and len(original_source["citation"]) <= 500
+        ):
+            item["source"]["citation"] = original_source["citation"]
         for message in item["messages"]:
             if (
                 not isinstance(message, dict)
                 or message.get("role") not in {"user", "assistant"}
                 or not isinstance(message.get("content"), str)
                 or len(message["content"]) > 50000
+                or type(message.get("imageAttached", False)) is not bool
+                or not isinstance(message.get("nearbyText", ""), str)
+                or len(message.get("nearbyText", "")) > 18000
+                or not isinstance(message.get("citationWarning", ""), str)
+                or len(message.get("citationWarning", "")) > 1000
             ):
                 raise ValueError("备份中的回答结构无效。")
             if message["role"] == "assistant":
@@ -307,11 +318,14 @@ def normalize_recovery(root):
                         or not 3 <= reference["number"] <= 32
                     ):
                         raise ValueError("备份中的来源编号无效。")
+                    citation = reference.get("citation")
                     reference.update(
                         text=source["quote"],
                         position=source["position"],
                         citation=source["citation"],
                     )
+                    if isinstance(citation, str) and len(citation) <= 500:
+                        reference["citation"] = citation
     save(root / "library.json", collection)
     if (root / "ai-conversations.json").exists():
         save(root / "ai-conversations.json", conversations)
@@ -543,7 +557,7 @@ def queue_cache_cleanup():
 def apply_cache_cleanup():
     marker = record_path("pending-cache-clear")
     if marker.exists():
-        for name in ("ocr-v3", "book-index-v1", "exports"):
+        for name in ("ocr-v3", "book-index-v1", "book-index-v2", "exports"):
             shutil.rmtree(CACHE / name, ignore_errors=True)
         for directory in cloud_cache_folders():
             shutil.rmtree(directory, ignore_errors=True)

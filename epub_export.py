@@ -169,9 +169,13 @@ def complete_package(path):
 
 
 def filename(title, extension):
-    return (
-        re.sub(r"[\x00-\x1f/\\:]", "_", title).strip(". ")[:120] or "页间导出"
-    ) + extension
+    title = re.sub(r"[\x00-\x1f/\\:]", "_", title).strip(". ")
+    title = (
+        title.encode("utf-8")[: 240 - len(extension.encode("utf-8"))]
+        .decode("utf-8", "ignore")
+        .rstrip(". ")
+    )
+    return (title or "页间导出") + extension
 
 
 def table_html(value):

@@ -7,6 +7,60 @@ from pdf_selection import align_spans, character_map, utf16
 
 
 class Selection(unittest.TestCase):
+    def test_formula_and_table_are_whole_objects_even_when_ocr_text_does_not_match(
+        self,
+    ):
+        groups = align_spans(
+            [
+                {"text": "x", "bbox": [0.2, 0.15, 0.3, 0.2]},
+                {"text": "poor OCR", "bbox": [0.5, 0.15, 0.7, 0.2]},
+                {"text": "first cell", "bbox": [0.2, 0.4, 0.4, 0.45]},
+                {"text": "last cell", "bbox": [0.5, 0.5, 0.7, 0.55]},
+                {"text": "Following functlon.", "bbox": [0.1, 0.7, 0.9, 0.75]},
+            ],
+            [
+                {
+                    "id": "math",
+                    "type": "equation",
+                    "text": r"x^2+y^2=r^2",
+                    "bbox": [0.1, 0.1, 0.9, 0.25],
+                },
+                {
+                    "id": "table",
+                    "type": "table",
+                    "text": "x\tf(x)\n1\t1\n2\t4",
+                    "bbox": [0.1, 0.35, 0.9, 0.6],
+                },
+                {
+                    "id": "after",
+                    "type": "text",
+                    "text": "Following function.",
+                    "bbox": [0.1, 0.65, 0.9, 0.8],
+                },
+            ],
+        )
+        self.assertEqual([group["whole"] for group in groups[:2]], [True, True])
+        self.assertEqual([span["index"] for span in groups[0]["spans"]], [0, 1])
+        self.assertEqual([span["index"] for span in groups[1]["spans"]], [2, 3])
+        self.assertEqual(groups[0]["text"], r"x^2+y^2=r^2")
+        self.assertEqual(groups[1]["text"], "x\tf(x)\n1\t1\n2\t4")
+        self.assertFalse(groups[2].get("whole"))
+        self.assertTrue(groups[2]["spans"][0]["map"])
+        missing = align_spans(
+            [],
+            [
+                {
+                    "id": "table",
+                    "type": "table",
+                    "text": "x\tf(x)",
+                    "bbox": [0.1, 0.3, 0.8, 0.6],
+                }
+            ],
+        )
+        self.assertTrue(missing[0]["whole"])
+        self.assertEqual(missing[0]["spans"], [])
+        self.assertEqual(missing[0]["bbox"], [0.1, 0.3, 0.8, 0.6])
+
     def test_corrections_keep_geometry_offsets_and_chinese_boundaries(self):
         raw = "A functlon has a unique output."
         target = "A function has a unique output."

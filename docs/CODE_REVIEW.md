@@ -16,7 +16,9 @@
 6. `native/Palm.swift`：窗口层级、尺寸、快捷键、桥接与关闭保存。
 7. `ai_tutor.py`、`ui/tutor.mjs`：来源、对话隔离、模型请求、失败重试与安全 Markdown / MathML。
 8. `service_settings.py`、`native/Secrets.swift`、`ui/settings.mjs`：非敏感配置、钥匙串、草稿测试与凭据保留 / 替换 / 移除。完整交付边界见 `APP_READINESS.md`。
-8. `tests/` 与 `scripts/create_demo.py`：回归范围、生成样本和缺口。
+9. `chapter_edit.py`、`ui/chapters.mjs`：目录修订、UTF-16 原文范围、失败保存与跨窗口位置。
+10. `book_images.py`、`ui/book-images.mjs`、`library_data.py`：图像限额、书籍归属、元信息清理与暂存恢复。
+11. `tests/`、`scripts/verify_app.py` 与 `scripts/create_demo.py`：回归范围、冻结包、生成样本与受校验的旧演示升级。
 
 文件名保留 `app-v2.mjs` 以对应当前原型，旧版入口和样本专用脚本不属于公开运行链路。
 

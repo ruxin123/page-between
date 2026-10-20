@@ -41,6 +41,7 @@ export function createServiceSettings({ document, api, post, toast }) {
       <fieldset><legend class="visually-hidden">${ai ? "模型服务配置" : "MinerU 服务配置"}</legend>
         <label class="service-field">服务地址<input name="baseUrl" type="url" maxlength="2048" required spellcheck="false" autocomplete="off" placeholder="${ai ? "https://…/v1" : "https://mineru.net/api/v4"}" value="${escapeHTML(config.baseUrl)}"><small>${ai ? "使用兼容 Chat Completions 的接口；本机模型可用回环 HTTP 地址。" : "填写 MinerU 云服务的 API v4 根地址。"}</small></label>
         <label class="service-field">${ai ? "模型名称" : "解析模型"}${ai ? `<input name="model" type="text" maxlength="200" required spellcheck="false" autocomplete="off" placeholder="填写服务商提供的模型 ID" value="${escapeHTML(config.model)}">` : `<select name="model"><option value="vlm" ${config.model === "vlm" ? "selected" : ""}>VLM · 复杂版面</option><option value="pipeline" ${config.model === "pipeline" ? "selected" : ""}>Pipeline · 通用解析</option></select>`}</label>
+        ${ai ? `<label class="setting-check">此模型支持图像输入<input name="supportsImages" type="checkbox" ${config.supportsImages ? "checked" : ""}></label><p class="setting-note">确认模型与接口支持图像后启用。提问时可选择是否附带原图；连接测试仍只发送一句文字。</p>` : ""}
         <label class="service-field">${ai ? "API Key" : "API Token"}<input name="key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="${config.hasKey ? "已保存，留空保持现有凭据" : ai ? "填写 Key；本机模型可留空" : "填写 MinerU Token"}" aria-describedby="${service}-key-note"><small id="${service}-key-note">${config.hasKey ? (config.source === "environment" ? "正在沿用现有凭据。保存后转交 macOS 钥匙串管理。" : "凭据保存在 macOS 钥匙串中，不回显原值。") : "凭据仅由本机服务读取，保存到 macOS 钥匙串。"}</small></label>
         ${config.hasKey ? '<label class="setting-check remove-key">移除已保存的凭据<input type="checkbox" name="removeKey"></label>' : ""}
         <p class="service-storage-note">${saved.keychainAvailable ? "保存后立即生效。" : "钥匙串组件当前不可用，含凭据的配置暂时不能保存。"}${config.source === "environment" ? "当前使用已有配置。" : ""}</p>
@@ -72,6 +73,8 @@ export function createServiceSettings({ document, api, post, toast }) {
       key: form.elements.key.value,
       removeKey: form.elements.removeKey?.checked || false,
     };
+    if (service === "ai")
+      config.supportsImages = form.elements.supportsImages.checked;
     const result = form.querySelector("[data-result]");
     form.dataset.busy = "true";
     form.setAttribute("aria-busy", "true");

@@ -23,7 +23,7 @@ CONFIG = (
 )
 LOCK = threading.RLock()
 DEFAULTS = {
-    "ai": {"baseUrl": "", "model": ""},
+    "ai": {"baseUrl": "", "model": "", "supportsImages": False},
     "mineru": {"baseUrl": "https://mineru.net/api/v4", "model": "vlm"},
 }
 ENV = {
@@ -108,6 +108,7 @@ def effective(service, *, read_key=True):
             values = legacy()
             base, model, key = (values.get(name, "").strip() for name in ENV[service])
             config = {
+                **DEFAULTS[service],
                 "baseUrl": base or DEFAULTS[service]["baseUrl"],
                 "model": model or DEFAULTS[service]["model"],
                 "key": key if read_key else "",
@@ -154,7 +155,12 @@ def validated(service, config, *, require_key=False):
         raise SettingsError("请选择受支持的 MinerU 解析模型。")
     if require_key and not key and (service == "mineru" or not local):
         raise SettingsError("请在设置中填写服务凭据。")
-    return {"baseUrl": base, "model": model, "key": key, "host": address.netloc}
+    result = {"baseUrl": base, "model": model, "key": key, "host": address.netloc}
+    if service == "ai":
+        if type(config.get("supportsImages", False)) is not bool:
+            raise SettingsError("图像能力开关无效。")
+        result["supportsImages"] = config.get("supportsImages", False)
+    return result
 
 
 def ai_configuration():
@@ -170,6 +176,7 @@ def ai_configuration():
         "model": result["model"],
         "key": result["key"],
         "host": result["host"],
+        "supportsImages": result["supportsImages"],
     }
 
 
@@ -190,6 +197,8 @@ def public_settings():
             name: config[name] for name in ("baseUrl", "model", "source", "hasKey")
         }
         services[service].update(ready=ready, message=message)
+        if service == "ai":
+            services[service]["supportsImages"] = config.get("supportsImages", False)
     return {
         "services": services,
         "keychainAvailable": sys.platform == "darwin"
@@ -211,8 +220,11 @@ def candidate(service, payload, *, require_key=False):
     incoming = text(payload.get("key", ""), "凭据", 4096)
     if incoming and payload.get("removeKey"):
         raise SettingsError("不能同时替换与移除凭据。")
-    config = validated(service, {**payload, "key": incoming})
     old = effective(service, read_key=False)
+    draft = {**payload, "key": incoming}
+    if service == "ai":
+        draft.setdefault("supportsImages", old.get("supportsImages", False))
+    config = validated(service, draft)
     if not incoming and not payload.get("removeKey") and old["hasKey"]:
 
         def destination(base):
@@ -249,6 +261,8 @@ def update(service, payload):
             "model": config["model"],
             "keyRef": new_reference,
         }
+        if service == "ai":
+            data["services"][service]["supportsImages"] = config["supportsImages"]
         try:
             save(CONFIG, data)
         except OSError:

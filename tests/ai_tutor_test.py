@@ -14,6 +14,49 @@ from lxml import html
 
 
 class Tutor(unittest.TestCase):
+    def test_actual_nearby_text_is_saved_and_unprovided_citations_are_identified(self):
+        quote = self.payload["source"]["quote"]
+        payload = {
+            **self.payload,
+            "source": {
+                **self.payload["source"],
+                "context": "之前说明。\n" + quote + "\n尚未读到的文字。",
+            },
+        }
+        with patch.object(
+            tutor, "complete", return_value="依据 [2]。数学集合 $[7]$ 不作为来源。"
+        ):
+            first = tutor.ask(self.book, payload)
+        message = first["messages"][-1]
+        self.assertEqual(message["nearbyText"], "之前说明。\n" + quote)
+        self.assertNotIn("citationWarning", message)
+        with patch.object(
+            tutor,
+            "complete",
+            return_value="模型误用了来源 [2]。数学 $[7]$ 不作为来源。",
+        ):
+            second = tutor.ask(
+                self.book,
+                {**self.payload, "source": {**self.payload["source"], "context": ""}},
+            )
+        self.assertEqual(second["messages"][-1]["status"], "ready")
+        self.assertIn("[2]", second["messages"][-1]["citationWarning"])
+        self.assertNotIn("[7]", second["messages"][-1]["citationWarning"])
+        with patch.object(tutor, "complete", return_value="位置明确的答复。[2]"):
+            exact = tutor.ask(
+                self.book,
+                {
+                    **payload,
+                    "source": {
+                        **payload["source"],
+                        "contextBefore": "重复选段实际位于乙段之后。",
+                    },
+                },
+            )
+        self.assertEqual(
+            exact["messages"][-1]["nearbyText"], "重复选段实际位于乙段之后。"
+        )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

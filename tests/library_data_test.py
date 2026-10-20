@@ -1,4 +1,6 @@
 import hashlib
+import base64
+import io
 import json
 import sys
 import tempfile
@@ -9,11 +11,43 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import book_import
+import book_images
+from PIL import Image
 import library_data as data
 from storage import load, save
 
 
 class LibraryRecovery(unittest.TestCase):
+    def test_image_conversation_restores_from_staged_resources_without_active_original(
+        self,
+    ):
+        output = io.BytesIO()
+        Image.new("RGB", (48, 32), "white").save(output, format="PNG")
+        url = book_images.save_image(
+            self.book,
+            "data:image/png;base64," + base64.b64encode(output.getvalue()).decode(),
+        )
+        source = self.snapshot["ai-conversations.json"]["conversations"][0]["source"]
+        source["image"] = url
+        self.snapshot["ai-conversations.json"]["conversations"][0]["messages"][0][
+            "imageAttached"
+        ] = True
+        save(
+            self.library / "ai-conversations.json",
+            self.snapshot["ai-conversations.json"],
+        )
+        original = book_import.path_for(url)
+        body = original.read_bytes()
+        package = self.package()
+        original.unlink()
+        data.prepare_restore(package)
+        data.approve_restore()
+        data.apply_pending_restore()
+        restored = load(self.library / "ai-conversations.json", {})["conversations"][0]
+        self.assertEqual(restored["source"]["image"], url)
+        self.assertTrue(restored["messages"][0]["imageAttached"])
+        self.assertEqual(book_images.stored_image(self.book, url)[0], body)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

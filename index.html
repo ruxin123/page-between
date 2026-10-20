@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.20" />
+    <link rel="stylesheet" href="/layout.css?v=2.21" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -452,6 +452,7 @@
         <div id="toc-list" class="toc-list"></div>
         <div id="bookmarks-list" class="bookmarks-list" hidden></div>
         <div id="toc-source" class="toc-source"></div>
+        <button id="toc-edit" class="toc-edit" hidden>调整章节…</button>
       </aside>
       <aside
         id="reader-settings"
@@ -485,6 +486,9 @@
       ><button id="copy-image" hidden><i data-icon="image"></i>复制原图</button
       ><button id="ask-selection"><i data-icon="ask"></i>提问</button>
       <button id="search-selection"><i data-icon="search"></i>查书内</button>
+      <button id="chapter-start" hidden>
+        <i data-icon="toc"></i>从这里分章
+      </button>
     </div>
     <dialog id="knowledge-dialog" class="knowledge-dialog">
       <header class="aside-head">
@@ -543,18 +547,24 @@
       </details>
       <div id="ai-history-list" class="ai-history-list" hidden></div>
       <div id="ai-conversation">
-        <div class="question-source">
-          <button
-            id="question-source"
-            class="ai-source-link"
-            title="返回原文位置"
-          ></button>
-          <p id="ai-quote"></p>
+        <div class="ai-thread">
+          <div class="question-source">
+            <button
+              id="question-source"
+              class="ai-source-link"
+              title="返回原文位置"
+            ></button>
+            <p id="ai-quote"></p>
+          </div>
+          <img id="question-image" alt="选中的原书完整图表" hidden />
+          <div id="ai-messages" class="ai-messages" aria-live="polite"></div>
+          <p id="ai-progress" class="setting-note" role="status" hidden></p>
         </div>
-        <img id="question-image" alt="选中的完整图表，仅在本机显示" hidden />
-        <div id="ai-messages" class="ai-messages" aria-live="polite"></div>
-        <p id="ai-progress" class="setting-note" role="status" hidden></p>
         <form id="ai-question-form">
+          <label id="ai-image-option" class="knowledge-scope" hidden
+            ><input id="ai-send-image" type="checkbox" />本次附带原图</label
+          >
+          <p id="ai-image-status" class="setting-note" hidden></p>
           <label class="knowledge-scope"
             ><input
               id="ai-previous-knowledge"
@@ -654,8 +664,80 @@
         ><button id="book-cloud" class="secondary-button" hidden>
           精细解析…</button
         ><button id="book-export" class="secondary-button">导出 EPUB…</button
+        ><button id="book-chapters" class="secondary-button" hidden>
+          调整章节…</button
         ><button id="book-save" class="primary-button">保存设置</button>
       </div>
+    </dialog>
+    <dialog
+      id="chapters-dialog"
+      class="chapters-dialog"
+      aria-labelledby="chapters-heading"
+    >
+      <form method="dialog" class="dialog-heading">
+        <h2 id="chapters-heading">调整章节</h2>
+        <button class="icon-button" aria-label="关闭章节调整">
+          <i data-icon="close"></i>
+        </button>
+      </form>
+      <div class="chapters-intro">
+        <strong id="chapters-book"></strong>
+        <p id="chapters-note" class="setting-note"></p>
+      </div>
+      <div class="chapters-editor">
+        <nav id="chapters-browser" aria-label="选择要调整的章节">
+          <input
+            id="chapters-search"
+            type="search"
+            placeholder="查找章节"
+            aria-label="查找要调整的章节"
+          />
+          <div id="chapters-list" class="chapters-list"></div>
+        </nav>
+        <form id="chapters-form">
+          <fieldset id="chapters-controls">
+            <legend id="chapters-current"></legend>
+            <blockquote id="chapters-preview" hidden></blockquote>
+            <label
+              >章节标题<input
+                id="chapters-title"
+                type="text"
+                required
+                maxlength="120"
+            /></label>
+            <div class="chapters-actions">
+              <button id="chapters-save" class="primary-button">保存标题</button
+              ><button
+                id="chapters-merge"
+                type="button"
+                class="secondary-button"
+              >
+                合并到上一章
+              </button>
+            </div>
+          </fieldset>
+        </form>
+      </div>
+      <div id="chapters-restore" class="chapters-restore">
+        <button id="chapters-undo" class="secondary-button">
+          恢复上一版目录
+        </button>
+        <details id="chapters-reset">
+          <summary>重新识别目录</summary>
+          <p class="setting-note">
+            重新使用通用章节规则生成目录，会替换当前调整；完成后仍可恢复上一版。
+          </p>
+          <button id="chapters-auto" class="secondary-button">
+            重新识别目录
+          </button>
+        </details>
+      </div>
+      <p
+        id="chapters-status"
+        class="chapters-status"
+        role="status"
+        aria-live="polite"
+      ></p>
     </dialog>
     <dialog id="export-dialog" class="book-dialog">
       <form method="dialog" class="dialog-heading">
@@ -769,6 +851,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.20"></script>
+    <script type="module" src="/app-v2.mjs?v=2.21"></script>
   </body>
 </html>

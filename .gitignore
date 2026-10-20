@@ -23,8 +23,10 @@
 !/pdf_enhancement.py
 !/pdf_selection.py
 !/book_index.py
+!/book_images.py
 !/epub_export.py
 !/library_data.py
+!/chapter_edit.py
 !/paths.py
 !/normalize-headings.lua
 !/start.command
@@ -62,6 +64,8 @@
 !/tests/knowledge.test.mjs
 !/tests/export_test.py
 !/tests/library_data_test.py
+!/tests/chapter_edit_test.py
+!/tests/book_images_test.py
 !/docs/
 !/assets/
 /assets/*

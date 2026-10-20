@@ -1696,6 +1696,8 @@ body[data-theme="blue"] .pdf-paper.tinted {
   position: fixed;
   z-index: 70;
   display: flex;
+  flex-wrap: wrap;
+  max-width: calc(100vw - 16px);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -1718,12 +1720,14 @@ body[data-theme="blue"] .pdf-paper.tinted {
   height: 14px;
 }
 .question-panel {
+  display: flex;
+  flex-direction: column;
   position: fixed;
   right: 22px;
   bottom: 65px;
   width: 350px;
   max-height: calc(100dvh - 90px);
-  overflow: auto;
+  overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1737,7 +1741,7 @@ body[data-theme="blue"] .pdf-paper.tinted {
 .question-source {
   font-size: 12px;
   line-height: 1.8;
-  white-space: pre-wrap;
+  white-space: normal;
   background: var(--paper);
   border-left: 2px solid var(--accent);
   padding: 12px;
@@ -1987,6 +1991,144 @@ dialog::backdrop {
 }
 .book-dialog {
   width: 470px;
+}
+.book-dialog .dialog-footer {
+  flex-wrap: wrap;
+}
+.toc-edit {
+  margin: 0 20px 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--accent);
+}
+.chapters-dialog {
+  width: min(760px, calc(100vw - 24px));
+}
+.chapters-intro,
+.chapters-restore,
+.chapters-status {
+  margin: 0;
+  padding: 16px 24px;
+}
+.chapters-intro strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.chapters-editor {
+  display: flex;
+  gap: 24px;
+  padding: 0 24px;
+}
+.chapters-editor > nav {
+  flex: 1;
+  min-width: 0;
+}
+.chapters-editor > form {
+  flex: 1.2;
+  min-width: 0;
+}
+.chapters-editor input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+}
+.chapters-list {
+  max-height: min(40vh, 340px);
+  overflow: auto;
+  padding: 8px 0;
+}
+.chapters-list button {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: left;
+}
+.chapters-list button:hover,
+.chapters-list button[aria-current="true"] {
+  background: var(--soft);
+}
+.chapters-list small {
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+.chapters-list span {
+  overflow-wrap: anywhere;
+}
+#chapters-controls {
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+#chapters-controls legend {
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+#chapters-controls label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+#chapters-preview {
+  margin: 0 0 16px;
+  padding: 12px;
+  border-left: 2px solid var(--accent);
+  font-size: 12px;
+  line-height: 1.8;
+  max-height: 140px;
+  overflow: auto;
+  background: var(--soft);
+}
+.chapters-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+.chapters-restore {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+}
+.chapters-restore details {
+  flex: 1;
+  min-width: 120px;
+  font-size: 12px;
+}
+.chapters-restore summary {
+  cursor: pointer;
+  color: var(--secondary);
+  padding: 8px 0;
+}
+.chapters-status {
+  color: var(--accent);
+  font-size: 12px;
+  min-height: 44px;
+  line-height: 1.7;
+  padding-top: 0;
+}
+@media (max-width: 540px) {
+  .chapters-editor {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .chapters-list {
+    max-height: 160px;
+  }
 }
 .book-form {
   padding: 16px 28px 24px;
@@ -2908,6 +3050,33 @@ body[data-mode="palm"] .text-host {
 }
 .ai-history-list {
   padding-top: 16px;
+  min-height: 0;
+  overflow: auto;
+}
+#ai-conversation {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ai-thread {
+  min-height: 0;
+  overflow: auto;
+}
+#ai-question-form {
+  flex: none;
+  padding-top: 12px;
+}
+.question-panel .ai-form-actions .primary-button {
+  margin-top: 0;
+}
+body[data-mode="palm"] .question-panel .ai-settings-link,
+body[data-mode="palm"] .question-panel .ai-service-details,
+body[data-mode="palm"] #ai-question-form > p:last-child {
+  display: none;
+}
+body[data-mode="palm"] .question-panel textarea {
+  height: 56px;
+  min-height: 56px;
 }
 .ai-history-item {
   display: grid;
@@ -2949,6 +3118,30 @@ body[data-mode="palm"] .text-host {
 }
 .ai-error {
   color: var(--error);
+}
+.ai-citation-warning {
+  padding: 8px 12px;
+  border-left: 2px solid var(--accent);
+  background: var(--soft);
+  color: var(--secondary);
+  font-size: 11px;
+}
+.ai-nearby {
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--secondary);
+}
+.ai-nearby summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.ai-nearby p {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  padding: 8px;
+  background: var(--soft);
+  border-radius: 8px;
 }
 .ai-message p {
   margin: 8px 0;
@@ -3022,6 +3215,7 @@ body[data-mode="palm"] .text-host {
 }
 #ai-quote {
   margin: 12px 0 0;
+  white-space: pre-wrap;
 }
 
 .cloud-dialog {

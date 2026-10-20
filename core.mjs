@@ -2,6 +2,8 @@ const headingPattern =
   /^(?:第\s*[零〇一二三四五六七八九十百千万两\d]+\s*[章节回卷部篇](?:\s|[：:、.．—-]|$).*|(?:chapter|part|book)\s+(?:\d+|[ivxlcdm]+)(?:\s|[.:—-]|$).*|(?:序章|序言|前言|引子|楔子|尾声|后记|终章)(?:\s|[：:、—-]|$).*)$/iu;
 const volumePattern =
   /^(?:第\s*[零〇一二三四五六七八九十百千万两\d]+\s*[卷部篇]|(?:part|book)\s)/iu;
+const compactHeadingPattern =
+  /^第\s*[零〇一二三四五六七八九十百千万两\d]+\s*[章节回卷部篇]\S.{0,35}$/u;
 
 export function shouldFollowPosition({
   revision,
@@ -17,25 +19,60 @@ export function shouldFollowPosition({
   );
 }
 
+export function textChapterIndex(chapters, offset) {
+  if (!Number.isFinite(offset)) return 1;
+  return Math.max(
+    1,
+    chapters.findLastIndex((chapter) => (chapter.sourceOffset || 0) <= offset) +
+      1,
+  );
+}
+
+export function sliceText(text, start, end = text.length) {
+  start = Math.max(0, Math.min(text.length, start));
+  end = Math.max(start, Math.min(text.length, end));
+  if (start === end) return "";
+  const high = (value) => value >= 0xd800 && value <= 0xdbff;
+  const low = (value) => value >= 0xdc00 && value <= 0xdfff;
+  if (low(text.charCodeAt(start)) && high(text.charCodeAt(start - 1))) start--;
+  if (high(text.charCodeAt(end - 1)) && low(text.charCodeAt(end))) end++;
+  return text.slice(start, end);
+}
+
 export function parseChapters(input) {
   const text = input.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
-  const headings = [];
+  const lines = text.split("\n"),
+    candidates = [];
   let offset = 0;
-  for (const line of text.split("\n")) {
+  for (const [number, line] of lines.entries()) {
     const title = line.trim();
-    if (title.length <= 80 && headingPattern.test(title))
-      headings.push({ title, offset, end: offset + line.length });
+    const strict = title.length <= 80 && headingPattern.test(title);
+    const compact =
+      title.length <= 40 &&
+      compactHeadingPattern.test(title) &&
+      !/[。！？!?；;]/u.test(title);
+    if (strict || compact)
+      candidates.push({
+        title,
+        offset,
+        end: offset + line.length,
+        compact: !strict,
+        isolated: !lines[number - 1]?.trim() || !lines[number + 1]?.trim(),
+      });
     offset += line.length + 1;
   }
-  if (!headings.length)
-    return [
-      {
-        title: "全文",
-        body: text.trim(),
-        volume: "",
-        sourceOffset: text.indexOf(text.trim()),
-      },
-    ];
+  const compactCount = candidates.filter((item) => item.compact).length;
+  const headings = candidates.filter(
+    (item) => !item.compact || item.isolated || compactCount >= 2,
+  );
+  const full = {
+    title: "全文",
+    body: text.trim(),
+    volume: "",
+    sourceOffset: text.indexOf(text.trim()),
+    sourceEnd: text.indexOf(text.trim()) + text.trim().length,
+  };
+  if (!headings.length) return [full];
   const chapters = [];
   const prefix = text.slice(0, headings[0].offset).trim();
   if (prefix)
@@ -44,26 +81,33 @@ export function parseChapters(input) {
       body: prefix,
       volume: "",
       sourceOffset: text.indexOf(prefix),
+      sourceEnd: text.indexOf(prefix) + prefix.length,
     });
   let volume = "";
+  const bodies = headings.map((heading, index) =>
+    text.slice(heading.end, headings[index + 1]?.offset ?? text.length).trim(),
+  );
+  const lastWithBody = new Map();
   headings.forEach((heading, index) => {
-    const body = text
-      .slice(heading.end, headings[index + 1]?.offset ?? text.length)
-      .trim();
+    if (bodies[index]) lastWithBody.set(heading.title, index);
+  });
+  headings.forEach((heading, index) => {
+    const body = bodies[index];
+    if (!body && lastWithBody.get(heading.title) > index) return;
     if (volumePattern.test(heading.title)) {
       volume = heading.title;
       if (!body) return;
     }
+    const sourceOffset = body ? text.indexOf(body, heading.end) : heading.end;
     chapters.push({
       title: heading.title,
       body,
       volume,
-      sourceOffset: body ? text.indexOf(body, heading.end) : heading.end,
+      sourceOffset,
+      sourceEnd: sourceOffset + body.length,
     });
   });
-  return chapters.length
-    ? chapters
-    : [{ title: "全文", body: text.trim(), volume: "" }];
+  return chapters.length ? chapters : [full];
 }
 
 export function decodeBook(buffer) {

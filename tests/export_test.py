@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import book_import
 import epub_export
+import chapter_edit
 from scripts.create_demo import make_epub, make_pdf, make_scan
 from storage import save
 from lxml import etree
@@ -131,10 +132,17 @@ class Export(unittest.TestCase):
             "第一章 起点\n\n这是第一章，价格 $100。\n\n第二章 继续\n\n这是第二章。"
         )
         book = book_import.import_book(source)
+        book.update(
+            chapter_edit.stage(
+                book, {"action": "rename", "index": 1, "title": "手工调整的标题"}
+            )
+        )
         result = epub_export.build(book)
         exported = book_import.import_book(self.output(result))
         self.assertTrue(
-            any("第一章" in chapter["title"] for chapter in exported["chapters"])
+            any(
+                "手工调整的标题" in chapter["title"] for chapter in exported["chapters"]
+            )
         )
         with zipfile.ZipFile(self.output(result)) as archive:
             text = "".join(
@@ -235,6 +243,9 @@ class Export(unittest.TestCase):
         self.assertNotIn("onclick", table)
         self.assertIn('rowspan="2"', table)
         self.assertEqual(epub_export.filename("../name/a", ".epub"), "_name_a.epub")
+        long_name = epub_export.filename("很长的中文书名😀" * 30, ".epub")
+        self.assertLessEqual(len(long_name.encode("utf-8")), 240)
+        self.assertTrue(long_name.endswith(".epub"))
 
 
 if __name__ == "__main__":

@@ -350,6 +350,44 @@ def html_metadata(source):
     }
 
 
+def text_toc(chapters):
+    toc = []
+    for index, chapter in enumerate(chapters):
+        item = {
+            "title": chapter["title"],
+            "index": index + 1,
+            "fragment": "",
+            "children": [],
+        }
+        if chapter.get("volume"):
+            if not toc or toc[-1]["title"] != chapter["volume"]:
+                toc.append(
+                    {
+                        "title": chapter["volume"],
+                        "index": index + 1,
+                        "fragment": "",
+                        "children": [],
+                    }
+                )
+            toc[-1]["children"].append(item)
+        else:
+            toc.append(item)
+    return toc
+
+
+def text_chapter_index(book, offset):
+    if type(offset) is not int or not 0 <= offset <= 1000000000:
+        raise ValueError("原文字符位置无效。")
+    return max(
+        [
+            index
+            for index, chapter in enumerate(book.get("chapters", []), 1)
+            if chapter.get("sourceOffset", 0) <= offset
+        ]
+        or [1]
+    )
+
+
 def text_metadata(source, destination, enabled):
     text = decode_text(source.read_bytes())
     if not text.strip():
@@ -368,33 +406,12 @@ def text_metadata(source, destination, enabled):
     chapters = json.loads(parsed.stdout)
     output = destination / "text.json"
     save(output, chapters)
-    toc = []
-    for index, chapter in enumerate(chapters):
-        item = {
-            "title": chapter["title"],
-            "index": index + 1,
-            "fragment": "",
-            "children": [],
-        }
-        if chapter["volume"]:
-            if not toc or toc[-1]["title"] != chapter["volume"]:
-                toc.append(
-                    {
-                        "title": chapter["volume"],
-                        "index": index + 1,
-                        "fragment": "",
-                        "children": [],
-                    }
-                )
-            toc[-1]["children"].append(item)
-        else:
-            toc.append(item)
     return {
         "type": "txt",
         "title": source.stem,
         "author": "本地导入",
         "language": "zh" if re.search(r"[\u4e00-\u9fff]", text) else "en",
-        "toc": toc,
+        "toc": text_toc(chapters),
         "chapters": [{**chapter, "body": ""} for chapter in chapters],
         "contentUrl": url_for(output),
         "tocSource": "txt-rules" if enabled else "text",

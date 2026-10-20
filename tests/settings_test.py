@@ -15,6 +15,22 @@ from server import Handler
 
 
 class Settings(unittest.TestCase):
+    def test_image_capability_is_explicit_persistent_and_does_not_change_credentials(
+        self,
+    ):
+        settings.update("ai", self.config)
+        reference = settings.preferences()["services"]["ai"]["keyRef"]
+        self.assertFalse(settings.ai_configuration()["supportsImages"])
+        result = settings.update(
+            "ai", {**self.config, "key": "", "supportsImages": True}
+        )
+        self.assertTrue(result["services"]["ai"]["supportsImages"])
+        self.assertEqual(settings.preferences()["services"]["ai"]["keyRef"], reference)
+        settings.update("ai", {**self.config, "key": ""})
+        self.assertTrue(settings.ai_configuration()["supportsImages"])
+        with self.assertRaises(settings.SettingsError):
+            settings.update("ai", {**self.config, "supportsImages": "true"})
+
     def test_status_does_not_read_credentials_in_the_background(self):
         import ai_tutor
 

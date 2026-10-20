@@ -1,4 +1,6 @@
 import json
+import hashlib
+import socket
 import sys
 import tempfile
 import threading
@@ -18,6 +20,62 @@ from scripts.migrate_library import migrate
 
 
 class AppStorage(unittest.TestCase):
+    def test_large_import_streams_to_disk_and_truncated_upload_leaves_no_book(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = ("第一章 开始\n\n" + "read locally.\n" * 160000).encode()
+            with (
+                patch.object(server, "DATA", root),
+                patch.object(server, "BOOK_ROOT", root / "books"),
+                patch.object(book_import, "BOOK_ROOT", root / "books"),
+                patch.object(server, "SESSION", ""),
+                patch.object(
+                    server.Handler,
+                    "request_body",
+                    side_effect=AssertionError("raw uploads must stream"),
+                ),
+            ):
+                http = server.ReaderServer(("127.0.0.1", 0), server.Handler)
+                worker = threading.Thread(target=http.serve_forever, daemon=True)
+                worker.start()
+                try:
+                    connection = HTTPConnection("127.0.0.1", http.server_port)
+                    connection.request(
+                        "POST",
+                        "/api/import?name=large.txt&parse=0",
+                        payload,
+                        {"Content-Type": "application/octet-stream"},
+                    )
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    book = json.loads(response.read())["book"]
+                    self.assertEqual(
+                        book["sourceHash"], hashlib.sha256(payload).hexdigest()
+                    )
+                    self.assertEqual(
+                        (root / "books" / book["id"] / "original.txt").read_bytes(),
+                        payload,
+                    )
+                    connection.close()
+                    connection = HTTPConnection("127.0.0.1", http.server_port)
+                    connection.putrequest(
+                        "POST", "/api/import?name=partial.txt&parse=0"
+                    )
+                    connection.putheader("Content-Length", "12")
+                    connection.endheaders()
+                    connection.send(b"abc")
+                    connection.sock.shutdown(socket.SHUT_WR)
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 400)
+                    response.read()
+                    connection.close()
+                    self.assertEqual(len(server.library()["books"]), 1)
+                    self.assertFalse(list((root / "incoming").iterdir()))
+                finally:
+                    http.shutdown()
+                    http.server_close()
+                    worker.join()
+
     def test_epub_import_outside_source_handles_macos_temporary_directory_aliases(self):
         from scripts.create_demo import make_epub
 

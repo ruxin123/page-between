@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var base: URL?
   var palm: PalmDelegate?
   var quitting = false
+  var restarting = false
   var pendingFiles: [URL] = []
   var importing = false
   var ready = false
@@ -162,12 +163,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
       }
       try process.run()
-      DispatchQueue.main.asyncAfter(deadline: .now() + 40) { [weak self] in
+      DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in
         guard let self = self, self.engine === process, self.base == nil, !self.quitting else {
           return
         }
         self.engine = nil
-        if process.isRunning { process.terminate() }
+        self.stopEngine(process)
         self.showFailure("阅读服务未能启动，请重试。", retry: true)
       }
     } catch { showFailure("无法启动本机阅读服务，请检查应用与本机存储后重试。", retry: true) }
@@ -268,7 +269,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     let panel = NSOpenPanel()
     panel.canChooseDirectories = false
     panel.allowsMultipleSelection = parameters.allowsMultipleSelection
-    panel.allowedContentTypes = supported.compactMap { UTType(filenameExtension: $0) }
+    panel.allowedContentTypes = (supported + ["pbbackup"]).compactMap {
+      UTType(filenameExtension: $0)
+    }
     panel.beginSheetModal(for: window) { response in
       completionHandler(response == .OK ? panel.urls : nil)
     }
@@ -287,6 +290,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       importPendingFiles()
       return
     }
+    if action == "saveExport", let path = body["path"] as? String,
+      let name = body["name"] as? String
+    {
+      saveExport(path: path, name: name)
+      return
+    }
+    if action == "revealLibrary" {
+      NSWorkspace.shared.open(support)
+      return
+    }
+    if action == "restartLibrary" {
+      restartLibrary()
+      return
+    }
     if action == "palm", let book = body["book"] as? String,
       book.range(of: "^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$", options: .regularExpression) != nil,
       let base = base, var parts = URLComponents(url: base, resolvingAgainstBaseURL: false)
@@ -302,6 +319,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         palm?.showMainSettings = { [weak self] in self?.loadMain("/settings/ai") }
       }
       palm?.show(url)
+    }
+  }
+
+  func saveExport(path: String, name: String) {
+    guard
+      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup)$", options: .regularExpression)
+        != nil,
+      let base = base, let url = URL(string: path, relativeTo: base)?.absoluteURL
+    else { return }
+    let panel = NSSavePanel()
+    panel.title = "保存导出文件"
+    panel.nameFieldStringValue = URL(fileURLWithPath: name).lastPathComponent
+    panel.canCreateDirectories = true
+    panel.beginSheetModal(for: window) { [weak self] response in
+      guard response == .OK, let destination = panel.url, let self = self else { return }
+      Task { @MainActor in
+        do {
+          var request = self.request(url)
+          request.timeoutInterval = 300
+          let (temporary, response) = try await URLSession.shared.download(for: request)
+          guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw NSError(domain: "Export", code: 1)
+          }
+          let staged = destination.deletingLastPathComponent().appendingPathComponent(
+            "." + UUID().uuidString + ".download")
+          defer { try? FileManager.default.removeItem(at: staged) }
+          try FileManager.default.copyItem(at: temporary, to: staged)
+          if FileManager.default.fileExists(atPath: destination.path) {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged)
+          } else {
+            try FileManager.default.moveItem(at: staged, to: destination)
+          }
+          _ = try? await self.web.evaluateJavaScript(
+            "window.dispatchEvent(new Event('native-file-saved'))")
+        } catch {
+          let alert = NSAlert()
+          alert.messageText = "文件未能保存"
+          alert.informativeText = "请选择可写入的位置后重新导出；书库中的原文件保留。"
+          await alert.beginSheetModal(for: self.window)
+        }
+      }
+    }
+  }
+
+  func stopEngine(_ process: Process?) {
+    guard let process = process, process.isRunning else { return }
+    let pid = process.processIdentifier
+    if getpgid(pid) == pid { kill(-pid, SIGTERM) } else { process.terminate() }
+  }
+
+  func restartLibrary() {
+    guard !restarting, !quitting else { return }
+    restarting = true
+    Task { @MainActor [weak self] in
+      guard let self = self, !self.quitting else { return }
+      defer { self.restarting = false }
+      for view in [self.web, self.palm?.web].compactMap({ $0 }) {
+        _ = try? await view.callAsyncJavaScript(
+          "if(window.readerFlush) await window.readerFlush();", arguments: [:], in: nil,
+          contentWorld: .page)
+      }
+      let process = self.engine
+      self.engine = nil
+      self.ready = false
+      self.base = nil
+      self.output?.fileHandleForReading.readabilityHandler = nil
+      self.stopEngine(process)
+      self.web.loadHTMLString(
+        "<html><body style='background:#f4f6f4;color:#294137;font:16px -apple-system;display:grid;place-items:center;height:90vh'><p>正在重新打开并校验书库…</p></body></html>",
+        baseURL: nil)
+      for _ in 0..<50 {
+        if process?.isRunning != true { break }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+      }
+      if let process = process, process.isRunning {
+        let pid = process.processIdentifier
+        if getpgid(pid) == pid { kill(-pid, SIGKILL) } else { kill(pid, SIGKILL) }
+      }
+      if !self.quitting { self.startEngine() }
     }
   }
 
@@ -477,7 +573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     guard !quitReplied else { return }
     quitReplied = true
     palm?.stopHotkeys()
-    if engine?.isRunning == true { engine?.terminate() }
+    stopEngine(engine)
     output?.fileHandleForReading.readabilityHandler = nil
     sender.reply(toApplicationShouldTerminate: true)
   }
@@ -485,7 +581,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   func applicationWillTerminate(_ notification: Notification) {
     if let key = hotkey { UnregisterEventHotKey(key) }
     if let handler = hotkeyHandler { RemoveEventHandler(handler) }
-    if engine?.isRunning == true { engine?.terminate() }
+    stopEngine(engine)
     try? FileManager.default.removeItem(at: support.appendingPathComponent("runtime.json"))
   }
 }

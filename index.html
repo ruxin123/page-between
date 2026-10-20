@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.18" />
+    <link rel="stylesheet" href="/layout.css?v=2.19" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -124,6 +124,16 @@
             >
               文档解析
             </button>
+            <button
+              id="tab-data"
+              role="tab"
+              aria-controls="settings-data"
+              aria-selected="false"
+              tabindex="-1"
+              data-settings-tab="data"
+            >
+              书库与数据
+            </button>
           </div>
           <div
             id="settings-reading"
@@ -160,6 +170,74 @@
             hidden
           ></section>
           <p id="settings-load-status" class="setting-note" role="status"></p>
+          <section
+            id="settings-data"
+            class="data-settings"
+            role="tabpanel"
+            aria-labelledby="tab-data"
+            hidden
+          >
+            <div class="data-summary">
+              <div><small>书籍</small><strong id="data-books">—</strong></div>
+              <div>
+                <small>书库与记录</small><strong id="data-size">—</strong>
+              </div>
+              <div>
+                <small>可重建缓存</small><strong id="data-cache-size">—</strong>
+              </div>
+            </div>
+            <fieldset id="data-actions">
+              <h2>把书和阅读积累带在身边</h2>
+              <p class="setting-note">
+                备份包含原书、目录、进度、书签、解析结果与对话。模型和 MinerU
+                的凭据留在本机钥匙串中。
+              </p>
+              <div class="service-actions">
+                <button id="data-backup" class="primary-button">
+                  保存完整备份</button
+                ><button id="data-restore" class="secondary-button">
+                  选择备份恢复…</button
+                ><button id="data-reveal" class="secondary-button" hidden>
+                  查看数据文件夹
+                </button>
+              </div>
+              <input
+                type="file"
+                id="data-restore-file"
+                accept=".pbbackup"
+                hidden
+              />
+              <div id="data-restore-review" class="data-restore-review" hidden>
+                <h3>恢复前确认</h3>
+                <p id="data-restore-summary"></p>
+                <div class="service-actions">
+                  <button id="data-confirm-restore" class="primary-button">
+                    确认恢复并重启</button
+                  ><button id="data-cancel-restore" class="secondary-button">
+                    取消恢复
+                  </button>
+                </div>
+              </div>
+              <p id="data-last-restore" class="setting-note"></p>
+              <button id="data-previous" class="secondary-button" hidden>
+                找回恢复前的书库…
+              </button>
+              <hr />
+              <h2>让空间保持轻盈</h2>
+              <p class="setting-note">
+                清理
+                OCR、搜索和导出缓存。原书、进度、书签、对话与服务设置保留，缓存会按需重建。
+              </p>
+              <div class="service-actions">
+                <button id="data-clear-cache" class="secondary-button">
+                  准备清理缓存</button
+                ><button id="data-restart" class="primary-button" hidden>
+                  立即重启并清理
+                </button>
+              </div>
+            </fieldset>
+            <p id="data-status" class="setting-note" role="status"></p>
+          </section>
         </section>
       </main>
     </div>
@@ -188,6 +266,15 @@
           </div>
         </div>
         <div class="reader-actions">
+          <button
+            class="icon-button"
+            id="source-pdf-open"
+            aria-label="查看原 PDF"
+            title="查看对应的原 PDF 页面，随后可返回"
+            hidden
+          >
+            <i data-icon="pages"></i>
+          </button>
           <button
             class="icon-button"
             id="knowledge-open"
@@ -566,8 +653,40 @@
         <span id="book-save-note"></span
         ><button id="book-cloud" class="secondary-button" hidden>
           精细解析…</button
+        ><button id="book-export" class="secondary-button">导出 EPUB…</button
         ><button id="book-save" class="primary-button">保存设置</button>
       </div>
+    </dialog>
+    <dialog id="export-dialog" class="book-dialog">
+      <form method="dialog" class="dialog-heading">
+        <h2>导出 EPUB</h2>
+        <button class="icon-button" aria-label="关闭导出">
+          <i data-icon="close"></i>
+        </button>
+      </form>
+      <form id="export-form" class="book-form">
+        <strong id="export-book-title"></strong>
+        <p id="export-policy" class="setting-note"></p>
+        <div id="export-pages-row">
+          <label
+            >PDF 文件页序<input
+              id="export-pages"
+              placeholder="例如 29-34 或 2,5-8"
+              maxlength="2000"
+          /></label>
+          <div class="service-actions">
+            <button id="export-known" class="secondary-button" type="button">
+              已解析页</button
+            ><button id="export-all" class="secondary-button" type="button">
+              整本
+            </button>
+          </div>
+        </div>
+        <p id="export-status" class="setting-note" role="status"></p>
+        <button id="export-submit" class="primary-button" type="submit">
+          准备并保存 EPUB
+        </button>
+      </form>
     </dialog>
     <dialog id="cloud-dialog" class="book-dialog cloud-dialog">
       <form method="dialog" class="dialog-heading">
@@ -650,6 +769,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.18"></script>
+    <script type="module" src="/app-v2.mjs?v=2.19"></script>
   </body>
 </html>

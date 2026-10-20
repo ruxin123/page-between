@@ -9,6 +9,7 @@ import statistics
 import csv
 import io
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 
 from book_import import ROOT, path_for
@@ -18,6 +19,20 @@ from paths import CACHE as CACHE_ROOT, RUNTIME
 OCR = RUNTIME / "ocr-page"
 CACHE = CACHE_ROOT / "ocr-v3"
 LOCKS = collections.defaultdict(threading.Lock)
+PDF_LOCK = threading.RLock()
+
+
+@contextmanager
+def open_pdf(path):
+    import pypdfium2 as pdfium
+
+    with PDF_LOCK:
+        document = pdfium.PdfDocument(str(path))
+    try:
+        yield document
+    finally:
+        with PDF_LOCK:
+            document.close()
 
 
 def source_path(book):
@@ -59,11 +74,16 @@ def recognize(book, page, mode="full"):
         if path.is_file():
             return apply_enrichment(json.loads(path.read_text()), book, page, mode)
         if english:
-            import pypdfium2 as pdfium
-
-            document = pdfium.PdfDocument(str(source_path(book)))
-            original = document[page - 1]
-            image = original.render(scale=1900 / original.get_width()).to_pil()
+            with open_pdf(source_path(book)) as document, PDF_LOCK:
+                original = document[page - 1]
+                try:
+                    bitmap = original.render(scale=1900 / original.get_width())
+                    try:
+                        image = bitmap.to_pil().copy()
+                    finally:
+                        bitmap.close()
+                finally:
+                    original.close()
             stream = io.BytesIO()
             image.save(stream, format="PNG")
             tesseract = shutil.which("tesseract")
@@ -141,8 +161,6 @@ def recognize(book, page, mode="full"):
                 "engine": "tesseract-eng",
                 "lines": lines,
             }
-            original.close()
-            document.close()
         else:
             command = [str(OCR), str(source_path(book)), str(page)]
             if mode != "full":

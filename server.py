@@ -6,12 +6,14 @@ import hmac
 from collections import defaultdict
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
 import time
 import sys
 import uuid
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -33,18 +35,21 @@ from book_import import (
 from pdf_enhancement import build_contents, recognize, page_enrichment
 from pdf_selection import align_spans
 
-from paths import DATA, RUNTIME, DEMO, APP_MODE, DATA_PREFIX
+from paths import DATA, RUNTIME, DEMO, APP_MODE, DATA_PREFIX, CACHE
 from storage import load, save
 import ai_tutor
 import service_settings
 import mineru_api
 import book_index
+import epub_export
+import library_data
 
 MUTEX = threading.RLock()
 WORKERS = ThreadPoolExecutor(max_workers=2)
 RUNNING = set()
 CANCELS = {}
 IMPORT_LOCKS = defaultdict(threading.Lock)
+RECOVERY_LOCK = threading.Lock()
 SESSION = os.environ.pop("PAGE_BETWEEN_SESSION", "")
 
 
@@ -321,6 +326,23 @@ class Handler(SimpleHTTPRequestHandler):
             raise ValueError("文件或请求过大。")
         return self.rfile.read(length)
 
+    def receive_file(self, target, limit):
+        remaining = int(self.headers.get("Content-Length", "0"))
+        if not 0 < remaining <= limit:
+            raise ValueError("文件为空或超过当前大小上限。")
+        checksum = hashlib.sha256()
+        with target.open("wb") as output:
+            while remaining:
+                block = self.rfile.read(min(1024 * 1024, remaining))
+                if not block:
+                    raise ValueError("文件传输已中断，请重新选择文件。")
+                output.write(block)
+                checksum.update(block)
+                remaining -= len(block)
+            output.flush()
+            os.fsync(output.fileno())
+        return checksum.hexdigest()
+
     def same_origin(self):
         port = self.server.server_port
         if self.headers.get("Host") not in {f"127.0.0.1:{port}", f"localhost:{port}"}:
@@ -370,6 +392,9 @@ class Handler(SimpleHTTPRequestHandler):
                 )
             if route.path == "/api/library":
                 return self.json(library())
+            if route.path == "/api/data/info":
+                with RECOVERY_LOCK:
+                    return self.json(library_data.information())
             if route.path == "/api/library-version":
                 return self.json(
                     {
@@ -407,6 +432,28 @@ class Handler(SimpleHTTPRequestHandler):
                     },
                 )
                 return self.json(state)
+            if route.path.startswith("/api/downloads/"):
+                name = route.path.removeprefix("/api/downloads/")
+                if not re.fullmatch(r"[0-9a-f]{32}\.(?:epub|pbbackup)", name):
+                    raise ValueError("导出文件地址无效。")
+                path = CACHE / "exports" / name
+                if not path.is_file():
+                    raise ValueError("导出文件已过期，请重新导出。")
+                self.send_response(200)
+                self.send_header(
+                    "Content-Type",
+                    "application/epub+zip"
+                    if name.endswith(".epub")
+                    else "application/zip",
+                )
+                self.send_header("Content-Length", str(path.stat().st_size))
+                self.send_header(
+                    "Content-Disposition", 'attachment; filename="' + name + '"'
+                )
+                self.end_headers()
+                with path.open("rb") as stream:
+                    shutil.copyfileobj(stream, self.wfile)
+                return
             if route.path == "/api/ocr":
                 book = book_for(query.get("book", [""])[0])
                 page = int(query.get("page", ["0"])[0])
@@ -479,6 +526,16 @@ class Handler(SimpleHTTPRequestHandler):
         route = urlsplit(self.path)
         query = parse_qs(route.query)
         try:
+            if route.path == "/api/data/restore":
+                with (
+                    RECOVERY_LOCK,
+                    tempfile.TemporaryDirectory(
+                        prefix=".backup-import-", dir=DATA.parent
+                    ) as folder,
+                ):
+                    source = Path(folder) / "library.pbbackup"
+                    self.receive_file(source, library_data.MAX_ARCHIVE)
+                    return self.json(library_data.prepare_restore(source))
             if route.path == "/api/import":
                 name = Path(query.get("name", [""])[0]).name
                 if not name or len(name) > 240 or "\x00" in name:
@@ -486,24 +543,22 @@ class Handler(SimpleHTTPRequestHandler):
                 extension = Path(name).suffix.lower()
                 if extension not in SUPPORTED:
                     raise ValueError("暂不支持这个格式。")
-                data = self.request_body(200 * 1024 * 1024)
-                digest = hashlib.sha256(data).hexdigest()
-                with IMPORT_LOCKS[digest]:
-                    duplicate = next(
-                        (
-                            old
-                            for old in library()["books"]
-                            if old["sourceHash"] == digest
-                        ),
-                        None,
-                    )
-                    if duplicate:
-                        return self.json({"book": duplicate, "duplicate": True})
-                    incoming = DATA / "incoming" / uuid.uuid4().hex
-                    incoming.mkdir(parents=True)
-                    source = incoming / name
-                    source.write_bytes(data)
-                    try:
+                incoming = DATA / "incoming" / uuid.uuid4().hex
+                incoming.mkdir(parents=True)
+                source = incoming / name
+                try:
+                    digest = self.receive_file(source, 200 * 1024 * 1024)
+                    with IMPORT_LOCKS[digest]:
+                        duplicate = next(
+                            (
+                                old
+                                for old in library()["books"]
+                                if old["sourceHash"] == digest
+                            ),
+                            None,
+                        )
+                        if duplicate:
+                            return self.json({"book": duplicate, "duplicate": True})
                         book = import_book(
                             source,
                             enabled=query.get(
@@ -519,9 +574,45 @@ class Handler(SimpleHTTPRequestHandler):
                         if book["parseEnabled"]:
                             start_job(book["id"])
                         return self.json({"book": book})
-                    finally:
-                        shutil.rmtree(incoming, ignore_errors=True)
+                finally:
+                    shutil.rmtree(incoming, ignore_errors=True)
             payload = json.loads(self.request_body())
+            if route.path == "/api/data/backup":
+                with MUTEX, ai_tutor.LOCK:
+                    snapshot = {
+                        "library.json": library(),
+                        "state.json": load(DATA / "state.json", {}),
+                        "ai-conversations.json": ai_tutor.records(),
+                    }
+                result = library_data.backup(snapshot)
+                return self.json(
+                    {**result, "download": "/api/downloads/" + result["id"]}
+                )
+            if route.path == "/api/data/approve-restore":
+                with RECOVERY_LOCK:
+                    return self.json(library_data.approve_restore())
+            if route.path == "/api/data/cancel-restore":
+                with RECOVERY_LOCK:
+                    library_data.cancel_restore()
+                return self.json({"cancelled": True})
+            if route.path == "/api/data/previous":
+                with RECOVERY_LOCK:
+                    return self.json(library_data.prepare_previous())
+            if route.path == "/api/data/clear-cache":
+                return self.json(library_data.queue_cache_cleanup())
+            if route.path == "/api/export/epub":
+                book = book_for(payload.get("book"))
+                if not book:
+                    raise ValueError("找不到这本书。")
+                pages = (
+                    mineru_api.page_range(payload.get("pages"), book["pages"])
+                    if book["type"] == "pdf"
+                    else None
+                )
+                result = epub_export.build(book, pages)
+                return self.json(
+                    {**result, "download": "/api/downloads/" + result["id"]}
+                )
             if route.path == "/api/index/search":
                 book = book_for(payload.get("book"))
                 if not book:
@@ -805,15 +896,18 @@ def main():
         import signal
 
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
-
-        DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
-        instance_lock = (DATA / ".instance.lock").open("a")
+        if os.getpgrp() != os.getpid():
+            os.setsid()
+        DATA.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        instance_lock = (DATA.parent / (DATA.name + ".instance.lock")).open("a")
         try:
             fcntl.flock(instance_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SystemExit(
                 "此书库已由另一个页间进程使用，请先关闭已有窗口。"
             ) from None
+    library_data.apply_pending_restore()
+    library_data.apply_cache_cleanup()
     build_native()
     if not (DATA / "library.json").exists():
         if DEMO:
@@ -831,7 +925,9 @@ def main():
         def follow_parent():
             while os.getppid() == int(parent):
                 time.sleep(1)
-            os._exit(0)
+            import signal
+
+            os.killpg(os.getpgrp(), signal.SIGTERM)
 
         threading.Thread(target=follow_parent, daemon=True).start()
     resume_pending_jobs()

@@ -253,7 +253,7 @@ def epub_metadata(content):
         if cover is not None
         else None
     )
-    return {
+    metadata = {
         "type": "epub",
         "title": package.xpath("string(//dc:title)", namespaces=OPF).strip(),
         "author": "、".join(package.xpath("//dc:creator/text()", namespaces=OPF)),
@@ -267,6 +267,31 @@ def epub_metadata(content):
         "toc": toc,
         "tocSource": toc_source,
     }
+    marker = content / "META-INF/page-between.json"
+    if marker.is_file() and marker.stat().st_size <= 100000:
+        try:
+            source = json.loads(marker.read_text())
+            pages = source.get("pages", [])
+            if (
+                source.get("schema") == 1
+                and re.fullmatch(r"[0-9a-f]{64}", source.get("sourceHash", ""))
+                and isinstance(pages, list)
+                and pages
+                and all(type(page) is int and 1 <= page <= 100000 for page in pages)
+            ):
+                metadata.update(
+                    sourcePdfHash=source["sourceHash"], sourcePdfPages=pages
+                )
+                for chapter in chapters:
+                    root = etree.parse(str(path_for(chapter["url"])), XML)
+                    markers = root.xpath('//*[starts-with(@id,"pdf-page-")]/@id')
+                    if markers and re.fullmatch(r"pdf-page-\d+", markers[0]):
+                        page = int(markers[0].removeprefix("pdf-page-"))
+                        if page in pages:
+                            chapter["sourcePdfPage"] = page
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return metadata
 
 
 def flatten_toc(items):

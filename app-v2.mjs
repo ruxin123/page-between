@@ -14,8 +14,10 @@ import { createDocumentParsing, formatPages } from "/ui/mineru.mjs";
 import { copyPng } from "/ui/clipboard.mjs";
 import { alignTextLayer, canonicalSelection } from "/ui/pdf-selection.mjs";
 import { createBookSearch, decorateReferences } from "/ui/knowledge.mjs";
+import { createBookExport } from "/ui/export.mjs";
+import { createDataSettings } from "/ui/data.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.18";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.19";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -94,7 +96,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.18";
+document.body.dataset.readerBuild = "2.19";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -116,6 +118,12 @@ function post(path, value) {
   });
 }
 const toast = createToasts($("toasts"));
+const dataSettings = createDataSettings({ api, post, toast });
+const bookExport = createBookExport({
+  post,
+  getBook: (id) => books.find((book) => book.id === id),
+  toast,
+});
 const bookSearch = createBookSearch({
   post,
   toast,
@@ -519,7 +527,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.18",
+        build: "2.19",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1668,8 +1676,14 @@ function onEpubClick(event) {
     const latex = element.querySelector('annotation[encoding*="tex"]');
     text = latex?.textContent || element.outerHTML;
     format = latex ? "latex" : "mathml";
-  } else if (tag === "img") image = element.src;
-  else {
+  } else if (tag === "img") {
+    image = element.src;
+    if (element.alt?.startsWith("LaTeX: ")) {
+      kind = "equation";
+      text = element.alt.slice(7);
+      format = "latex";
+    }
+  } else {
     const embedded = element.querySelector("image");
     image = embedded
       ? new URL(
@@ -1790,6 +1804,12 @@ async function renderCurrent(position) {
         ? "正在加载原书章节与字体…"
         : "正在整理章节排版…";
   $("book-title").textContent = current.title;
+  $("source-pdf-open").hidden =
+    !current.sourcePdfHash ||
+    !books.some(
+      (book) =>
+        book.type === "pdf" && book.sourceHash === current.sourcePdfHash,
+    );
   $("book-subtitle").textContent = position.resource
     ? "原书附加内容 · 返回后继续阅读"
     : current.author;
@@ -1951,8 +1971,10 @@ async function flip(direction) {
 function goBack() {
   const previous = history.pop();
   if (previous) {
+    savePosition(true);
     current = books.find((book) => book.id === previous.book);
     location = previous.position;
+    if (!palm) window.history.replaceState(null, "", "#/read/" + current.id);
     renderCurrent(location);
   }
 }
@@ -2014,6 +2036,7 @@ function showRoute() {
     if (next === "settings") {
       renderSettings();
       serviceSettings.show(requested[1]);
+      if (requested[1] === "data") dataSettings.show();
     }
   }
 }
@@ -2502,6 +2525,27 @@ $("bookmarks-list").addEventListener("click", async (event) => {
 $("bookmark-button").onclick = toggleBookmark;
 $("palm-open").onclick = () => openPalm(current.id);
 $("book-options").onclick = () => openBookOptions(current.id);
+$("book-export").onclick = () => {
+  const id = editingBook?.id;
+  $("book-dialog").close();
+  bookExport.open(id);
+};
+$("source-pdf-open").onclick = () => {
+  const source = books.find(
+    (book) => book.type === "pdf" && book.sourceHash === current.sourcePdfHash,
+  );
+  if (!source) return;
+  const page =
+    current.chapters[location.index - 1]?.sourcePdfPage ||
+    current.sourcePdfPages?.[0] ||
+    1;
+  history.push(snapshot());
+  savePosition(true);
+  current = source;
+  location = { index: page, pdfY: 0 };
+  if (!palm) window.history.replaceState(null, "", "#/read/" + source.id);
+  renderCurrent(location);
+};
 $("focus-button").onclick = () =>
   setFocus(!$("reader").classList.contains("focused"));
 $("focus-exit").onclick = () => setFocus(false);
@@ -2637,6 +2681,9 @@ if (palm && native)
   };
 window.addEventListener("app-import", openImport);
 window.addEventListener("app-palm", () => openPalm(current?.id));
+window.addEventListener("native-file-saved", () =>
+  toast("文件已保存。", { kind: "success" }),
+);
 document.addEventListener("keydown", handleKeydown);
 document.addEventListener("copy", onCopy);
 attachPageGestures($("reading-viewport"));

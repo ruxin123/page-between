@@ -1,5 +1,6 @@
 import io
 import json
+import shutil
 import sys
 import tempfile
 import threading
@@ -254,6 +255,13 @@ class MinerU(unittest.TestCase):
                         __import__("hashlib")
                         .sha256(book_import.path_for(book["url"]).read_bytes())
                         .digest(),
+                    )
+                    shutil.rmtree(root / "books" / book["id"] / "mineru")
+                    mineru.run(book, [2, 4], lambda message: None, cancel)
+                    self.assertEqual(
+                        counts["created"],
+                        2,
+                        "Clearing completed caches must reuse canonical results.",
                     )
             finally:
                 http.shutdown()

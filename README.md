@@ -1,6 +1,6 @@
 # 页间 · Page Between
 
-一个面向 macOS 的个人阅读原型：原生 EPUB、保留版面的 PDF、可分页的文字书，以及随窗口大小调整字号的掌上阅读窗口。
+一个面向 macOS 的个人阅读应用：原生 EPUB、保留版面的 PDF、可分页的文字书，以及随窗口大小调整字号的掌上阅读窗口。
 
 A local-first reading prototype with native EPUB navigation, enhanced PDF selection, paginated text, and a compact macOS reading window.
 
@@ -10,7 +10,7 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（前端 2.18）
+## macOS App 构建（前端 2.19）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -23,7 +23,7 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 
 构建结果默认位于用户的 `Library/Caches/Page Between/build/`。当前在 Apple Silicon、macOS 27.0.1 验证，签名为本机构建的 ad-hoc 签名；其他系统版本和正式分发尚待验收。旧书库可使用 `python scripts/migrate_library.py data` 复制到安装版，已有目标不会覆盖，原目录保留。
 
-当前 App 仍在持续开发：重排导出、应用内备份恢复等见 [完整验收清单](docs/APP_READINESS.md)。以下是从源码运行原型的方式。
+当前 App 仍在持续开发，完整交互与安装验收见 [完整验收清单](docs/APP_READINESS.md)。以下是从源码运行原型的方式。
 
 ## 快速开始
 
@@ -113,6 +113,18 @@ MinerU 页面可保存云 API v4 的地址、Token 与解析模型。「检查�
 ![匿名资料上的真实模型问答](docs/screenshots/ai-answer.png)
 
 [本书记录示例](docs/screenshots/ai-history.png)
+
+## 导出与书库备份（2.19）
+
+书籍设置中可以「导出 EPUB」。原生 EPUB 保留原书副本；TXT 导出章节；PDF 可以选择页段或整本，把已解析内容转为正文、MathML 公式、表格和插图。尚无文字的扫描页和无法排版的复杂公式保留原图。导出的 EPUB 重新导入后，在原 PDF 仍在书库时可一键查看对应原页，并返回继续阅读。
+
+「设置 → 书库与数据」提供完整备份、恢复校验、取消、确认后重启恢复，以及找回恢复前的书库。备份包含图书与阅读积累，凭据继续留在本机钥匙串。未确认的备份不会在重启时启用；恢复失败保留原书库。
+
+缓存清理在重启时执行，保留原书、记录、规范化解析结果和未完成的云任务断点。当前备份上限为压缩 2 GB、展开 10 GB。
+
+![匿名资料的重排阅读与原页入口](docs/screenshots/reflow-reader.png)
+
+[备份校验和恢复确认](docs/screenshots/data-restore.png)
 
 ## 书内检索与引用（2.18）
 

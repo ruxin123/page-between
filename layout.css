@@ -60,6 +60,52 @@
   --reading-line: 1.95;
   --reading-width: 680px;
 }
+.data-settings {
+  max-width: 880px;
+}
+.data-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 24px 0;
+}
+.data-summary > div {
+  min-width: 128px;
+  display: grid;
+  gap: 8px;
+}
+.data-summary small {
+  color: var(--secondary);
+}
+.data-summary strong {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+.data-settings fieldset {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  background: var(--surface);
+}
+.data-settings h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+.data-settings hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 24px 0;
+}
+.data-restore-review {
+  margin-top: 24px;
+  padding: 16px;
+  background: var(--soft);
+  border-radius: 12px;
+  line-height: 1.8;
+}
+.data-restore-review h3 {
+  margin: 0;
+}
 
 .knowledge-dialog {
   width: min(720px, calc(100vw - 32px));

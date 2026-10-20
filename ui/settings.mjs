@@ -111,14 +111,15 @@ export function createServiceSettings({ document, api, post, toast }) {
     }
   }
   async function show(section = "reading") {
-    if (!["reading", "ai", "mineru"].includes(section)) section = "reading";
+    if (!["reading", "ai", "mineru", "data"].includes(section))
+      section = "reading";
     for (const tab of tabs) {
       const selected = tab.dataset.settingsTab === section;
       tab.setAttribute("aria-selected", String(selected));
       tab.tabIndex = selected ? 0 : -1;
       $("settings-" + tab.dataset.settingsTab).hidden = !selected;
     }
-    if (section === "reading" || saved) return;
+    if (["reading", "data"].includes(section) || saved) return;
     if (!loading)
       loading = (async () => {
         $("settings-load-status").textContent = "正在读取本机服务设置…";

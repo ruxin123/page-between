@@ -130,6 +130,7 @@ class Adapters(unittest.TestCase):
                 self.assertEqual(book["language"], "en")
                 self.assertEqual(book["author"], "Original example")
                 self.assertEqual(book["tocSource"], "epub-nav")
+                self.assertEqual(book["chapters"][0]["title"], "Part A")
                 self.assertEqual(book["toc"][0]["fragment"], "part-a")
                 self.assertEqual(book["toc"][0]["children"][0]["fragment"], "part-b")
                 self.assertEqual(book["toc"][0]["children"][0]["index"], 1)

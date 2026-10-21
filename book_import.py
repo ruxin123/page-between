@@ -237,7 +237,9 @@ def epub_metadata(content):
     for item in flatten_toc(toc):
         if item["index"] and item["title"]:
             chapter = chapters[item["index"] - 1]
-            if not chapter.get("named") or not item.get("children"):
+            if not chapter.get("named") or (
+                not item.get("fragment") and not item.get("children")
+            ):
                 chapter["title"], chapter["named"] = item["title"], True
     cover_id = package.xpath('string(//o:meta[@name="cover"]/@content)', namespaces=OPF)
     cover = manifest.get(cover_id)

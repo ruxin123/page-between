@@ -163,6 +163,7 @@ def verify(app, epubcheck=None, samples=()):
                 "/",
                 "/app-v2.mjs",
                 "/ui/settings.mjs",
+                "/ui/navigation.mjs",
                 "/assets/fonts/han-serif.otf",
                 "/assets/vendor/pdf.mjs",
                 "/demo-data/books/demo-a/content/OPS/chapter-2.xhtml",

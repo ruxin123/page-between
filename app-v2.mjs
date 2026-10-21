@@ -24,7 +24,8 @@ import { createBookExport } from "/ui/export.mjs";
 import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.24";
+import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.25";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -107,7 +108,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.24";
+document.body.dataset.readerBuild = "2.25";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -193,14 +194,20 @@ function postState(patch) {
     });
   return stateQueue;
 }
-function flatToc(items) {
-  return items.flatMap((item) => [item, ...flatToc(item.children || [])]);
-}
 function count(book) {
   return book.type === "pdf" ? book.pages : book.chapters.length;
 }
 function chapterTitle(book = current, index = location?.index) {
   if (!book) return "";
+  if (
+    book.type === "epub" &&
+    book === current &&
+    index === location?.index &&
+    readerReady
+  )
+    return (
+      activeTocItem()?.title || book.chapters[index - 1]?.title || book.title
+    );
   if (book.type !== "pdf")
     return book.chapters[clamp(index, 1, count(book)) - 1]?.title || book.title;
   return (
@@ -209,6 +216,71 @@ function chapterTitle(book = current, index = location?.index) {
       .sort((a, b) => a.index - b.index)
       .at(-1)?.title || "原书页面"
   );
+}
+function activeTocItem() {
+  if (!current || !location) return null;
+  if (current.type !== "epub")
+    return (
+      flatToc(current.toc || [])
+        .filter((item) => item.index && item.index <= location.index)
+        .sort((a, b) => a.index - b.index)
+        .at(-1) || null
+    );
+  const doc =
+    readerReady &&
+    !location.resource &&
+    $("epub-frame").dataset.chapter ===
+      current.chapters[location.index - 1]?.url
+      ? frameDocument()
+      : null;
+  const anchor = retainedAnchor || lastAnchor;
+  const element =
+    doc &&
+    anchor &&
+    (Number.isSafeInteger(anchor.sourceNode)
+      ? doc.querySelector(`[data-source-node="${anchor.sourceNode}"]`)
+      : readingElements()[anchor.index]);
+  let fragment = location.fragment;
+  if (doc && fragment) {
+    const target = fragmentTarget(doc, fragment);
+    const rectangle =
+      target && (characterRect(target) || target.getClientRects()[0]);
+    const frame = $("epub-frame").getBoundingClientRect(),
+      view = $("reading-viewport").getBoundingClientRect();
+    if (
+      !rectangle ||
+      rectangle.left + frame.left < view.left ||
+      rectangle.left + frame.left > view.right ||
+      rectangle.top + frame.top < view.top ||
+      rectangle.top + frame.top > view.bottom
+    )
+      fragment = "";
+  }
+  return epubTocAtAnchor(current.toc || [], location.index, {
+    doc,
+    element,
+    offset: anchor?.charOffset || 0,
+    fragment,
+  });
+}
+
+function updateTocActive(active = activeTocItem()) {
+  const index = flatToc(current?.toc || []).indexOf(active);
+  const list = $("toc-list"),
+    previous = list.querySelector('[aria-current="true"]');
+  if (previous?.dataset.tocEntry === String(index)) return;
+  previous?.classList.remove("active");
+  previous?.removeAttribute("aria-current");
+  const button = list.querySelector(`[data-toc-entry="${index}"]`);
+  if (!button) return;
+  button.classList.add("active");
+  button.setAttribute("aria-current", "true");
+  for (
+    let parent = button.parentElement;
+    parent && parent !== list;
+    parent = parent.parentElement
+  )
+    if (parent.tagName === "DETAILS") parent.open = true;
 }
 function initialLocation(book) {
   const saved = positions[book.id] || {};
@@ -587,7 +659,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.24",
+        build: "2.25",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -672,6 +744,9 @@ function currentProgress() {
 function updateProgress() {
   if (!current || !location) return;
   const progress = currentProgress();
+  const active = activeTocItem(),
+    title = active?.title || chapterTitle();
+  updateTocActive(active);
   $("progress-fill").style.width = `${progress * 100}%`;
   $("page-label").textContent = pagination
     ? `${pagination.page + 1} / ${pagination.count} 页`
@@ -679,11 +754,11 @@ function updateProgress() {
   $("page-label").dataset.chapter = location.index;
   $("palm-position").textContent = pagination
     ? `${pagination.page + 1} / ${pagination.count} · ${Math.round(progress * 100)}%`
-    : `${chapterTitle()} · ${Math.round(progress * 100)}%`;
+    : `${title} · ${Math.round(progress * 100)}%`;
   $("position-label").textContent =
     current.type === "pdf"
-      ? `${current.pageOffset !== null && location.index > current.pageOffset ? "书页 " + (location.index - current.pageOffset) : "PDF 第 " + location.index + " 页"} · ${chapterTitle()}`
-      : chapterTitle();
+      ? `${current.pageOffset !== null && location.index > current.pageOffset ? "书页 " + (location.index - current.pageOffset) : "PDF 第 " + location.index + " 页"} · ${title}`
+      : title;
   const view = $("reading-viewport"),
     first = pagination ? pagination.page === 0 : view.scrollTop < 1,
     last = pagination
@@ -720,10 +795,10 @@ function updateProgress() {
 function renderToc() {
   if (!current) return;
   const text = $("toc-search").value.trim().toLocaleLowerCase();
-  const active = flatToc(current.toc || [])
-    .filter((item) => item.index && item.index <= location.index)
-    .sort((a, b) => a.index - b.index)
-    .at(-1);
+  const entries = new Map(
+    flatToc(current.toc || []).map((item, index) => [item, index]),
+  );
+  const active = activeTocItem();
   function node(item, inherited = false) {
     const matches = inherited || item.title.toLocaleLowerCase().includes(text);
     const children = (item.children || [])
@@ -731,10 +806,10 @@ function renderToc() {
       .join("");
     if (text && !matches && !children) return "";
     const currentItem = active === item;
-    const row = `<button class="toc-item${currentItem ? " active" : ""}" data-index="${item.index || ""}" data-fragment="${escapeHTML(item.fragment || "")}" ${!item.index ? "disabled" : ""} ${currentItem ? 'aria-current="true"' : ""}><span>${escapeHTML(item.title)}</span>${item.printed ? `<small>${escapeHTML(item.printed)}</small>` : ""}</button>`;
+    const row = `<button class="toc-item${currentItem ? " active" : ""}" data-toc-entry="${entries.get(item)}" data-index="${item.index || ""}" data-fragment="${escapeHTML(item.fragment || "")}" ${!item.index ? "disabled" : ""} ${currentItem ? 'aria-current="true"' : ""}><span>${escapeHTML(item.title)}</span>${item.printed ? `<small>${escapeHTML(item.printed)}</small>` : ""}</button>`;
     if (!item.children?.length) return row;
     const open = !!text || flatToc([item]).includes(active);
-    return `<details ${open ? "open" : ""}><summary><span>${escapeHTML(item.title)}</span>${item.printed ? `<small>${escapeHTML(item.printed)}</small>` : ""}</summary>${item.index ? `<button class="toc-item" data-index="${item.index}" data-fragment="${escapeHTML(item.fragment || "")}"><span>${current.type === "pdf" ? "本章起始页" : "从这里阅读"}</span></button>` : ""}${children}</details>`;
+    return `<details ${open ? "open" : ""}><summary><span>${escapeHTML(item.title)}</span>${item.printed ? `<small>${escapeHTML(item.printed)}</small>` : ""}</summary>${item.index ? `<button class="toc-item${currentItem ? " active" : ""}" data-toc-entry="${entries.get(item)}" data-index="${item.index}" data-fragment="${escapeHTML(item.fragment || "")}" ${currentItem ? 'aria-current="true"' : ""}><span>${current.type === "pdf" ? "本章起始页" : "从这里阅读"}</span></button>` : ""}${children}</details>`;
   }
   $("toc-list").innerHTML =
     (current.toc || []).map((item) => node(item)).join("") ||
@@ -1394,7 +1469,6 @@ function updatePdfScroll() {
   }
   if (lo !== location.index) {
     location.index = lo;
-    renderToc();
     $("ocr-status").hidden = true;
   }
   ensurePdfPages();
@@ -1521,9 +1595,7 @@ function revealPosition(position) {
   }
   if (position.fragment) {
     const doc = current.type === "epub" ? frameDocument() : document,
-      target =
-        doc.getElementById(position.fragment) ||
-        doc.querySelector(`[name="${CSS.escape(position.fragment)}"]`);
+      target = fragmentTarget(doc, position.fragment);
     if (target) {
       if (pagination) pagination.reveal(target);
       else
@@ -1757,7 +1829,6 @@ async function renderEpub(position, revision) {
   $("reader-loading").hidden = true;
   readerReady = true;
   restorePosition(() => revealPosition(position));
-  location.fragment = "";
   lastAnchor = retainedAnchor || captureAnchor();
   updateProgress();
 }
@@ -2066,7 +2137,6 @@ async function navigate(index, options = {}, record = true) {
   ) {
     restorePosition(() => scrollPdfTo(location));
     ensurePdfPages();
-    renderToc();
     updateProgress();
     $("reader-back").disabled = !history.length;
   } else await renderCurrent(location);
@@ -2081,6 +2151,7 @@ async function flip(direction) {
   }
   if (!readerReady) return;
   retainedAnchor = null;
+  location.fragment = "";
   clearSelection();
   const view = $("reading-viewport");
   if (pagination) {
@@ -2392,7 +2463,17 @@ async function refreshLibrary() {
     }
   }
   renderJobs();
-  if (route === "reader" && current) renderToc();
+  if (
+    route === "reader" &&
+    current &&
+    (previous?.id !== current.id ||
+      JSON.stringify(previous?.toc || []) !==
+        JSON.stringify(current.toc || []) ||
+      ["tocSource", "pageOffset", "processing"].some(
+        (key) => previous?.[key] !== current[key],
+      ))
+  )
+    renderToc();
   return data;
 }
 function validatePreferences(input) {
@@ -2788,6 +2869,7 @@ $("page-jump-form").onsubmit = (event) => {
   if (pagination) {
     history.push(snapshot());
     retainedAnchor = null;
+    location.fragment = "";
     pagination.set(page - 1, true);
     lastAnchor = captureAnchor();
     updateProgress();
@@ -2960,7 +3042,10 @@ $("reading-viewport").addEventListener(
   "scroll",
   () => {
     if (!readerReady || pagination) return;
-    if (!restoringPosition) retainedAnchor = null;
+    if (!restoringPosition) {
+      retainedAnchor = null;
+      location.fragment = "";
+    }
     if (current?.type === "pdf" && prefs.pdfMode === "scroll")
       updatePdfScroll();
     lastAnchor = retainedAnchor || captureAnchor();

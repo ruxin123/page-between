@@ -10,7 +10,7 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（0.5.3 / 前端 2.24）
+## macOS App 构建（0.5.4 / 前端 2.25）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -30,6 +30,10 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 2.23 调整全局快捷键的系统事件接收入口，并保护后台翻页尚未保存的位置，避免被其他窗口的同步覆盖。窗口内用 ← / →，后台用 ⌃⌥⌘← / ⌃⌥⌘→；实际后台组合键是否送达仍需桌面验证。诊断会分别保存登记状态、收到的快捷键次数及 WebKit 执行错误，保存在本机数据目录。
 
 桌面版阅读设置中可选后台翻页按键：方向键、P / N（上一页 / 下一页），或关闭后台翻页；组合键均为 Control + Option + Command。设置会保存，并同步到已经打开的小窗。仅在小窗正文就绪后登记按键，关闭小窗会释放；关闭后台按键仍可在窗口内用普通方向键翻页。网页版会说明桌面窗口提供的能力。
+
+2.25 修复多个目录章节共用一个 EPUB 正文文件时，始终高亮最后一章的问题。目录、位置说明和新书签标题跟随正文锚点；支持跳转、返回、重开与掌上重排。正常阅读及无关的书架更新保留目录节点与键盘焦点；PDF 滚动和跳页也只更新当前位置。
+
+![共享正文目录与当前位置，原创匿名样本](docs/screenshots/epub-directory.png)
 
 ![掌上窗口快捷键设置，原创匿名演示](docs/screenshots/palm-shortcuts.png)
 
@@ -284,6 +288,8 @@ node tests/jobs.test.mjs
 node tests/feedback.test.mjs
 python -m unittest discover -s tests -p '*_test.py' -v
 ```
+
+目录交互回归可在隔离的匿名演示服务上运行：`node scripts/verify_navigation.cjs http://127.0.0.1:8779 chromium`，或将最后参数改为 `webkit`。它使用 Playwright 和 Python 标准库生成原创 EPUB，验证共享正文目录、书签、重开、掌上模式及目录焦点；不要对个人书库运行修改型验证。
 
 准备提交时还可运行：
 

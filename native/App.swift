@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var terminationSignal: DispatchSourceSignal?
   var hotkey: EventHotKeyRef?
   var hotkeyHandler: EventHandlerRef?
+  var hotkeyHandlerStatus: OSStatus = -1
+  var hotkeyRegistrationStatus: OSStatus = -1
   let demo =
     CommandLine.arguments.contains("--demo")
     || Bundle.main.object(forInfoDictionaryKey: "PageBetweenDemo") as? Bool == true
@@ -223,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       "appPID": ProcessInfo.processInfo.processIdentifier,
       "enginePID": engine?.processIdentifier ?? 0,
       "port": base?.port ?? 0, "ready": ready, "demo": demo,
+      "hotkeyHandlerStatus": hotkeyHandlerStatus, "hotkeyRegistrationStatus": hotkeyRegistrationStatus,
     ]
     if let bytes = try? JSONSerialization.data(withJSONObject: data) {
       try? bytes.write(to: support.appendingPathComponent("runtime.json"), options: .atomic)
@@ -318,6 +321,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
           standalone: false, session: session)
         palm?.showMainSettings = { [weak self] in self?.loadMain("/settings/ai") }
       }
+      palm?.configureHotkeys(body["keys"] as? String ?? "arrows")
       palm?.show(url)
     }
   }
@@ -536,22 +540,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   func registerHotkey() {
     var type = EventTypeSpec(
       eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-    InstallEventHandler(
-      GetApplicationEventTarget(),
+    hotkeyHandlerStatus = InstallEventHandler(
+      GetEventDispatcherTarget(),
       { next, event, context in
         guard let event = event, let context = context else { return noErr }
         var identity = EventHotKeyID()
-        GetEventParameter(
+        let result = GetEventParameter(
           event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
           MemoryLayout<EventHotKeyID>.size, nil, &identity)
-        guard identity.signature == 0x594A_4150 else { return CallNextEventHandler(next, event) }
+        guard result == noErr, identity.signature == 0x594A_4150, identity.id == 1 else { return CallNextEventHandler(next, event) }
         let delegate = Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue()
         DispatchQueue.main.async { delegate.openPalm() }
         return noErr
       }, 1, &type, Unmanaged.passUnretained(self).toOpaque(), &hotkeyHandler)
-    RegisterEventHotKey(
+    guard hotkeyHandlerStatus == noErr, hotkeyHandler != nil else { return }
+    hotkeyRegistrationStatus = RegisterEventHotKey(
       49, UInt32(controlKey | optionKey | cmdKey), EventHotKeyID(signature: 0x594A_4150, id: 1),
-      GetApplicationEventTarget(), 0, &hotkey)
+      GetEventDispatcherTarget(), 0, &hotkey)
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool

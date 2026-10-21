@@ -76,6 +76,205 @@ async function selectParagraph(page, epub) {
     return doc.getSelection().toString().trim();
   }, epub);
 }
+async function backgroundPositionSync(browser, failures) {
+  await api("/api/state", {
+    prefs: { palmMode: "pages" },
+    positions: {
+      "demo-b": {
+        index: 2,
+        page: 0,
+        top: 0,
+        anchor: null,
+        updatedAt: Date.now(),
+      },
+    },
+  });
+  const page = await browser.newPage({ viewport: { width: 344, height: 560 } });
+  page.on("pageerror", (error) => failures.push(error.message));
+  let release, observed;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const polling = new Promise((resolve) => {
+    observed = resolve;
+  });
+  let first = true;
+  await page.route("**/api/library-version", async (route) => {
+    if (first) {
+      first = false;
+      observed();
+      await held;
+    }
+    await route.continue();
+  });
+  try {
+    await page.goto(base + "/?mode=palm&book=demo-b");
+    await ready(page);
+    await Promise.race([
+      polling,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(Error("Position poll did not start")), 8000),
+      ),
+    ]);
+    // A second window saves its older visible position while this window is about to turn.
+    const state = await api("/api/state");
+    await api("/api/state", {
+      positions: {
+        "demo-b": { ...state.positions["demo-b"], updatedAt: Date.now() },
+      },
+    });
+    const before = await pageNumber(page, false);
+    await page.evaluate(() =>
+      window.dispatchEvent(new CustomEvent("palm-flip", { detail: 1 })),
+    );
+    await turned(page, false, before);
+    const polled = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/state",
+    );
+    release();
+    await polled;
+    await page.waitForTimeout(120);
+    assert.deepEqual(
+      await pageNumber(page, false),
+      { ...before, page: before.page + 1 },
+      "A native command must protect its pending position from an older window's save.",
+    );
+    await page.waitForFunction(async () => {
+      const data = await (await fetch("/api/state")).json();
+      return data.positions["demo-b"].page === 1;
+    });
+  } finally {
+    release();
+    await page.close();
+  }
+  console.log(
+    engine,
+    "background page command survives a concurrent position poll",
+  );
+}
+async function shortcutPreferences(browser, failures) {
+  const page = await browser.newPage({ viewport: { width: 344, height: 560 } });
+  page.on("pageerror", (error) => failures.push(error.message));
+  await page.addInitScript(() => {
+    window.shortcutMessages = [];
+    Object.defineProperty(window, "webkit", {
+      configurable: true,
+      value: {
+        messageHandlers: {
+          readerNative: {
+            postMessage(message) {
+              window.shortcutMessages.push(message);
+            },
+          },
+        },
+      },
+    });
+  });
+  try {
+    await page.goto(base + "/?mode=palm&book=demo-b");
+    await ready(page);
+    await page.locator("#palm-settings").click();
+    const control = page.locator('#quick-settings [data-pref="palmKeys"]');
+    const before = await pageNumber(page, false);
+    await control.selectOption("letters");
+    await page.waitForFunction(() =>
+      window.shortcutMessages.some((value) => value.reader?.keys === "letters"),
+    );
+    assert.equal((await api("/api/state")).prefs.palmKeys, "letters");
+    assert.deepEqual(
+      await pageNumber(page, false),
+      before,
+      "Changing shortcuts must not reflow or move the reading position.",
+    );
+    await control.selectOption("off");
+    await page.waitForFunction(
+      () => window.shortcutMessages.at(-1)?.reader?.keys === "off",
+    );
+    await page.keyboard.press("Escape");
+    await page
+      .locator("#reading-viewport")
+      .click({ position: { x: 30, y: 90 } });
+    await page.keyboard.press("ArrowRight");
+    await turned(page, false, before);
+    await page.locator("#palm-settings").click();
+    await control.selectOption("letters");
+    await page.waitForFunction(
+      () => window.shortcutMessages.at(-1)?.reader?.keys === "letters",
+    );
+    await page.reload();
+    await ready(page);
+    await page.locator("#palm-settings").click();
+    assert.equal(
+      await control.inputValue(),
+      "letters",
+      "Shortcut preferences survive reopening the reader.",
+    );
+    await page.evaluate(() => {
+      window.shortcutLayoutChanges = 0;
+      new MutationObserver((records) => {
+        window.shortcutLayoutChanges += records.length;
+      }).observe(document.querySelector("#text-host"), {
+        attributes: true,
+        attributeFilter: ["data-pages"],
+      });
+    });
+    await page.keyboard.press("Escape");
+    await page
+      .locator("#reading-viewport")
+      .click({ position: { x: 30, y: 90 } });
+    const raceStart = await pageNumber(page, false);
+    await page.keyboard.press("ArrowRight");
+    await turned(page, false, raceStart);
+    const concurrentMark = "sync-" + Date.now();
+    const ownSave = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/state" &&
+        !!response.request().postDataJSON()?.positions?.["demo-b"],
+    );
+    await api("/api/state", {
+      prefs: { palmKeys: "off" },
+      bookmarkChanges: {
+        add: [
+          {
+            id: concurrentMark,
+            book: "demo-b",
+            label: "并发同步检查",
+            detail: "原创测试记录",
+            position: { index: 2, top: 0, page: 0 },
+          },
+        ],
+      },
+    });
+    await ownSave;
+    await page.waitForFunction(
+      () => window.shortcutMessages.at(-1)?.reader?.keys === "off",
+    );
+    await page.waitForFunction(
+      (id) => !!document.querySelector(`[data-mark="${id}"]`),
+      concurrentMark,
+    );
+    assert.equal(
+      await page.evaluate(() => window.shortcutLayoutChanges),
+      0,
+      "Changing shortcuts from another window must not rebuild the pages.",
+    );
+    await page.locator("#palm-settings").click();
+    assert.equal(await control.inputValue(), "off");
+    await control.selectOption("arrows");
+    await page.waitForFunction(
+      () => window.shortcutMessages.at(-1)?.reader?.keys === "arrows",
+    );
+  } finally {
+    await page.close();
+  }
+  console.log(
+    engine,
+    "shortcut presets, persistence, native bridge and local navigation while disabled passed",
+  );
+}
 (async () => {
   const collection = await api("/api/library");
   assert.ok(
@@ -204,6 +403,8 @@ async function selectParagraph(page, epub) {
         );
       }
     }
+    await shortcutPreferences(browser, failures);
+    await backgroundPositionSync(browser, failures);
     const interrupted = await browser.newPage({
       viewport: { width: 1280, height: 900 },
     });
@@ -384,6 +585,7 @@ async function selectParagraph(page, epub) {
       prefs: {
         textMode: original.prefs.textMode || "pages",
         palmMode: original.prefs.palmMode || "pages",
+        palmKeys: original.prefs.palmKeys || "arrows",
       },
       positions: Object.fromEntries(
         Object.entries(original.positions || {}).map(([book, position]) => [
@@ -391,6 +593,7 @@ async function selectParagraph(page, epub) {
           { ...position, updatedAt: Date.now() },
         ]),
       ),
+      bookmarks: original.bookmarks,
       lastBook: original.lastBook,
     });
   }

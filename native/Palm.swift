@@ -12,6 +12,12 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     var web: WKWebView!
     var hotkeys: [EventHotKeyRef?] = []
     var eventHandler: EventHandlerRef?
+    var hotkeyHandlerStatus: OSStatus = -1
+    var hotkeyRegistration: [String: OSStatus] = [:]
+    private(set) var shortcutPreset = "arrows"
+    var receivedHotkeys = 0
+    var lastHotkeyAt: TimeInterval = 0
+    var hotkeyDispatchError = ""
     var loaded = false
     var closing = false
     var address: URL
@@ -40,10 +46,10 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     func show(_ url: URL? = nil) {
         if let panel = panel {
             closing=false
-            if let url=url, url != address { address=url;loaded=false;web.load(request(url)) }
+            if let url=url, url != address { stopHotkeys();readerState=[:];address=url;loaded=false;web.load(request(url)) }
             else { web.evaluateJavaScript("window.dispatchEvent(new Event('palm-resume'))") }
             panel.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
-            registerHotkeys();writeStatus();return
+            writeStatus();return
         }
         if let url=url { address=url }
         if standalone { NSApp.setActivationPolicy(.accessory) }
@@ -75,35 +81,54 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(web)
         NSApp.activate(ignoringOtherApps:true)
-        registerHotkeys()
         writeStatus()
         if standalone { Timer.scheduledTimer(withTimeInterval:0.5,repeats:true) { [weak self] _ in self?.readCommand() } }
     }
 
+    func configureHotkeys(_ preset: String) {
+        guard ["arrows", "letters", "off"].contains(preset) else { return }
+        if preset != shortcutPreset { stopHotkeys(); shortcutPreset = preset }
+        if panel?.isVisible == true && !closing { registerHotkeys() }
+    }
+
     func registerHotkeys() {
+        if shortcutPreset == "off" { return }
         if !hotkeys.isEmpty { return }
+        if let handler = eventHandler { RemoveEventHandler(handler); eventHandler = nil }
+        hotkeyRegistration.removeAll()
         var type=EventTypeSpec(eventClass:OSType(kEventClassKeyboard),eventKind:UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { next,event,context in
+        // Receive global shortcuts at the dispatcher before AppKit routes events by focus.
+        hotkeyHandlerStatus = InstallEventHandler(GetEventDispatcherTarget(), { next,event,context in
             guard let event=event,let context=context else { return noErr }
             var identity=EventHotKeyID()
-            GetEventParameter(event,EventParamName(kEventParamDirectObject),EventParamType(typeEventHotKeyID),nil,MemoryLayout<EventHotKeyID>.size,nil,&identity)
-            guard identity.signature == 0x594A504D else { return CallNextEventHandler(next, event) }
+            let result = GetEventParameter(event,EventParamName(kEventParamDirectObject),EventParamType(typeEventHotKeyID),nil,MemoryLayout<EventHotKeyID>.size,nil,&identity)
+            guard result == noErr, identity.signature == 0x594A504D, (1...2).contains(identity.id) else { return CallNextEventHandler(next, event) }
             let delegate=Unmanaged<PalmDelegate>.fromOpaque(context).takeUnretainedValue()
             delegate.flip(identity.id==1 ? 1 : -1)
             return noErr
         },1,&type,Unmanaged.passUnretained(self).toOpaque(),&eventHandler)
-        for (id,key) in [(UInt32(1),UInt32(124)),(UInt32(2),UInt32(123))] {
+        guard hotkeyHandlerStatus == noErr, eventHandler != nil else { writeStatus(); return }
+        let nextKey = UInt32(shortcutPreset == "letters" ? kVK_ANSI_N : kVK_RightArrow)
+        let previousKey = UInt32(shortcutPreset == "letters" ? kVK_ANSI_P : kVK_LeftArrow)
+        for (id,key) in [(UInt32(1), nextKey), (UInt32(2), previousKey)] {
             var reference: EventHotKeyRef?
-            let result=RegisterEventHotKey(key,UInt32(controlKey|optionKey|cmdKey),EventHotKeyID(signature:0x594A504D,id:id),GetApplicationEventTarget(),0,&reference)
-            if result==noErr { hotkeys.append(reference) }
+            let result=RegisterEventHotKey(key,UInt32(controlKey|optionKey|cmdKey),EventHotKeyID(signature:0x594A504D,id:id),GetEventDispatcherTarget(),0,&reference)
+            hotkeyRegistration[id == 1 ? "next" : "previous"] = result
+            if result==noErr, reference != nil { hotkeys.append(reference) }
         }
     }
 
     func flip(_ direction:Int) {
+        receivedHotkeys += 1
         lastHotkeyWasBackground = !NSApp.isActive
+        lastHotkeyAt = Date().timeIntervalSince1970
+        hotkeyDispatchError = ""
+        writeStatus()
         DispatchQueue.main.async { [weak self] in
-            self?.web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('palm-flip',{detail:\(direction)}))")
-            self?.writeStatus()
+            self?.web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('palm-flip',{detail:\(direction)}))") { [weak self] _, error in
+                self?.hotkeyDispatchError = error?.localizedDescription ?? ""
+                self?.writeStatus()
+            }
         }
     }
 
@@ -113,6 +138,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
               let nonce=values["nonce"] as? String,nonce != commandNonce,
               let text=values["url"] as? String,let url=URL(string:text),url.host=="127.0.0.1",url.scheme=="http" else { return }
         commandNonce=nonce
+        closing=false
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps:true)
         guard address != url else {
@@ -121,7 +147,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         }
         Task { @MainActor [weak self] in
             guard let self=self else { return }
-            self.address=url;self.loaded=false;self.web.load(self.request(url));self.writeStatus()
+            self.stopHotkeys();self.readerState=[:];self.address=url;self.loaded=false;self.web.load(self.request(url));self.writeStatus()
         }
     }
 
@@ -130,7 +156,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         let content=panel.contentView?.bounds.size ?? panel.frame.size
         let values:[String:Any] = ["visible":panel.isVisible,"loaded":loaded,"width":content.width,"height":content.height,
                                   "x":panel.frame.minX,"y":panel.frame.minY,"alwaysOnTop":panel.level == .floating,
-                                  "registeredHotkeys":hotkeys.count,"url":address.absoluteString,"pid":ProcessInfo.processInfo.processIdentifier,"reader":readerState,"lastHotkeyWasBackground":lastHotkeyWasBackground]
+                                  "registeredHotkeys":hotkeys.count,"shortcutPreset":shortcutPreset,"hotkeyHandlerStatus":hotkeyHandlerStatus,"hotkeyRegistration":hotkeyRegistration,"receivedHotkeys":receivedHotkeys,"lastHotkeyAt":lastHotkeyAt,"hotkeyDispatchError":hotkeyDispatchError,"url":address.absoluteString,"pid":ProcessInfo.processInfo.processIdentifier,"reader":readerState,"lastHotkeyWasBackground":lastHotkeyWasBackground]
         if let data=try? JSONSerialization.data(withJSONObject:values,options:.sortedKeys) { try? data.write(to:statusFile,options:.atomic) }
     }
 
@@ -140,9 +166,11 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     func windowShouldClose(_ sender:NSWindow)->Bool {
         if closing { return true }
         closing=true
+        stopHotkeys()
         Task { @MainActor [weak self] in
             guard let self=self else { return }
             _ = try? await self.web.callAsyncJavaScript("if(window.readerFlush) await window.readerFlush();",arguments:[:],in:nil,contentWorld:.page)
+            guard self.closing else { return }
             self.panel.orderOut(nil);self.stopHotkeys();self.writeStatus()
             if self.standalone { NSApp.terminate(nil) }
         }
@@ -161,7 +189,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
                 if let url=parts.url { NSWorkspace.shared.open(url) }
             }
         }
-        if action=="reader-state",let state=body["reader"] as? [String:Any] { readerState=state;writeStatus() }
+        if action=="reader-state",let state=body["reader"] as? [String:Any] { readerState=state;configureHotkeys(state["keys"] as? String ?? "arrows");writeStatus() }
         if action=="resize",let compact=body["compact"] as? Bool {
             let size=compact ? NSSize(width:280,height:440) : NSSize(width:344,height:560)
             let origin=panel.frame.origin
@@ -182,6 +210,8 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     func stopHotkeys() {
         for reference in hotkeys { if let reference=reference { UnregisterEventHotKey(reference) } }
         hotkeys=[]
+        hotkeyRegistration.removeAll()
+        hotkeyHandlerStatus = -1
         if let eventHandler=eventHandler { RemoveEventHandler(eventHandler) }
         eventHandler=nil
     }

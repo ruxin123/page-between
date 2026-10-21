@@ -20,7 +20,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 
-def verify(app, epubcheck=None):
+def verify(app, epubcheck=None, samples=()):
     app = app.resolve()
     if epubcheck is not None:
         epubcheck = epubcheck.resolve(strict=True)
@@ -117,7 +117,7 @@ def verify(app, epubcheck=None):
                 package = container.find("{*}rootfiles/{*}rootfile")
                 assert package.get("media-type") == "application/oebps-package+xml"
                 metadata = ET.fromstring(archive.read(package.get("full-path")))
-                assert (
+                assert not metadata.get("version", "").startswith("3.") or (
                     len(
                         metadata.findall(
                             "{*}metadata/{*}meta[@property='dcterms:modified']"
@@ -426,6 +426,34 @@ def verify(app, epubcheck=None):
                 assert {"equation", "table", "image"} <= {
                     block["type"] for block in blocks
                 }
+            sample_results = []
+            for sample in samples:
+                original = sample.read_bytes()
+                imported = json.loads(
+                    request(
+                        "/api/import?name=sample" + sample.suffix.lower() + "&parse=0",
+                        original,
+                    )[2]
+                )["book"]
+                assert request(imported["originalUrl"])[2] == original
+                if imported["type"] == "pdf":
+                    assert imported["pages"] > 0
+                else:
+                    assert imported["chapters"] and imported["toc"]
+                    if imported["type"] == "epub":
+                        for chapter in imported["chapters"]:
+                            assert request(chapter["url"])[2]
+                    check_epub(
+                        export_epub(imported["id"])[1],
+                        "sample-" + sample.suffix.lower().lstrip("."),
+                    )
+                sample_results.append(
+                    {
+                        "format": imported["format"],
+                        "chapters": len(imported.get("chapters", [])),
+                        "toc": len(imported.get("toc", [])),
+                    }
+                )
             subprocess.run(
                 ["codesign", "--verify", "--deep", "--strict", str(app)], check=True
             )
@@ -449,6 +477,7 @@ def verify(app, epubcheck=None):
                 "originalPageMapping": True,
                 "verifiedBackupRestore": True,
                 "signature": "ad-hoc verified",
+                "formatSamples": sample_results,
             }
         finally:
             if process and process.poll() is None:
@@ -469,5 +498,12 @@ if __name__ == "__main__":
         type=Path,
         help="EPUBCheck JAR; reject errors and warnings in actual frozen exports",
     )
+    parser.add_argument(
+        "--sample",
+        type=Path,
+        action="append",
+        default=[],
+        help="Additional local, readable book sample; original bytes and EPUB export are checked without publishing its title or content",
+    )
     args = parser.parse_args()
-    print(json.dumps(verify(args.app, args.epubcheck), ensure_ascii=False))
+    print(json.dumps(verify(args.app, args.epubcheck, args.sample), ensure_ascii=False))

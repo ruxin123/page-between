@@ -24,7 +24,7 @@ import { createBookExport } from "/ui/export.mjs";
 import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.22";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.23";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -43,6 +43,7 @@ const fontFamilies = {
 const query = new URLSearchParams(window.location.search);
 const palm = query.get("mode") === "palm";
 const native = !!window.webkit?.messageHandlers?.readerNative;
+const desktop = native || !!window.webkit?.messageHandlers?.appNative;
 const writer = crypto.randomUUID();
 const defaults = {
   theme: "paper",
@@ -56,6 +57,7 @@ const defaults = {
   palmScale: 1,
   textMode: "pages",
   palmMode: "pages",
+  palmKeys: "arrows",
   pdfMode: "scroll",
 };
 let prefs = { ...defaults },
@@ -88,6 +90,7 @@ let stateRevision = 0,
   editingBook,
   readerReady = false;
 let stateQueue = Promise.resolve(),
+  stateWrites = 0,
   restoringPosition = false,
   restoreTimer;
 function restorePosition(action) {
@@ -104,7 +107,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.22";
+document.body.dataset.readerBuild = "2.23";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -177,12 +180,16 @@ const documentParsing = createDocumentParsing({
 });
 const libraryView = createLibraryView(document);
 function postState(patch) {
+  stateWrites++;
   stateQueue = stateQueue
     .catch(() => {})
     .then(() => post("/api/state", { ...patch, writer }))
     .then((data) => {
       stateRevision = Math.max(stateRevision, data.revision || 0);
       return data;
+    })
+    .finally(() => {
+      stateWrites--;
     });
   return stateQueue;
 }
@@ -324,7 +331,15 @@ function settingsMarkup() {
           ["georgia", "Georgia"],
           ["system", "系统字体"],
         ])}${palm ? range("字号偏好", "palmScale", 0.85, 1.25, 0.05, `${Math.round(prefs.palmScale * 100)}%`) : range("字号", "fontSize", 16, 30, 1, `${prefs.fontSize} px`)}${!palm ? range("行距", "lineHeight", 1.5, 2.4, 0.05, prefs.lineHeight.toFixed(2)) + range("正文宽度", "textWidth", 480, 860, 20, `${prefs.textWidth} px`) : `<p class="setting-note adaptive-size-note">随窗口调整，当前 ${actualSize().toFixed(1)} px。</p>`}</section>`
-  }<section class="settings-section"><h2>掌上阅读</h2>${palm && native ? '<div class="window-sizes"><button class="secondary-button" data-window-size="compact">小巧</button><button class="secondary-button" data-window-size="standard">标准</button></div>' : ""}<p class="setting-note">独立小窗，默认置顶。窗口缩小时，字号会同步调整；阅读位置与主阅读器共享。</p><p class="setting-note">聚焦小窗：← / → / 空格<br>后台翻页：⌃⌥⌘← / ⌃⌥⌘→</p></section>`;
+  }<section class="settings-section"><h2>掌上阅读</h2>${palm && native ? '<div class="window-sizes"><button class="secondary-button" data-window-size="compact">小巧</button><button class="secondary-button" data-window-size="standard">标准</button></div>' : ""}<p class="setting-note">独立小窗，默认置顶。窗口缩小时，字号会同步调整；阅读位置与主阅读器共享。</p>${
+    desktop
+      ? select("后台翻页", "palmKeys", [
+          ["arrows", "⌃⌥⌘ ← / →"],
+          ["letters", "⌃⌥⌘ P / N"],
+          ["off", "关闭后台快捷键"],
+        ])
+      : ""
+  }<p class="setting-note">聚焦小窗：← / → / 空格<br>${desktop ? (prefs.palmKeys === "off" ? "后台快捷键已关闭。" : `后台：Control + Option + Command + ${prefs.palmKeys === "letters" ? "P（上一页） / N（下一页）" : "← / →"}。小窗打开且正文就绪时生效。`) : "后台快捷键由 macOS 桌面窗口提供，可在掌上窗口的阅读设置中调整。"}</p></section>`;
 }
 function renderSettings() {
   $("global-settings").innerHTML = settingsMarkup();
@@ -504,6 +519,18 @@ function restoreAnchor(anchor) {
 }
 
 async function changePreference(key, value) {
+  if (key === "palmKeys") {
+    if (!["arrows", "letters", "off"].includes(value)) return;
+    try {
+      await postState({ prefs: { palmKeys: value } });
+      prefs.palmKeys = value;
+      reportNative();
+    } catch (error) {
+      toast(error.message, { kind: "error" });
+    }
+    renderSettings();
+    return;
+  }
   const epoch = ++preferenceRevision,
     revision = renderRevision;
   pendingAnchor ??= lastAnchor || captureAnchor();
@@ -560,13 +587,14 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.22",
+        build: "2.23",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
         anchor: retainedAnchor || captureAnchor(),
         top: $("reading-viewport").scrollTop,
         mode: readingMode(),
+        keys: prefs.palmKeys,
         page: pagination?.page + 1,
         pages: pagination?.count,
       },
@@ -2046,6 +2074,7 @@ async function navigate(index, options = {}, record = true) {
 }
 
 async function flip(direction) {
+  lastInput = Date.now();
   if (flipBusy) {
     pendingFlip = direction;
     return;
@@ -2227,6 +2256,7 @@ async function openPalm(id) {
       window.webkit.messageHandlers.appNative.postMessage({
         action: "palm",
         book: id,
+        keys: prefs.palmKeys,
       });
     } else await post("/api/palm", { book: id });
     toast("已打开掌上窗口。");
@@ -2369,6 +2399,8 @@ function validatePreferences(input) {
   const output = { ...defaults, ...input };
   for (const key of ["textMode", "palmMode", "pdfMode"])
     if (!["pages", "scroll"].includes(output[key])) output[key] = defaults[key];
+  if (!["arrows", "letters", "off"].includes(output.palmKeys))
+    output.palmKeys = defaults.palmKeys;
   if (!["paper", "sage", "blue", "night"].includes(output.theme))
     output.theme = "paper";
   if (!["han-serif", "han-sans", "wenkai", "system"].includes(output.zhFont))
@@ -2943,6 +2975,8 @@ $("reading-viewport").addEventListener(
 window.addEventListener("palm-resume", async () => {
   const state = await api("/api/state");
   positions = state.positions || positions;
+  prefs = validatePreferences(state.prefs || {});
+  renderSettings();
   location = initialLocation(current);
   renderCurrent(location);
 });
@@ -3047,6 +3081,7 @@ async function poll(resume = false) {
       }
     }
     const state = await api("/api/state");
+    if (stateWrites || state.revision < stateRevision) return;
     const remote = current && state.positions?.[current.id];
     const followingBook = current?.id;
     const follow = shouldFollowPosition({
@@ -3061,38 +3096,52 @@ async function poll(resume = false) {
         !document.activeElement?.matches("input,textarea,select") &&
         (resume || Date.now() - lastInput > 1000),
     });
-    if (state.revision <= stateRevision && !follow) return;
+    const nextPrefs = validatePreferences(state.prefs || {});
+    const preferencesChanged =
+      JSON.stringify(prefs) !== JSON.stringify(nextPrefs);
+    const marksChanged =
+      JSON.stringify(bookmarks) !== JSON.stringify(state.bookmarks || []);
+    const positionsChanged =
+      JSON.stringify(positions) !== JSON.stringify(state.positions || {});
+    if (
+      state.revision === stateRevision &&
+      !follow &&
+      !preferencesChanged &&
+      !marksChanged &&
+      !positionsChanged
+    )
+      return;
     stateRevision = state.revision;
     positions = state.positions || positions;
     bookmarks = state.bookmarks || bookmarks;
-    if (state.writer !== writer) {
+    if (preferencesChanged) {
       const previousPrefs = prefs;
-      const changed =
-        JSON.stringify(prefs) !==
-        JSON.stringify(validatePreferences(state.prefs || {}));
-      prefs = validatePreferences(state.prefs || {});
-      if (changed) {
-        const anchor = lastAnchor || captureAnchor();
-        applyPreferences();
-        renderSettings();
-        if (route === "reader" && current) {
-          if (current.type === "pdf") {
-            if (
-              previousPrefs.pdfMode !== prefs.pdfMode ||
-              previousPrefs.pdfZoom !== prefs.pdfZoom
-            )
-              await renderCurrent(makePosition());
-          } else {
-            if (current.type === "epub") await styleEpub();
-            configureTextLayout();
-            restorePosition(() => restoreAnchor(anchor));
-            updateProgress();
-          }
+      prefs = nextPrefs;
+      const onlyKeysChanged = Object.keys(prefs).every(
+        (key) => key === "palmKeys" || prefs[key] === previousPrefs[key],
+      );
+      const anchor = lastAnchor || captureAnchor();
+      applyPreferences();
+      renderSettings();
+      if (route === "reader" && current) {
+        if (!onlyKeysChanged && current.type === "pdf") {
+          if (
+            previousPrefs.pdfMode !== prefs.pdfMode ||
+            previousPrefs.pdfZoom !== prefs.pdfZoom
+          )
+            await renderCurrent(makePosition());
+        } else if (!onlyKeysChanged) {
+          if (current.type === "epub") await styleEpub();
+          configureTextLayout();
+          restorePosition(() => restoreAnchor(anchor));
+          updateProgress();
         }
+        reportNative();
       }
-      if (route === "library") renderLibrary();
-      renderBookmarks();
     }
+    if (route === "library" && (preferencesChanged || positionsChanged))
+      renderLibrary();
+    if (marksChanged) renderBookmarks();
     if (follow && current?.id === followingBook && route === "reader") {
       location = initialLocation(current);
       if (location.index !== Number($("page-label").dataset.chapter))

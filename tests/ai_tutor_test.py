@@ -14,6 +14,31 @@ from lxml import html
 
 
 class Tutor(unittest.TestCase):
+    def test_shared_epub_source_uses_its_toc_section_instead_of_the_spine_label(self):
+        book = {
+            **self.book,
+            "chapters": [{"title": "正文"}],
+            "toc": [
+                {"title": "第二章", "index": 1, "fragment": "part-2", "children": []}
+            ],
+        }
+        source = {
+            **self.payload["source"],
+            "citation": "不采用客户端自填标题",
+            "position": {"index": 1, "fragment": "part-2"},
+        }
+        self.assertEqual(
+            tutor.source_for(book, source)["citation"], "《自编示例》 · 第二章"
+        )
+        source["position"]["fragment"] = "unknown"
+        self.assertEqual(
+            tutor.source_for(book, source)["citation"], "《自编示例》 · 正文"
+        )
+        source["position"]["resource"] = "/demo-data/books/demo/content/notes.xhtml"
+        self.assertEqual(
+            tutor.source_for(book, source)["citation"], "《自编示例》 · 原书附加内容"
+        )
+
     def test_actual_nearby_text_is_saved_and_unprovided_citations_are_identified(self):
         quote = self.payload["source"]["quote"]
         payload = {

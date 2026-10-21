@@ -17,7 +17,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 from lxml import etree
 from paths import DATA
 from storage import load, save
-from book_import import text_chapter_index
+from book_import import text_chapter_index, position_label
 import service_settings
 import book_index
 import book_images
@@ -184,11 +184,7 @@ def source_for(book, source, *, resource_root=None):
             type(position[name]) is not int or not minimum <= position[name] <= maximum
         ):
             raise TutorError("原文区块位置无效。")
-    label = (
-        f"PDF 第 {index} 页"
-        if book["type"] == "pdf"
-        else book["chapters"][index - 1]["title"]
-    )
+    label = position_label(book, position)
     context = source.get("context", "")
     if not isinstance(context, str):
         raise TutorError("附近内容无效。")

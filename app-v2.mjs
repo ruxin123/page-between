@@ -25,7 +25,7 @@ import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
 import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.25";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.26";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -108,7 +108,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.25";
+document.body.dataset.readerBuild = "2.26";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -659,7 +659,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.25",
+        build: "2.26",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1009,8 +1009,37 @@ function watchSelection(doc) {
   // Mouseup also covers native text selection and accessibility-driven selection.
   doc.addEventListener("mouseup", schedule);
 }
-function selectionContext() {
-  return `《${current.title}》 · ${current.type === "pdf" ? "PDF 第 " + location.index + " 页" : chapterTitle()}`;
+function selectionDetails(position) {
+  const actual = { ...position };
+  let label =
+    current.type === "pdf"
+      ? "PDF 第 " + actual.index + " 页"
+      : current.chapters[actual.index - 1]?.title || current.title;
+  if (current.type === "epub") {
+    if (actual.resource) label = "原书附加内容";
+    else if (
+      $("epub-frame").dataset.chapter ===
+      current.chapters[actual.index - 1]?.url
+    ) {
+      const doc = frameDocument(),
+        anchor = actual.anchor;
+      const element =
+        anchor &&
+        (Number.isSafeInteger(anchor.sourceNode)
+          ? doc.querySelector(`[data-source-node="${anchor.sourceNode}"]`)
+          : readingElements()[anchor.index]);
+      const section = epubTocAtAnchor(current.toc || [], actual.index, {
+        doc,
+        element,
+        offset: anchor?.charOffset || 0,
+      });
+      if (section) {
+        actual.fragment = section.fragment || "";
+        label = section.title;
+      }
+    }
+  }
+  return { position: actual, source: `《${current.title}》 · ${label}` };
 }
 function showToolbar(rectangle) {
   const bar = $("selection-toolbar");
@@ -1104,10 +1133,7 @@ function captureSelection(doc = document) {
     document: doc,
     text,
     kind: "text",
-    position,
-    source: pdfPage
-      ? `《${current.title}》 · PDF 第 ${pdfPage} 页`
-      : selectionContext(),
+    ...selectionDetails(position),
   };
   const rects = [...range.getClientRects()].filter(
     (rect) => rect.width && rect.height,
@@ -1937,8 +1963,7 @@ function onEpubClick(event) {
     image,
     text: text || "[完整图像]",
     format,
-    position,
-    source: selectionContext(),
+    ...selectionDetails(position),
   };
   showToolbar(rect);
 }
@@ -2913,7 +2938,8 @@ $("search-selection").onclick = () => {
 };
 function tutorContext(selection = null) {
   if (!current || !readerReady) return null;
-  const position = selection?.position || makePosition();
+  const details = selectionDetails(selection?.position || makePosition());
+  const position = details.position;
   let units = [],
     separator = "\n\n",
     unitIndex = 0,
@@ -2996,7 +3022,7 @@ function tutorContext(selection = null) {
       context: sliceText(context, start, start + 18000),
       contextBefore: sliceText(context, start, cursor),
       position,
-      citation: selection?.source || selectionContext(),
+      citation: details.source,
       image: selection?.image,
       kind: selection?.kind || "text",
     },

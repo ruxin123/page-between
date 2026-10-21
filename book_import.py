@@ -304,6 +304,26 @@ def flatten_toc(items):
         yield from flatten_toc(item.get("children", []))
 
 
+def position_label(book, position):
+    index = position["index"]
+    if book["type"] == "pdf":
+        return f"PDF 第 {index} 页"
+    if book["type"] == "epub":
+        if position.get("resource"):
+            return "原书附加内容"
+        matches = [
+            item
+            for item in flatten_toc(book.get("toc", []))
+            if item.get("index") == index
+            and item.get("fragment", "") == position.get("fragment", "")
+            and item.get("title")
+        ]
+        if matches:
+            leaves = [item for item in matches if not item.get("children")]
+            return (leaves or matches)[-1]["title"]
+    return book["chapters"][index - 1]["title"]
+
+
 def decode_text(data):
     for encoding in (
         ["utf-16"]

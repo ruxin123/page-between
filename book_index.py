@@ -13,7 +13,7 @@ from contextlib import closing
 from lxml import etree
 from pypdf import PdfReader
 
-from book_import import path_for, XML, text_chapter_index
+from book_import import path_for, XML, text_chapter_index, flatten_toc, position_label
 from paths import CACHE
 from pdf_enhancement import enrichment_data
 from pdf_selection import utf16
@@ -74,12 +74,13 @@ def fingerprint(book):
     return hashlib.sha256(
         json.dumps(
             [
-                6,
+                7,
                 book.get("sourceHash"),
                 book.get("enhancementRevision"),
                 book.get("enrichmentUrl"),
                 book.get("parseEnabled"),
                 book.get("chapters"),
+                book.get("toc") if book.get("type") == "epub" else None,
                 files,
             ],
             sort_keys=True,
@@ -95,6 +96,19 @@ def paragraphs(text):
         cursor = start + len(paragraph)
         if paragraph.strip():
             yield paragraph.strip(), start + len(paragraph) - len(paragraph.lstrip())
+
+
+def leading_section(node, section, markers):
+    for event, element in etree.iterwalk(node, events=("start", "end")):
+        if event == "start":
+            for marker in (element.get("id"), element.get("name")):
+                if marker in markers:
+                    section = marker
+            if (element.text or "").strip():
+                break
+        elif element is not node and (element.tail or "").strip():
+            break
+    return section
 
 
 def text_units(book):
@@ -117,22 +131,30 @@ def text_units(book):
                 yield index, number, text, position, "text"
     elif book["type"] == "epub":
         names = {"p", "h1", "h2", "h3", "h4", "blockquote", "figure", "table"}
+        sections = collections.defaultdict(set)
+        for item in flatten_toc(book.get("toc", [])):
+            if item.get("index") and item.get("fragment"):
+                sections[item["index"]].add(item["fragment"])
         for index, chapter in enumerate(book["chapters"], 1):
             root = etree.parse(str(path_for(chapter["url"])), XML)
             body = root.xpath('//*[local-name()="body"]')
             if not body:
                 continue
-            number = 0
-            for node in body[0].iterdescendants():
-                if (
-                    not isinstance(node.tag, str)
-                    or etree.QName(node).localname not in names
+            number, section = 0, ""
+            for node in body[0].iter():
+                if not isinstance(node.tag, str) or (
+                    etree.QName(node).localname in {"nav", "script", "style"}
                     or any(
                         etree.QName(parent).localname in {"nav", "script", "style"}
                         for parent in node.iterancestors()
                         if isinstance(parent.tag, str)
                     )
                 ):
+                    continue
+                for marker in (node.get("id"), node.get("name")):
+                    if marker in sections[index]:
+                        section = marker
+                if etree.QName(node).localname not in names:
                     continue
                 anchor_number = number
                 number += 1
@@ -145,17 +167,10 @@ def text_units(book):
                 text = " ".join("".join(node.itertext()).split())
                 if not text:
                     continue
-                fragment = next(
-                    (
-                        parent.get("id")
-                        for parent in [node, *node.iterancestors()]
-                        if parent.get("id")
-                    ),
-                    "",
-                )
+                section = leading_section(node, section, sections[index])
                 position = {
                     "index": index,
-                    "fragment": fragment,
+                    "fragment": section,
                     "anchor": {
                         "index": anchor_number,
                         "sourceNode": anchor_number,
@@ -295,18 +310,14 @@ def ensure(book):
 
 
 def snapshot(book, row):
-    index = row["idx"]
-    chapter = (
-        f"PDF 第 {index} 页"
-        if book["type"] == "pdf"
-        else book["chapters"][index - 1]["title"]
-    )
+    position = json.loads(row["position"])
+    chapter = position_label(book, position)
     return {
         "id": row["id"],
         "text": row["text"],
         "kind": row["kind"],
         "label": row["label"],
-        "position": json.loads(row["position"]),
+        "position": position,
         "citation": f"《{book['title']}》 · {chapter}",
     }
 

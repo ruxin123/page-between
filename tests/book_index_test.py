@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,42 @@ from scripts.create_demo import make_epub, make_pdf, make_scan
 
 
 class BookIndex(unittest.TestCase):
+    def test_shared_epub_search_and_sources_follow_the_toc_sections(self):
+        source = self.root / "shared.epub"
+        make_epub(source)
+        with zipfile.ZipFile(source) as archive:
+            files = {name: archive.read(name) for name in archive.namelist()}
+        files["OPS/chapter-1.xhtml"] = (
+            b'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Body</title></head><body><h1 id="part-1">First</h1><p id="unrelated-paragraph">Definition 1.1. Earlier material.</p><h2><span id="part-2"/>Second</h2><p>Theorem 2.1. Later material.</p></body></html>'
+        )
+        files["OPS/nav.xhtml"] = (
+            '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol><li><a href="chapter-1.xhtml#part-1">第一章</a></li><li><a href="chapter-1.xhtml#part-2">第二章</a></li></ol></nav></body></html>'.encode()
+        )
+        with zipfile.ZipFile(source, "w") as archive:
+            for name, value in files.items():
+                archive.writestr(name, value)
+        book = book_import.import_book(source)
+        first = book_index.search(book, "Definition 1.1")["results"][0]
+        second = book_index.search(book, "Theorem 2.1")["results"][0]
+        heading = next(
+            unit for unit in book_index.text_units(book) if unit[2] == "Second"
+        )
+        self.assertEqual(first["position"]["fragment"], "part-1")
+        self.assertEqual(second["position"]["fragment"], "part-2")
+        self.assertEqual(heading[3]["fragment"], "part-2")
+        self.assertTrue(second["citation"].endswith(" · 第二章"))
+        normalized = source_for(
+            book, {"quote": second["text"], "position": second["position"]}
+        )
+        self.assertEqual(normalized["citation"], second["citation"])
+        before = book_index.search(
+            book, "Definition 1.1", position=second["position"], previous_only=True
+        )
+        self.assertEqual(before["results"][0]["position"]["fragment"], "part-1")
+        book["toc"][1]["fragment"] = "unrelated-paragraph"
+        rebuilt = book_index.search(book, "Definition 1.1")["results"][0]
+        self.assertEqual(rebuilt["position"]["fragment"], "unrelated-paragraph")
+
     def test_pdf_previous_scope_uses_reading_order_and_excludes_unknown_current_page(
         self,
     ):

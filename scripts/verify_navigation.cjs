@@ -24,11 +24,11 @@ async function api(path, body) {
   assert.ok(response.ok, result.error);
   return result;
 }
-function fixture() {
+function fixture(compact = false) {
   const sections = [1, 2, 3]
     .map(
       (index) =>
-        `<section><h2 style="break-before:column" ${index !== 2 ? `id="part-${index}"` : ""}>${index === 2 ? '<span id="part-2"></span>' : ""}第${index}章 原创样本</h2>${Array.from({ length: 30 }, (_, paragraph) => `<p>第${index}章第${paragraph + 1}段。这是自编的目录测试文字，用于验证分页、滚动、书签与返回位置。Each paragraph belongs to its original chapter and is used only for anonymous navigation testing.</p>`).join("")}</section>`,
+        `<section><h2 ${compact ? "" : 'style="break-before:column"'} ${index !== 2 ? `id="part-${index}"` : ""}>${index === 2 ? '<span id="part-2"></span>' : ""}第${index}章 原创样本</h2>${Array.from({ length: compact ? 1 : 30 }, (_, paragraph) => `<p>第${index}章第${paragraph + 1}段。这是自编的目录测试文字，用于验证分页、滚动、书签与返回位置。Each paragraph belongs to its original chapter and is used only for anonymous navigation testing.</p>`).join("")}</section>`,
     )
     .join("");
   const entries = {
@@ -39,6 +39,14 @@ function fixture() {
     "OPS/body.xhtml": `<html xmlns="http://www.w3.org/1999/xhtml" lang="zh"><head><title>原创目录样本</title></head><body>${sections}</body></html>`,
     "OPS/nav.xhtml": `<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol><li><a href="body.xhtml">正文</a><ol>${[1, 2, 3].map((index) => `<li><a href="body.xhtml#part-${index}">第${index}章 原创样本</a></li>`).join("")}</ol></li></ol></nav></body></html>`,
   };
+  if (compact)
+    for (const name of Object.keys(entries))
+      entries[name] = entries[name]
+        .replaceAll("原创目录样本", "原创选段样本")
+        .replace(
+          "urn:page-between:fragment-test",
+          "urn:page-between:selection-test",
+        );
   return execFileSync(
     process.env.PYTHON || "python3",
     [
@@ -339,10 +347,82 @@ async function pageIndex(page) {
       "PDF scrolling must preserve the TOC nodes.",
     );
     await pdf.close();
+    const compactResponse = await fetch(
+      base + "/api/import?name=selection-test.epub&parse=0",
+      { method: "POST", body: fixture(true) },
+    );
+    const compactBook = (await compactResponse.json()).book;
+    assert.ok(compactResponse.ok);
+    await api("/api/state", {
+      prefs: { textMode: "pages" },
+      positions: {
+        [compactBook.id]: {
+          index: 1,
+          page: 0,
+          top: 0,
+          anchor: null,
+          fragment: "",
+          updatedAt: Date.now(),
+        },
+      },
+    });
+    const selecting = await browser.newPage({
+      viewport: { width: 1280, height: 1000 },
+    });
+    selecting.on("pageerror", (error) => failures.push(error.message));
+    await selecting.route("**/api/ai/status", (route) =>
+      route.fulfill({
+        json: {
+          configured: true,
+          model: "anonymous-fixture",
+          host: "localhost",
+          supportsImages: false,
+        },
+      }),
+    );
+    const sent = selecting.waitForRequest(
+      (request) =>
+        new URL(request.url()).pathname === "/api/ai/start" &&
+        request.method() === "POST",
+    );
+    await selecting.route("**/api/ai/start", async (route) => {
+      await route.fulfill({
+        status: 503,
+        json: {
+          error: "Anonymous request captured by the test; no model was called.",
+        },
+      });
+    });
+    await selecting.goto(base + "/#/read/" + compactBook.id);
+    await ready(selecting);
+    await active(selecting, "part-1");
+    const selectedText = await selecting.evaluate(() => {
+      const doc = document.querySelector("#epub-frame").contentDocument;
+      const paragraph = doc.querySelectorAll("#reader-flow p")[1];
+      const range = doc.createRange();
+      range.selectNodeContents(paragraph);
+      doc.getSelection().removeAllRanges();
+      doc.getSelection().addRange(range);
+      return doc.getSelection().toString();
+    });
+    assert.ok(selectedText.startsWith("第2章"));
+    await selecting.locator("#selection-toolbar").waitFor();
+    await selecting.locator("#ask-selection").click();
+    assert.match(
+      await selecting.locator("#question-source").textContent(),
+      /第2章 原创样本/,
+    );
+    await selecting.locator("#question-input").fill("解释这段自编文字。");
+    await selecting.locator("#ai-submit").click();
+    const payload = (await sent).postDataJSON();
+    assert.equal(payload.source.position.fragment, "part-2");
+    assert.match(payload.source.citation, /第2章 原创样本/);
+    assert.equal(payload.source.quote, selectedText);
+    await selecting.close();
     assert.deepEqual(failures, []);
     console.log(
       engine,
-      "shared-document TOC, keyboard activation, page/scroll tracking, history, reload, bookmarks, inline anchors, palm reading and stable PDF outline passed",
+      "shared-document navigation, bookmarks, palm reading, stable PDF outline and selection-based chapter citations passed",
     );
   } finally {
     await browser.close();

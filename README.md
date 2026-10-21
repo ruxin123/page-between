@@ -10,7 +10,7 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（0.5.4 / 前端 2.25）
+## macOS App 构建（0.5.5 / 前端 2.26）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -34,6 +34,8 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 2.25 修复多个目录章节共用一个 EPUB 正文文件时，始终高亮最后一章的问题。目录、位置说明和新书签标题跟随正文锚点；支持跳转、返回、重开与掌上重排。正常阅读及无关的书架更新保留目录节点与键盘焦点；PDF 滚动和跳页也只更新当前位置。
 
 ![共享正文目录与当前位置，原创匿名样本](docs/screenshots/epub-directory.png)
+
+2.26 将章节定位用于答疑出处：同一页有多章时，选段引用按实际段落归属；书内检索也保存目录章节锚点，新对话使用对应章节名称。附加注释单独标为原书附加内容。索引更新会自动重建缓存，历史对话保留原有来源快照。
 
 ![掌上窗口快捷键设置，原创匿名演示](docs/screenshots/palm-shortcuts.png)
 

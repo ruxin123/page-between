@@ -32,19 +32,27 @@ do {
     request.usesLanguageCorrection = !fast
     request.minimumTextHeight = fast ? 0.008 : 0.003
     try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
-    let pattern = try NSRegularExpression(pattern: "\\p{Han}+|[\\p{L}\\p{N}]+|[^\\s]")
     var lines: [[String: Any]] = []
     for observation in request.results ?? [] {
         guard let candidate = observation.topCandidates(1).first else { continue }
         let text = candidate.string
         var segments: [[String: Any]] = []
         if !fast && !arguments.contains("--layout") {
-            let matches = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
-            for (index, match) in matches.enumerated() {
-                guard let range = Range(match.range, in: text), let rectangle = try? candidate.boundingBox(for: range) else { continue }
-                let end = index + 1 < matches.count ? matches[index + 1].range.location : (text as NSString).length
-                let value = (text as NSString).substring(with: NSRange(location: match.range.location, length: end - match.range.location))
-                segments.append(["text": value, "bbox": box(rectangle.boundingBox)])
+            for index in text.indices {
+                let end = text.index(after: index), value = String(text[index..<end])
+                if value.allSatisfy({ $0.isWhitespace }), let last = segments.indices.last {
+                    segments[last]["text"] = (segments[last]["text"] as! String) + value
+                    continue
+                }
+                guard let rectangle = try? candidate.boundingBox(for: index..<end) else { continue }
+                let bounds = box(rectangle.boundingBox)
+                // Vision sometimes reports one box for a whole word; never stack identical hit regions.
+                if let last = segments.indices.last, let previous = segments[last]["bbox"] as? [Double],
+                   zip(previous, bounds).allSatisfy({ abs($0 - $1) < 0.000001 }) {
+                    segments[last]["text"] = (segments[last]["text"] as! String) + value
+                } else {
+                    segments.append(["text": value, "bbox": bounds])
+                }
             }
         }
         lines.append(["text": text, "bbox": box(observation.boundingBox), "confidence": candidate.confidence, "segments": segments])

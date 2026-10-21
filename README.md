@@ -10,7 +10,7 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（0.5.0 / 前端 2.21）
+## macOS App 构建（0.5.1 / 前端 2.22）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -26,6 +26,10 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 构建结果默认位于用户的 `Library/Caches/Page Between/build/`。当前在 Apple Silicon、macOS 27.0.1 验证，签名为本机构建的 ad-hoc 签名；其他系统版本和正式分发尚待验收。旧书库可使用 `python scripts/migrate_library.py data` 复制到安装版，已有目标不会覆盖，原目录保留。
 
 当前 App 仍在持续开发，完整交互与安装验收见 [完整验收清单](docs/APP_READINESS.md)。以下是从源码运行原型的方式。
+
+2.22 修复 WebKit 中点击 EPUB 正文后的翻页与划词，并处理跨章动画中断后的翻页状态；原书代码仍经过清理并由独立 CSP 禁止执行。取消选区或按 Esc 会收起复制 / 提问菜单；答疑面板可拖动标题移动，聚焦标题后也可用方向键微调。掌上窗口使用系统标题栏移动，并恢复上次窗口位置。
+
+扫描 PDF 的本机 OCR 改为字符坐标：中文使用 Vision 字符框，英文使用 Tesseract hOCR 字符框，避免整词拉伸后选区边界偏移。公式、表格与插图仍完整取用；模糊扫描、识别漏字和不可靠的结构对齐仍可能影响结果。
 
 ## 快速开始
 

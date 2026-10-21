@@ -24,7 +24,7 @@ import { createBookExport } from "/ui/export.mjs";
 import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.21";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.22";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -100,10 +100,11 @@ function restorePosition(action) {
 }
 let pagination,
   flipBusy = false,
+  pendingFlip = 0,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.21";
+document.body.dataset.readerBuild = "2.22";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -559,7 +560,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.21",
+        build: "2.22",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -705,7 +706,7 @@ function renderToc() {
     const row = `<button class="toc-item${currentItem ? " active" : ""}" data-index="${item.index || ""}" data-fragment="${escapeHTML(item.fragment || "")}" ${!item.index ? "disabled" : ""} ${currentItem ? 'aria-current="true"' : ""}><span>${escapeHTML(item.title)}</span>${item.printed ? `<small>${escapeHTML(item.printed)}</small>` : ""}</button>`;
     if (!item.children?.length) return row;
     const open = !!text || flatToc([item]).includes(active);
-    return `<details ${open ? "open" : ""}><summary><span>${escapeHTML(item.title)}</span>${item.printed ? `<small>${item.printed}</small>` : ""}</summary>${item.index ? `<button class="toc-item" data-index="${item.index}" data-fragment="${escapeHTML(item.fragment || "")}"><span>${current.type === "pdf" ? "本章起始页" : "从这里阅读"}</span></button>` : ""}${children}</details>`;
+    return `<details ${open ? "open" : ""}><summary><span>${escapeHTML(item.title)}</span>${item.printed ? `<small>${escapeHTML(item.printed)}</small>` : ""}</summary>${item.index ? `<button class="toc-item" data-index="${item.index}" data-fragment="${escapeHTML(item.fragment || "")}"><span>${current.type === "pdf" ? "本章起始页" : "从这里阅读"}</span></button>` : ""}${children}</details>`;
   }
   $("toc-list").innerHTML =
     (current.toc || []).map((item) => node(item)).join("") ||
@@ -756,7 +757,7 @@ function renderBookmarks() {
     marks
       .map(
         (mark) =>
-          `<div class="bookmark-row"><button class="bookmark-open" data-mark="${mark.id}">${escapeHTML(mark.label)}<small>${escapeHTML(mark.detail)}</small></button><button class="icon-button" data-remove-mark="${mark.id}" aria-label="删除书签">${icon("close")}</button></div>`,
+          `<div class="bookmark-row"><button class="bookmark-open" data-mark="${escapeHTML(mark.id)}">${escapeHTML(mark.label)}<small>${escapeHTML(mark.detail)}</small></button><button class="icon-button" data-remove-mark="${escapeHTML(mark.id)}" aria-label="删除书签">${icon("close")}</button></div>`,
       )
       .join("") || '<div class="empty-state">给想再读的地方，留个记号。</div>';
   const position = makePosition();
@@ -843,13 +844,9 @@ async function setPinned(id, pinned, offerUndo = true) {
   }
 }
 
-function clearSelection() {
+function dismissSelection() {
   currentSelection = null;
   $("selection-toolbar").hidden = true;
-  window.getSelection()?.removeAllRanges();
-  try {
-    $("epub-frame").contentWindow?.getSelection()?.removeAllRanges();
-  } catch {}
   document
     .querySelectorAll(".pdf-object.selected")
     .forEach((element) => element.classList.remove("selected"));
@@ -857,6 +854,57 @@ function clearSelection() {
   doc
     ?.querySelectorAll("[data-reader-selected]")
     .forEach((element) => element.removeAttribute("data-reader-selected"));
+}
+function clearSelection() {
+  dismissSelection();
+  window.getSelection()?.removeAllRanges();
+  try {
+    $("epub-frame").contentWindow?.getSelection()?.removeAllRanges();
+  } catch {}
+}
+function watchSelection(doc) {
+  let dragging = false,
+    timer;
+  const schedule = (event) => {
+    if (
+      event?.target?.closest?.(
+        ".selection-toolbar,.question-panel,.reader-settings",
+      )
+    )
+      return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (route === "reader" && !dragging) captureSelection(doc);
+    }, 80);
+  };
+  doc.addEventListener("pointerdown", (event) => {
+    if (
+      event.target.closest?.(
+        ".selection-toolbar,.question-panel,.reader-settings",
+      )
+    )
+      return;
+    dragging = true;
+    if (!event.target.closest?.(".pdf-object")) dismissSelection();
+  });
+  doc.addEventListener("pointerup", (event) => {
+    dragging = false;
+    schedule(event);
+  });
+  doc.addEventListener("pointercancel", () => {
+    dragging = false;
+  });
+  doc.addEventListener("selectionchange", () => {
+    const selection = doc.getSelection();
+    if (
+      (!selection?.rangeCount || selection.isCollapsed) &&
+      currentSelection?.document === doc
+    )
+      dismissSelection();
+    else if (!dragging) schedule();
+  });
+  // Mouseup also covers native text selection and accessibility-driven selection.
+  doc.addEventListener("mouseup", schedule);
 }
 function selectionContext() {
   return `《${current.title}》 · ${current.type === "pdf" ? "PDF 第 " + location.index + " 页" : chapterTitle()}`;
@@ -950,6 +998,7 @@ function captureSelection(doc = document) {
     }
   }
   currentSelection = {
+    document: doc,
     text,
     kind: "text",
     position,
@@ -1081,13 +1130,15 @@ function renderOCR(data, viewport, root) {
         ? "Songti SC, serif"
         : "Times New Roman, serif";
       measure.font = `${height}px ${family}`;
+      const width = Math.max(1, measure.measureText(word.text.trimEnd()).width);
       Object.assign(span.style, {
         left: `${x0 * viewport.width}px`,
         top: `${y0 * viewport.height}px`,
         fontSize: `${height}px`,
         height: `${height}px`,
+        width: `${width}px`,
         fontFamily: family,
-        transform: `scaleX(${((x1 - x0) * viewport.width) / Math.max(1, measure.measureText(word.text.trimEnd()).width)})`,
+        transform: `scaleX(${((x1 - x0) * viewport.width) / width})`,
       });
       root.append(span);
     }
@@ -1587,6 +1638,19 @@ async function renderEpub(position, revision) {
     const source = await response.text();
     if (revision !== renderRevision) return;
     const parsed = new DOMParser().parseFromString(source, "text/html");
+    // WebKit needs allow-scripts for trusted parent listeners; book code stays removed and forbidden by CSP.
+    parsed
+      .querySelectorAll("script,iframe,object,embed,base")
+      .forEach((element) => element.remove());
+    for (const element of parsed.querySelectorAll("*"))
+      for (const attribute of [...element.attributes])
+        if (
+          /^on/i.test(attribute.name) ||
+          /^(srcdoc|autofocus|contenteditable)$/i.test(attribute.name) ||
+          (/^(href|xlink:href|src|action|formaction)$/i.test(attribute.name) &&
+            /^\s*javascript:/i.test(attribute.value))
+        )
+          element.removeAttribute(attribute.name);
     const base = parsed.createElement("base");
     base.href = new URL(chapter.url, window.location).href;
     const policy = parsed.createElement("meta");
@@ -1634,13 +1698,7 @@ async function renderEpub(position, revision) {
     doc.body.append(flow);
     decorateReferences(flow);
     attachPageGestures(doc);
-    doc.addEventListener("mouseup", () =>
-      setTimeout(() => captureSelection(doc), 10),
-    );
-    doc.addEventListener("mousedown", () => {
-      $("selection-toolbar").hidden = true;
-      currentSelection = null;
-    });
+    watchSelection(doc);
     doc.addEventListener("keydown", handleKeydown);
     doc.addEventListener("copy", onCopy);
     doc.addEventListener("click", onEpubClick);
@@ -1988,7 +2046,11 @@ async function navigate(index, options = {}, record = true) {
 }
 
 async function flip(direction) {
-  if (!readerReady || flipBusy) return;
+  if (flipBusy) {
+    pendingFlip = direction;
+    return;
+  }
+  if (!readerReady) return;
   retainedAnchor = null;
   clearSelection();
   const view = $("reading-viewport");
@@ -2031,34 +2093,47 @@ async function flip(direction) {
   const animated =
     readingMode() === "pages" &&
     !matchMedia("(prefers-reduced-motion:reduce)").matches;
-  if (animated) {
-    flipBusy = true;
-    updateProgress();
-    await view.animate(
-      [
-        { opacity: 1, transform: "translateX(0)" },
-        { opacity: 0.65, transform: `translateX(${-direction * 6}px)` },
-      ],
-      { duration: 180, easing: "ease-in-out" },
-    ).finished;
-  }
-  await navigate(
-    location.index + direction,
-    { end: direction < 0, top: direction < 0 ? Number.MAX_SAFE_INTEGER : 0 },
-    false,
-  );
-  if (animated) {
-    await view.animate(
-      [
-        { opacity: 0.65, transform: `translateX(${direction * 6}px)` },
-        { opacity: 1, transform: "translateX(0)" },
-      ],
-      { duration: 300, easing: "cubic-bezier(.3,0,.15,1)" },
-    ).finished;
+  const book = current,
+    revision = renderRevision;
+  flipBusy = true;
+  updateProgress();
+  try {
+    if (animated)
+      await view
+        .animate(
+          [
+            { opacity: 1, transform: "translateX(0)" },
+            { opacity: 0.65, transform: `translateX(${-direction * 6}px)` },
+          ],
+          { duration: 180, easing: "ease-in-out" },
+        )
+        .finished.catch(() => {});
+    if (route !== "reader" || current !== book || renderRevision !== revision)
+      return;
+    await navigate(
+      location.index + direction,
+      { end: direction < 0, top: direction < 0 ? Number.MAX_SAFE_INTEGER : 0 },
+      false,
+    );
+    if (animated && route === "reader" && current === book)
+      await view
+        .animate(
+          [
+            { opacity: 0.65, transform: `translateX(${direction * 6}px)` },
+            { opacity: 1, transform: "translateX(0)" },
+          ],
+          { duration: 300, easing: "cubic-bezier(.3,0,.15,1)" },
+        )
+        .finished.catch(() => {});
+    saveTimer = setTimeout(() => savePosition().catch(() => {}), 230);
+  } finally {
     flipBusy = false;
     updateProgress();
+    const queued = pendingFlip;
+    pendingFlip = 0;
+    if (queued && route === "reader" && current === book && readerReady)
+      queueMicrotask(() => flip(queued));
   }
-  saveTimer = setTimeout(() => savePosition().catch(() => {}), 230);
 }
 
 function goBack() {
@@ -2329,7 +2404,7 @@ function handleKeydown(event) {
     $("reader-aside").hidden = true;
     $("reader-settings").hidden = true;
     $("question-panel").hidden = true;
-    $("selection-toolbar").hidden = true;
+    clearSelection();
     if ($("reader").classList.contains("focused")) setFocus(false);
     return;
   }
@@ -2702,15 +2777,7 @@ $("palm-close").onclick = async () => {
 };
 $("palm-bar").hidden = !palm;
 $("palm-footer").hidden = !palm;
-document.addEventListener("mouseup", (event) => {
-  const target = event.target instanceof Element ? event.target : null;
-  if (
-    route === "reader" &&
-    !target?.closest(".selection-toolbar,.reader-settings,.question-panel") &&
-    (!target?.closest(".pdf-object") || !window.getSelection()?.isCollapsed)
-  )
-    setTimeout(() => captureSelection(), 10);
-});
+watchSelection(document);
 $("selection-toolbar").onmousedown = (event) => event.preventDefault();
 $("copy-selection").onclick = () =>
   currentSelection && copyText(currentSelection.text);

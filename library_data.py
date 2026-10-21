@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import math
 import re
 import shutil
 import tempfile
@@ -11,15 +12,133 @@ import uuid
 import zipfile
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
+from pypdf import PdfReader
+import unicodedata
 
 from paths import DATA, DATA_PREFIX, CACHE, APP_MODE
 from storage import load, save
 from epub_export import filename
 from pdf_enhancement import enrichment_data
+from book_import import SUPPORTED, text_chapter_index
 
 RECORDS = {"library.json", "state.json", "ai-conversations.json"}
 MAX_ARCHIVE = 2 * 1024**3
 MAX_EXPANDED = 10 * 1024**3
+RESOURCE_URL_FIELDS = {
+    "url",
+    "originalUrl",
+    "contentUrl",
+    "enrichmentUrl",
+    "cover",
+    "structureIndexUrl",
+    "previousContentUrl",
+    "customContentsUrl",
+    "lastRenderedContentUrl",
+    "resource",
+}
+
+
+def validate_position(position, book=None):
+    if (
+        not isinstance(position, dict)
+        or type(position.get("index")) is not int
+        or position["index"] < 1
+    ):
+        raise ValueError("备份中的阅读位置无效。")
+    for key in (
+        "top",
+        "page",
+        "pdfY",
+        "progress",
+        "updatedAt",
+        "sourceOffset",
+        "blockOrder",
+        "blockOffset",
+    ):
+        value = position.get(key)
+        if value is not None and (
+            type(value) not in {int, float}
+            or abs(value) > 1e18
+            or not math.isfinite(value)
+        ):
+            raise ValueError("备份中的阅读位置无效。")
+    if book:
+        index = (
+            text_chapter_index(book, position["sourceOffset"])
+            if book["type"] == "txt" and position.get("sourceOffset") is not None
+            else position["index"]
+        )
+        total = (
+            book["pages"] if book["type"] == "pdf" else len(book.get("chapters", []))
+        )
+        if index > total:
+            raise ValueError("备份中的阅读位置超出原书范围。")
+    anchor = position.get("anchor")
+    if anchor is not None:
+        if (
+            not isinstance(anchor, dict)
+            or type(anchor.get("index")) is not int
+            or anchor["index"] < -1
+            or not isinstance(anchor.get("quote", ""), str)
+            or len(anchor.get("quote", "")) > 6000
+        ):
+            raise ValueError("备份中的文字锚点无效。")
+        for key in ("sourceNode", "charOffset", "pixels", "offset"):
+            value = anchor.get(key)
+            if value is not None and (
+                type(value) not in {int, float}
+                or abs(value) > 1e18
+                or not math.isfinite(value)
+            ):
+                raise ValueError("备份中的文字锚点无效。")
+    for key in ("fragment", "resource"):
+        if key in position and (
+            not isinstance(position[key], str) or len(position[key]) > 20000
+        ):
+            raise ValueError("备份中的原文地址无效。")
+
+
+def validate_navigation(book):
+    chapters = book.get("chapters", [])
+    if any(
+        not isinstance(chapter, dict) or not isinstance(chapter.get("title"), str)
+        for chapter in chapters
+    ):
+        raise ValueError("备份中的章节结构无效。")
+    if book["type"] == "pdf" and (
+        type(book.get("pages")) is not int or not 1 <= book["pages"] <= 1000000
+    ):
+        raise ValueError("备份中的 PDF 页数无效。")
+    if book["type"] != "pdf" and not chapters:
+        raise ValueError("备份中缺少正文。")
+    total = book["pages"] if book["type"] == "pdf" else len(chapters)
+    pending = [(book.get("toc", []), 0)]
+    count = 0
+    while pending:
+        nodes, depth = pending.pop()
+        if not isinstance(nodes, list) or depth > 256:
+            raise ValueError("备份中的目录结构无效。")
+        count += len(nodes)
+        if count > 100000:
+            raise ValueError("备份中的目录规模超出当前上限。")
+        for node in nodes:
+            if (
+                not isinstance(node, dict)
+                or not isinstance(node.get("title"), str)
+                or not isinstance(node.get("fragment", ""), str)
+            ):
+                raise ValueError("备份中的目录结构无效。")
+            index = node.get("index")
+            if index is not None and (
+                type(index) is not int or not 0 <= index <= total
+            ):
+                raise ValueError("备份中的目录页序无效。")
+            printed = node.get("printed")
+            if printed is not None and (
+                type(printed) not in {int, str} or len(str(printed)) > 128
+            ):
+                raise ValueError("备份中的印刷页码无效。")
+            pending.append((node.get("children", []), depth + 1))
 
 
 def record_path(name):
@@ -66,36 +185,44 @@ def validate(root):
         for ident in books
     ):
         raise ValueError("备份中的书籍标识无效或重复。")
+    if not isinstance(collection.get("jobs", []), list):
+        raise ValueError("备份中的任务记录无效。")
+    for job in collection.get("jobs", []):
+        if (
+            not isinstance(job, dict)
+            or not all(
+                isinstance(job.get(key, ""), str)
+                for key in ("id", "book", "status", "kind", "phase", "title")
+            )
+            or not isinstance(job.get("pages", []), list)
+            or any(type(page) is not int or page < 1 for page in job.get("pages", []))
+        ):
+            raise ValueError("备份中的任务记录无效。")
 
-    def urls(value):
+    def urls(value, owner):
         if isinstance(value, dict):
             for key, item in value.items():
-                if (
-                    key
-                    in {"url", "originalUrl", "contentUrl", "enrichmentUrl", "cover"}
-                    and item
-                    and (
+                if key in RESOURCE_URL_FIELDS and item is not None:
+                    if (
                         not isinstance(item, str)
-                        or not item.startswith(DATA_PREFIX + "/books/")
-                    )
-                ):
-                    raise ValueError("备份含有无法验证的书籍资源地址。")
-                urls(item)
+                        or item
+                        and not item.startswith(DATA_PREFIX + "/books/" + owner + "/")
+                    ):
+                        raise ValueError("备份含有无法验证的书籍资源地址。")
+                    if not item:
+                        continue
+                    relative = unquote(urlsplit(item).path[len(DATA_PREFIX) + 1 :])
+                    path = (root / relative).resolve()
+                    if (
+                        not path.is_relative_to((root / "books" / owner).resolve())
+                        or not path.is_file()
+                    ):
+                        raise ValueError("备份缺少本书资源，或资源超出书籍范围。")
+                elif isinstance(item, (dict, list)):
+                    urls(item, owner)
         elif isinstance(value, list):
             for item in value:
-                urls(item)
-        elif isinstance(value, str) and value.startswith(
-            ("/data/books/", "/demo-data/books/")
-        ):
-            if not value.startswith(DATA_PREFIX + "/books/"):
-                raise ValueError("个人和演示书库不能混合恢复。")
-            relative = unquote(urlsplit(value).path[len(DATA_PREFIX) + 1 :])
-            path = (root / relative).resolve()
-            if (
-                not path.is_relative_to((root / "books").resolve())
-                or not path.is_file()
-            ):
-                raise ValueError("备份缺少书籍资源，或资源超出书库范围。")
+                urls(item, owner)
 
     for ident, book in books.items():
         if (
@@ -103,11 +230,51 @@ def validate(root):
             or not isinstance(book.get("title"), str)
             or not isinstance(book.get("chapters", []), list)
             or not isinstance(book.get("toc", []), list)
+            or not isinstance(book.get("format"), str)
+            or book.get("format", "").lower()
+            not in {extension[1:] for extension in SUPPORTED}
+            or not isinstance(book.get("originalUrl"), str)
+            or not book["originalUrl"]
         ):
             raise ValueError("备份中的书籍结构不完整。")
         if not (root / "books" / ident / "book.json").is_file():
             raise ValueError("备份缺少书籍记录。")
-        urls(book)
+        validate_navigation(book)
+        if (
+            book["type"] == "txt"
+            and not book.get("contentUrl")
+            or book["type"] == "pdf"
+            and not book.get("url")
+            or book["type"] == "epub"
+            and any(not chapter.get("url") for chapter in book["chapters"])
+        ):
+            raise ValueError("备份中缺少正文地址。")
+        urls(book, ident)
+        if book["type"] == "pdf":
+            source = root / unquote(urlsplit(book["url"]).path[len(DATA_PREFIX) + 1 :])
+            try:
+                with source.open("rb") as stream:
+                    actual = len(PdfReader(stream).pages)
+            except Exception:
+                raise ValueError("备份中的 PDF 无法读取。") from None
+            if actual != book["pages"]:
+                raise ValueError("备份中的 PDF 页数与原文件不一致。")
+        elif book["type"] == "txt":
+            source = root / unquote(
+                urlsplit(book["contentUrl"]).path[len(DATA_PREFIX) + 1 :]
+            )
+            content = load(source, None)
+            if (
+                not isinstance(content, list)
+                or len(content) != len(book["chapters"])
+                or any(
+                    not isinstance(chapter, dict)
+                    or not isinstance(chapter.get("body"), str)
+                    or not isinstance(chapter.get("title"), str)
+                    for chapter in content
+                )
+            ):
+                raise ValueError("备份中的文字正文与目录不一致。")
     state = load(root / "state.json", {})
     if (
         not isinstance(state, dict)
@@ -116,6 +283,27 @@ def validate(root):
         or not isinstance(state.get("bookmarks", []), list)
     ):
         raise ValueError("备份中的阅读记录无效。")
+    for ident, position in state.get("positions", {}).items():
+        validate_position(position, books.get(ident))
+        if ident in books:
+            urls(position, ident)
+    mark_ids = set()
+    for mark in state.get("bookmarks", []):
+        if (
+            not isinstance(mark, dict)
+            or not isinstance(mark.get("id"), str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,100}", mark["id"])
+            or mark["id"] in mark_ids
+            or not isinstance(mark.get("book"), str)
+            or not all(
+                isinstance(mark.get(key, ""), str) for key in ("label", "detail")
+            )
+        ):
+            raise ValueError("备份中的书签结构无效。")
+        mark_ids.add(mark["id"])
+        validate_position(mark.get("position"), books.get(mark["book"]))
+        if mark["book"] in books:
+            urls(mark["position"], mark["book"])
     conversations = load(root / "ai-conversations.json", {"conversations": []})
     if (
         not isinstance(conversations, dict)
@@ -222,6 +410,29 @@ def backup(snapshot):
             ).encode()
             for name, content in overrides.items():
                 put(name, content)
+            copied = {unicodedata.normalize("NFC", name) for name in files}
+
+            def check_references(value):
+                if isinstance(value, dict):
+                    for key, item in value.items():
+                        if (
+                            key in RESOURCE_URL_FIELDS | {"image"}
+                            and isinstance(item, str)
+                            and item.startswith(DATA_PREFIX + "/books/")
+                        ):
+                            name = unicodedata.normalize(
+                                "NFC",
+                                unquote(urlsplit(item).path[len(DATA_PREFIX) + 1 :]),
+                            )
+                            if name not in copied:
+                                raise ValueError("备份期间书籍内容已更新，请稍后重试。")
+                        elif isinstance(item, (dict, list)):
+                            check_references(item)
+                elif isinstance(value, list):
+                    for item in value:
+                        check_references(item)
+
+            check_references(snapshot)
             archive.writestr(
                 "manifest.json",
                 json.dumps(

@@ -1,8 +1,73 @@
 import { escapeHTML } from "./shared.mjs";
 import { prepareQuestionImage } from "./book-images.mjs";
 
+function enablePanelDragging(panel, handle) {
+  let start;
+  const place = (left, top) => {
+    const rectangle = panel.getBoundingClientRect();
+    Object.assign(panel.style, {
+      left: `${Math.max(8, Math.min(innerWidth - rectangle.width - 8, left))}px`,
+      top: `${Math.max(8, Math.min(innerHeight - rectangle.height - 8, top))}px`,
+      right: "auto",
+      bottom: "auto",
+    });
+  };
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("button,a,input")) return;
+    const rectangle = panel.getBoundingClientRect();
+    start = {
+      x: event.clientX,
+      y: event.clientY,
+      left: rectangle.left,
+      top: rectangle.top,
+    };
+    handle.setPointerCapture(event.pointerId);
+    panel.dataset.dragging = "true";
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (start)
+      place(
+        start.left + event.clientX - start.x,
+        start.top + event.clientY - start.y,
+      );
+  });
+  const stop = () => {
+    start = null;
+    delete panel.dataset.dragging;
+  };
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  handle.addEventListener("lostpointercapture", stop);
+  handle.addEventListener("keydown", (event) => {
+    if (event.target.id !== "question-drag") return;
+    const delta = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    }[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    const rectangle = panel.getBoundingClientRect(),
+      step = event.shiftKey ? 32 : 8;
+    place(rectangle.left + delta[0] * step, rectangle.top + delta[1] * step);
+  });
+  const constrain = () => {
+    if (panel.hidden || !panel.style.left) return;
+    const rectangle = panel.getBoundingClientRect();
+    place(rectangle.left, rectangle.top);
+  };
+  window.addEventListener("resize", constrain);
+  new ResizeObserver(constrain).observe(panel);
+}
+
 export function createTutor({ api, post, toast, getContext, openSource }) {
   const $ = (id) => document.getElementById(id);
+  enablePanelDragging(
+    $("question-panel"),
+    $("question-panel").querySelector(".aside-head"),
+  );
   let book,
     source,
     active,

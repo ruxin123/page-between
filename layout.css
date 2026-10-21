@@ -2258,7 +2258,7 @@ body[data-mode="palm"] .toast {
   padding: 7px 12px;
 }
 body[data-native="true"] .palm-bar {
-  padding-left: 77px;
+  padding-left: 12px;
   height: 34px;
 }
 body[data-native="true"] #palm-close {
@@ -3025,6 +3025,19 @@ body[data-mode="palm"] .text-host {
 }
 .question-panel .aside-head strong {
   flex: 1;
+}
+.question-panel .aside-head {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.question-panel[data-dragging] .aside-head {
+  cursor: grabbing;
+}
+#question-drag:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 .question-panel .aside-head .secondary-button {
   padding: 6px 8px;

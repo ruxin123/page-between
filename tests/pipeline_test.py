@@ -13,7 +13,13 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
 import book_import
-from pdf_enhancement import joined_rows, toc_entries, printed_number, tree_from_entries
+from pdf_enhancement import (
+    hocr_lines,
+    joined_rows,
+    toc_entries,
+    printed_number,
+    tree_from_entries,
+)
 
 
 def line(text, x, y, right=0.9):
@@ -21,6 +27,24 @@ def line(text, x, y, right=0.9):
 
 
 class Contents(unittest.TestCase):
+    def test_character_boxes_preserve_word_spaces_and_line_order(self):
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+        <span class="ocr_line" title="bbox 10 20 85 40; baseline 0 0">
+          <span class="ocrx_word" title="bbox 10 20 25 40">
+            <span class="ocrx_cinfo" title="x_bboxes 10 20 15 40; x_conf 99">i</span>
+            <span class="ocrx_cinfo" title="x_bboxes 16 20 25 40; x_conf 98">f</span>
+          </span><span class="ocrx_word" title="bbox 40 20 85 40">wide</span>
+        </span></body></html>"""
+        lines = hocr_lines(source, 100, 200)
+        self.assertEqual(lines[0]["text"], "if wide")
+        self.assertEqual(
+            [part["text"] for part in lines[0]["segments"]], ["i", "f ", "wide "]
+        )
+        self.assertEqual(lines[0]["segments"][0]["bbox"], [0.1, 0.1, 0.15, 0.2])
+        self.assertEqual(lines[0]["segments"][1]["bbox"], [0.16, 0.1, 0.25, 0.2])
+        with self.assertRaisesRegex(ValueError, "字符坐标"):
+            hocr_lines(source.replace("x_bboxes", "missing"), 100, 200)
+
     def test_chinese_and_english_use_the_same_page_mapping(self):
         entries = toc_entries(
             [

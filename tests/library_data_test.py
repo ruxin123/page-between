@@ -1,7 +1,9 @@
 import hashlib
 import base64
 import io
+import shutil
 import json
+import copy
 import sys
 import tempfile
 import unittest
@@ -18,6 +20,126 @@ from storage import load, save
 
 
 class LibraryRecovery(unittest.TestCase):
+    def altered_package(self, mutate):
+        package = self.package()
+        with zipfile.ZipFile(package) as archive:
+            entries = {name: archive.read(name) for name in archive.namelist()}
+        collection = json.loads(entries["Library/library.json"])
+        state = json.loads(entries["Library/state.json"])
+        mutate(collection, state)
+        manifest = json.loads(entries["manifest.json"])
+        for name, value in (("library.json", collection), ("state.json", state)):
+            content = json.dumps(value, ensure_ascii=False).encode()
+            entries["Library/" + name] = content
+            manifest["files"][name] = {
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "size": len(content),
+            }
+        entries["manifest.json"] = json.dumps(manifest).encode()
+        target = self.root / "altered.pbbackup"
+        with zipfile.ZipFile(target, "w") as archive:
+            for name, value in entries.items():
+                archive.writestr(name, value)
+        return target
+
+    def test_malformed_navigation_and_bookmark_metadata_are_rejected_before_activation(
+        self,
+    ):
+        original = (self.library / "library.json").read_bytes()
+
+        def toc_index(collection, state):
+            collection["books"][0]["toc"][0]["index"] = '1" onclick="bad()'
+
+        def toc_children(collection, state):
+            collection["books"][0]["toc"][0]["children"] = {}
+
+        def chapter_title(collection, state):
+            collection["books"][0]["chapters"][0]["title"] = {"bad": True}
+
+        def bookmark(collection, state):
+            state["bookmarks"] = [
+                {
+                    "id": 'bad" onclick="bad()',
+                    "book": self.book["id"],
+                    "position": {"index": 1},
+                }
+            ]
+
+        def position(collection, state):
+            state["positions"] = {self.book["id"]: {"index": "1"}}
+
+        def job(collection, state):
+            collection["jobs"] = [
+                {"book": self.book["id"], "kind": "mineru", "pages": "not a page list"}
+            ]
+
+        for mutate in (toc_index, toc_children, chapter_title, bookmark, position, job):
+            with self.subTest(case=mutate.__name__):
+                with self.assertRaises(ValueError):
+                    data.prepare_restore(self.altered_package(mutate))
+                self.assertEqual((self.library / "library.json").read_bytes(), original)
+                self.assertFalse(data.record_path("pending-restore").exists())
+
+    def test_printed_page_labels_remain_plain_text_and_resources_belong_to_book(self):
+        label = '<img src="missing" onerror="bad()">'
+
+        def plain_label(collection, state):
+            collection["books"][0]["toc"][0]["printed"] = label
+            state["bookmarks"] = [
+                {
+                    "id": "legacy-mark_1",
+                    "book": self.book["id"],
+                    "label": "Old bookmark",
+                    "position": {"index": 1, "anchor": None},
+                }
+            ]
+
+        data.prepare_restore(self.altered_package(plain_label))
+        pending = load(data.record_path("pending-restore"), {})
+        staged = self.library.parent / pending["stage"]
+        self.assertEqual(
+            load(staged / "library.json", {})["books"][0]["toc"][0]["printed"], label
+        )
+        data.cancel_restore()
+        second = copy.deepcopy(self.book)
+
+        def relocate(value):
+            if isinstance(value, dict):
+                return {key: relocate(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [relocate(item) for item in value]
+            if isinstance(value, str):
+                return value.replace("/" + self.book["id"] + "/", "/other-book/")
+            return value
+
+        second = relocate(second)
+        second["id"] = "other-book"
+        directory = self.library / "books/other-book"
+        shutil.copytree(self.library / "books" / self.book["id"], directory)
+        self.snapshot["library.json"]["books"].append(second)
+        save(self.library / "library.json", self.snapshot["library.json"])
+
+        def cross_book(collection, state):
+            collection["books"][0]["originalUrl"] = self.book["originalUrl"].replace(
+                "/" + self.book["id"] + "/", "/other-book/"
+            )
+
+        with self.assertRaises(ValueError):
+            data.prepare_restore(self.altered_package(cross_book))
+
+    def test_stale_backup_snapshot_cannot_publish_a_missing_text_version(self):
+        old = book_import.path_for(self.book["contentUrl"])
+        new = old.with_name("text-newer.json")
+        new.write_bytes(old.read_bytes())
+        current = copy.deepcopy(self.snapshot["library.json"])
+        current["books"][0]["contentUrl"] = book_import.url_for(new)
+        save(self.library / "library.json", current)
+        old.unlink()
+        with self.assertRaisesRegex(ValueError, "内容已更新"):
+            self.package()
+        self.assertEqual(load(self.library / "library.json", {}), current)
+        self.assertEqual(list((self.root / "cache/exports").glob("*.pbbackup")), [])
+
     def test_image_conversation_restores_from_staged_resources_without_active_original(
         self,
     ):

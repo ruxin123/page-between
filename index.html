@@ -4,9 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; form-action 'none'; base-uri 'self'"
+    />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.21" />
+    <link rel="stylesheet" href="/layout.css?v=2.22" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -381,7 +385,7 @@
             id="epub-frame"
             class="epub-frame"
             title="原书 EPUB 正文"
-            sandbox="allow-same-origin"
+            sandbox="allow-same-origin allow-scripts"
             hidden
           ></iframe>
           <div id="pdf-paper" class="pdf-paper" hidden></div>
@@ -528,7 +532,12 @@
       hidden
     >
       <div class="aside-head">
-        <strong>书内答疑</strong
+        <strong
+          id="question-drag"
+          tabindex="0"
+          title="拖动移动；聚焦后按方向键微调位置"
+          aria-label="移动答疑面板，按方向键调整位置"
+          >书内答疑</strong
         ><button id="ai-history-toggle" class="secondary-button">
           本书记录</button
         ><button
@@ -780,8 +789,8 @@
       <form id="cloud-form" class="cloud-form">
         <p id="cloud-book-title" class="cloud-book-title"></p>
         <p class="setting-note">
-          将所选原页交给 MinerU
-          云服务，提取文字、公式与图表。解析期间可以继续阅读原书。
+          先在本机生成仅含指定页段的 PDF 副本，再交给 MinerU
+          提取文字、公式与图表。原文件保留，解析期间可以继续阅读。
         </p>
         <label class="service-field"
           >PDF 文件页序<input
@@ -851,6 +860,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.21"></script>
+    <script type="module" src="/app-v2.mjs?v=2.22"></script>
   </body>
 </html>

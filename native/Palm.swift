@@ -49,9 +49,10 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         if standalone { NSApp.setActivationPolicy(.accessory) }
         let screen=NSScreen.main?.visibleFrame ?? NSRect(x:0,y:0,width:1400,height:900)
         let frame=NSRect(x:screen.maxX-364,y:screen.minY+24,width:344,height:560)
-        panel=ReaderPanel(contentRect:frame,styleMask:[.titled,.closable,.resizable,.miniaturizable,.fullSizeContentView],backing:.buffered,defer:false)
+        panel=ReaderPanel(contentRect:frame,styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         panel.title="页间 · 掌上阅读"
-        panel.titleVisibility = .hidden
+        panel.titleVisibility = .visible
+        panel.isMovable = true
         panel.titlebarAppearsTransparent=true
         panel.isFloatingPanel=true
         panel.hidesOnDeactivate=false
@@ -62,6 +63,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         panel.isReleasedWhenClosed=false
         panel.delegate=self
         panel.setFrameAutosaveName("PageBetweenPalm" + (standalone ? "Standalone" : "App"))
+        panel.setFrameUsingName("PageBetweenPalm" + (standalone ? "Standalone" : "App"))
         let configuration=WKWebViewConfiguration()
         configuration.userContentController.add(self,name:"readerNative")
         web=WKWebView(frame:panel.contentView!.bounds,configuration:configuration)

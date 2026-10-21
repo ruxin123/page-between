@@ -6,9 +6,9 @@ import re
 import subprocess
 import threading
 import statistics
-import csv
 import io
 import shutil
+import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -17,7 +17,7 @@ from book_import import ROOT, path_for
 from paths import CACHE as CACHE_ROOT, RUNTIME
 
 OCR = RUNTIME / "ocr-page"
-CACHE = CACHE_ROOT / "ocr-v3"
+CACHE = CACHE_ROOT / "ocr-v4"
 LOCKS = collections.defaultdict(threading.Lock)
 PDF_LOCK = threading.RLock()
 
@@ -64,6 +64,57 @@ def apply_enrichment(data, book, page, mode):
     return data
 
 
+def hocr_lines(source, width, height):
+    """Keep the OCR engine's individual glyph boxes instead of stretching a word."""
+    root = ET.fromstring(source)
+
+    def has_class(element, name):
+        return name in element.get("class", "").split()
+
+    def bounds(element, field="bbox"):
+        match = re.search(
+            r"(?:^|;\s*)" + field + r"\s+(\d+) (\d+) (\d+) (\d+)",
+            element.get("title", ""),
+        )
+        if not match:
+            raise ValueError("文字识别结果缺少字符坐标。")
+        left, top, right, bottom = map(int, match.groups())
+        return [left / width, top / height, right / width, bottom / height]
+
+    lines = []
+    for line in root.iter():
+        if not has_class(line, "ocr_line"):
+            continue
+        segments = []
+        for word in line.iter():
+            if not has_class(word, "ocrx_word"):
+                continue
+            glyphs = [node for node in word.iter() if has_class(node, "ocrx_cinfo")]
+            if glyphs:
+                for glyph in glyphs:
+                    value = "".join(glyph.itertext())
+                    if value:
+                        segments.append(
+                            {"text": value, "bbox": bounds(glyph, "x_bboxes")}
+                        )
+            else:
+                value = "".join(word.itertext()).strip()
+                if value:
+                    segments.append({"text": value, "bbox": bounds(word)})
+            if segments:
+                segments[-1]["text"] += " "
+        if segments:
+            lines.append(
+                {
+                    "text": "".join(item["text"] for item in segments).strip(),
+                    "bbox": bounds(line),
+                    "segments": segments,
+                    "confidence": 1,
+                }
+            )
+    return lines
+
+
 def recognize(book, page, mode="full"):
     if not 1 <= page <= book["pages"]:
         raise ValueError("页码超出了书籍范围。")
@@ -99,7 +150,9 @@ def recognize(book, page, mode="full"):
                     "--psm",
                     "3",
                     "-c",
-                    "tessedit_create_tsv=1",
+                    "tessedit_create_hocr=1",
+                    "-c",
+                    "hocr_char_boxes=1",
                 ],
                 input=stream.getvalue(),
                 capture_output=True,
@@ -108,52 +161,7 @@ def recognize(book, page, mode="full"):
             if result.returncode:
                 raise ValueError("本页文字识别失败，请重试。")
             width, height = image.size
-            groups = {}
-            rows = csv.DictReader(io.StringIO(result.stdout.decode()), delimiter="\t")
-            if not {
-                "level",
-                "text",
-                "left",
-                "top",
-                "width",
-                "height",
-                "block_num",
-                "par_num",
-                "line_num",
-            }.issubset(rows.fieldnames or []):
-                raise ValueError("文字识别结果格式异常，请重新尝试。")
-            for word in rows:
-                if word["level"] != "5" or not word["text"].strip():
-                    continue
-                key = (word["block_num"], word["par_num"], word["line_num"])
-                left, top, w, h = [
-                    int(word[k]) for k in ["left", "top", "width", "height"]
-                ]
-                groups.setdefault(key, []).append(
-                    {
-                        "text": word["text"] + " ",
-                        "bbox": [
-                            left / width,
-                            top / height,
-                            (left + w) / width,
-                            (top + h) / height,
-                        ],
-                    }
-                )
-            lines = [
-                {
-                    "text": "".join(word["text"] for word in words).strip(),
-                    "bbox": [
-                        min(word["bbox"][0] for word in words),
-                        min(word["bbox"][1] for word in words),
-                        max(word["bbox"][2] for word in words),
-                        max(word["bbox"][3] for word in words),
-                    ],
-                    "segments": words,
-                    "confidence": 1,
-                }
-                for words in groups.values()
-            ]
+            lines = hocr_lines(result.stdout, width, height)
             data = {
                 "page": page,
                 "width": width,

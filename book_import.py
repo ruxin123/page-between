@@ -7,6 +7,8 @@ import re
 import shutil
 import subprocess
 import zipfile
+import os
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, unquote, urlsplit
 
@@ -350,6 +352,258 @@ def html_metadata(source):
     }
 
 
+def normalize_kindle_package(content, legacy_html=False):
+    """Turn KindleUnpack's package into EPUB 3, keeping its original navigation."""
+    container_path = content / "META-INF/container.xml"
+    if container_path.is_file():
+        container = etree.parse(str(container_path), XML)
+        opf_path = safe_target(
+            content,
+            container.xpath('string(//*[local-name()="rootfile"]/@full-path)'),
+            content,
+        )
+    else:
+        packages = [
+            path
+            for path in content.glob("*.opf")
+            if path.is_file() and not path.name.startswith("._")
+        ]
+        if not packages:
+            return False
+        if len(packages) != 1:
+            raise ValueError("Kindle 包含多个出版文件，无法确定阅读顺序。")
+        opf_path = packages[0]
+    package = etree.parse(str(opf_path), XML)
+    root = package.getroot()
+    metadata = root.find("o:metadata", OPF)
+    manifest = root.find("o:manifest", OPF)
+    spine = root.find("o:spine", OPF)
+    if metadata is None or manifest is None or spine is None:
+        raise ValueError("Kindle 缺少出版信息或阅读顺序。")
+    title = metadata.findtext("dc:title", default="电子书", namespaces=OPF)
+    language = metadata.findtext("dc:language", default="und", namespaces=OPF)
+    if legacy_html:
+        pandoc = shutil.which("pandoc")
+        if not pandoc:
+            raise ValueError("Kindle 转换组件不可用，请安装完整 App。")
+        items = {item.get("id"): item for item in manifest}
+        for reference in spine:
+            item = items.get(reference.get("idref"))
+            if item is None:
+                raise ValueError("Kindle 缺少正文资源。")
+            source = safe_target(opf_path.parent, item.get("href"), content)
+            temporary = source.with_name("." + source.name + ".xhtml.tmp")
+            try:
+                subprocess.run(
+                    [
+                        pandoc,
+                        str(source),
+                        "--sandbox",
+                        "--from=html",
+                        "--to=html5",
+                        "--standalone",
+                        "--mathml",
+                        "--wrap=none",
+                        "--metadata=title=",
+                        "--metadata=pagetitle=" + title,
+                        "--metadata=lang=" + language,
+                        "--output",
+                        str(temporary),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=180,
+                )
+                document = etree.parse(str(temporary), XML)
+                for block in document.xpath(
+                    '//*[local-name()="div"][@height or @width]'
+                ):
+                    style = block.get("style", "").rstrip("; ")
+                    for dimension in ("height", "width"):
+                        value = block.attrib.pop(dimension, None)
+                        if value and re.fullmatch(
+                            r"\d+(?:\.\d+)?(?:%|em|rem|px|pt|cm|mm|in)?", value
+                        ):
+                            if value[-1].isdigit():
+                                value += "px"
+                            style += f";{dimension}:{value}"
+                    if style:
+                        block.set("style", style.lstrip(";"))
+                document.write(str(temporary), xml_declaration=True, encoding="utf-8")
+                temporary.replace(source)
+                item.set("media-type", "application/xhtml+xml")
+            finally:
+                temporary.unlink(missing_ok=True)
+    root.set("version", "3.0")
+    for tours in root.findall("o:tours", OPF):
+        # KindleUnpack emits this obsolete OEB element even when it is empty.
+        root.remove(tours)
+    for element in list(metadata):
+        # OPF 2's creator/identifier attributes are not EPUB 3 metadata attributes.
+        for attribute in list(element.attrib):
+            if attribute.startswith("{" + OPF["o"] + "}"):
+                del element.attrib[attribute]
+        if (
+            element.tag == "{" + OPF["o"] + "}meta"
+            and element.get("property") == "dcterms:modified"
+        ):
+            metadata.remove(element)
+    etree.SubElement(
+        metadata, "{" + OPF["o"] + "}meta", property="dcterms:modified"
+    ).text = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cover = metadata.find('o:meta[@name="cover"]', OPF)
+    if cover is not None:
+        item = next(
+            (item for item in manifest if item.get("id") == cover.get("content")), None
+        )
+        if item is not None:
+            item.set(
+                "properties",
+                " ".join(
+                    sorted(set(item.get("properties", "").split()) | {"cover-image"})
+                ),
+            )
+        metadata.remove(cover)
+    nav_item = next(
+        (item for item in manifest if "nav" in item.get("properties", "").split()), None
+    )
+    if nav_item is None:
+        xhtml = "http://www.w3.org/1999/xhtml"
+        epub = "http://www.idpf.org/2007/ops"
+        document = etree.Element(
+            "{" + xhtml + "}html", nsmap={None: xhtml, "epub": epub}
+        )
+        document.set("lang", language)
+        head = etree.SubElement(document, "{" + xhtml + "}head")
+        etree.SubElement(head, "{" + xhtml + "}title").text = (
+            "目录" if language.startswith("zh") else "Contents"
+        )
+        body = etree.SubElement(document, "{" + xhtml + "}body")
+        nav = etree.SubElement(
+            body, "{" + xhtml + "}nav", {"{" + epub + "}type": "toc", "id": "toc"}
+        )
+        listing = etree.SubElement(nav, "{" + xhtml + "}ol")
+        ncx_item = next(
+            (item for item in manifest if item.get("id") == spine.get("toc")), None
+        )
+        if ncx_item is None:
+            ncx_item = next(
+                (
+                    item
+                    for item in manifest
+                    if item.get("media-type") == "application/x-dtbncx+xml"
+                ),
+                None,
+            )
+
+        def href(base, value):
+            link = urlsplit(value)
+            target = safe_target(base, value, content)
+            relative = Path(os.path.relpath(target, opf_path.parent)).as_posix()
+            return quote(relative, safe="/") + (
+                "#" + quote(unquote(link.fragment), safe="") if link.fragment else ""
+            )
+
+        def navigation(parent, output, base):
+            for point in parent.findall("n:navPoint", NCX):
+                row = etree.SubElement(output, "{" + xhtml + "}li")
+                label = point.findtext(
+                    "n:navLabel/n:text", default="章节", namespaces=NCX
+                )
+                destination = point.find("n:content", NCX)
+                if destination is not None:
+                    etree.SubElement(
+                        row,
+                        "{" + xhtml + "}a",
+                        href=href(base, destination.get("src", "")),
+                    ).text = label
+                else:
+                    etree.SubElement(row, "{" + xhtml + "}span").text = label
+                if point.findall("n:navPoint", NCX):
+                    navigation(point, etree.SubElement(row, "{" + xhtml + "}ol"), base)
+
+        if ncx_item is not None:
+            ncx_path = safe_target(opf_path.parent, ncx_item.get("href"), content)
+            ncx = etree.parse(str(ncx_path), XML).find("n:navMap", NCX)
+            if ncx is not None:
+                navigation(ncx, listing, ncx_path.parent)
+        if not len(listing):
+            items = {item.get("id"): item for item in manifest}
+            for index, reference in enumerate(spine, 1):
+                item = items.get(reference.get("idref"))
+                if item is None:
+                    continue
+                row = etree.SubElement(listing, "{" + xhtml + "}li")
+                etree.SubElement(
+                    row,
+                    "{" + xhtml + "}a",
+                    href=href(opf_path.parent, item.get("href", "")),
+                ).text = f"第 {index} 节"
+        name, serial = "reader-nav.xhtml", 0
+        ids = {item.get("id") for item in manifest}
+        while (opf_path.parent / name).exists() or Path(name).stem in ids:
+            serial += 1
+            name = f"reader-nav-{serial}.xhtml"
+        (opf_path.parent / name).write_bytes(
+            etree.tostring(document, xml_declaration=True, encoding="utf-8")
+        )
+        etree.SubElement(
+            manifest,
+            "{" + OPF["o"] + "}item",
+            id=Path(name).stem,
+            href=name,
+            **{"media-type": "application/xhtml+xml", "properties": "nav"},
+        )
+    documents = {}
+    for item in manifest:
+        if item.get("media-type") == "application/xhtml+xml":
+            path = safe_target(opf_path.parent, item.get("href"), content)
+            document = etree.parse(str(path), XML)
+            documents[path] = document
+            properties = set(item.get("properties", "").split())
+            if document.xpath(
+                '//*[namespace-uri()="http://www.w3.org/1998/Math/MathML"]'
+            ):
+                properties.add("mathml")
+            if document.xpath('//*[namespace-uri()="http://www.w3.org/2000/svg"]'):
+                properties.add("svg")
+            if properties:
+                item.set("properties", " ".join(sorted(properties)))
+    for reference in root.findall("o:guide/o:reference", OPF):
+        link = urlsplit(reference.get("href", ""))
+        path = safe_target(opf_path.parent, reference.get("href", ""), content)
+        document = documents.get(path)
+        if (
+            link.fragment
+            and document is not None
+            and not document.xpath(
+                "//*[@id=$value or @name=$value]", value=unquote(link.fragment)
+            )
+        ):
+            # Some legacy start-reading pointers have no corresponding HTML anchor.
+            reference.set("href", link._replace(fragment="").geturl())
+    package.write(str(opf_path), xml_declaration=True, encoding="utf-8")
+    if not container_path.exists():
+        container_path.parent.mkdir(parents=True, exist_ok=True)
+        namespace = "urn:oasis:names:tc:opendocument:xmlns:container"
+        container = etree.Element(
+            "{" + namespace + "}container", version="1.0", nsmap={None: namespace}
+        )
+        files = etree.SubElement(container, "{" + namespace + "}rootfiles")
+        etree.SubElement(
+            files,
+            "{" + namespace + "}rootfile",
+            **{
+                "full-path": opf_path.relative_to(content).as_posix(),
+                "media-type": "application/oebps-package+xml",
+            },
+        )
+        container_path.write_bytes(
+            etree.tostring(container, xml_declaration=True, encoding="utf-8")
+        )
+    return True
+
+
 def text_toc(chapters):
     toc = []
     for index, chapter in enumerate(chapters):
@@ -508,10 +762,15 @@ def import_book(source, *, enabled=None, ident=None, title=None, shelf=None):
                 extracted = Path(extracted)
                 if extracted.suffix == ".epub":
                     extract_zip(extracted, content)
+                    normalize_kindle_package(content)
                     metadata = epub_metadata(content)
                 elif extracted.suffix == ".html":
                     shutil.copytree(extracted.parent, content, dirs_exist_ok=True)
-                    metadata = html_metadata(content / extracted.name)
+                    metadata = (
+                        epub_metadata(content)
+                        if normalize_kindle_package(content, legacy_html=True)
+                        else html_metadata(content / extracted.name)
+                    )
                 elif extracted.suffix == ".pdf":
                     target = destination / "render.pdf"
                     shutil.copy2(extracted, target)

@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -9,8 +10,11 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from lxml import etree
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import book_import
+import epub_export
 from book_import import import_book, safe_target, epub_metadata, defaults
 
 PIXEL = base64.b64decode(
@@ -74,6 +78,116 @@ class Adapters(unittest.TestCase):
         book = import_book(source)
         self.assertEqual(book["tocSource"], "epub-ncx")
         self.assertEqual(book["toc"][1]["fragment"], "note")
+
+    def kindle(self, extension):
+        source = self.root / ("sample" + extension)
+        source.write_bytes(b"Original anonymous Kindle input" + extension.encode())
+        unpacked = self.root / ("unpacked" + extension)
+        unpacked.mkdir()
+        body = '<head><title>Anonymous format sample</title></head><body><a id="part-a"></a><p>Alpha <em>emphasis</em> <img src="pic.png" alt="Original image"/></p><div height="1em"></div><a id="part-b"></a><p>Beta</p></body>'
+        files = {
+            "content.opf": '<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf"><dc:identifier id="uid" opf:scheme="URI">urn:page-between:kindle-sample</dc:identifier><dc:title>Anonymous format sample</dc:title><dc:creator opf:role="aut">Original example</dc:creator><dc:language>en</dc:language><meta name="cover" content="cover"/></metadata><manifest><item id="body" href="book.html" media-type="text/html"/><item id="cover" href="pic.png" media-type="image/png"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest><spine toc="ncx"><itemref idref="body"/></spine><tours/><guide><reference type="text" href="book.html#missing-start"/></guide></package>',
+            "toc.ncx": '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:page-between:kindle-sample"/></head><docTitle><text>Anonymous format sample</text></docTitle><navMap><navPoint id="a" playOrder="1"><navLabel><text>Part A</text></navLabel><content src="book.html#part-a"/><navPoint id="b" playOrder="2"><navLabel><text>Part B</text></navLabel><content src="book.html#part-b"/></navPoint></navPoint></navMap></ncx>',
+            "book.html": '<html lang="en">' + body + "</html>",
+            "pic.png": PIXEL,
+        }
+        if extension == ".azw3":
+            files["book.html"] = (
+                '<html xmlns="http://www.w3.org/1999/xhtml" lang="en">'
+                + body.replace(
+                    '<div height="1em"></div>', "<section><p>Modern XHTML</p></section>"
+                )
+                + "</html>"
+            )
+            files["content.opf"] = files["content.opf"].replace(
+                'media-type="text/html"', 'media-type="application/xhtml+xml"'
+            )
+            files["META-INF/container.xml"] = (
+                '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
+            )
+            extracted = unpacked / "book.epub"
+            with zipfile.ZipFile(extracted, "w") as archive:
+                archive.writestr("mimetype", "application/epub+zip")
+                for name, value in files.items():
+                    archive.writestr(name, value)
+        else:
+            for name, value in files.items():
+                (unpacked / name).write_bytes(
+                    value if isinstance(value, bytes) else value.encode()
+                )
+            extracted = unpacked / "book.html"
+        return source, unpacked, extracted
+
+    def test_kindle_preserves_native_directory_images_and_exports_valid_epub3(self):
+        for extension in (".mobi", ".azw3"):
+            with self.subTest(extension=extension):
+                source, unpacked, extracted = self.kindle(extension)
+                with patch(
+                    "mobi.extract", return_value=(str(unpacked), str(extracted))
+                ):
+                    book = import_book(source)
+                self.assertFalse(unpacked.exists())
+                self.assertEqual(book["language"], "en")
+                self.assertEqual(book["author"], "Original example")
+                self.assertEqual(book["tocSource"], "epub-nav")
+                self.assertEqual(book["toc"][0]["fragment"], "part-a")
+                self.assertEqual(book["toc"][0]["children"][0]["fragment"], "part-b")
+                self.assertEqual(book["toc"][0]["children"][0]["index"], 1)
+                self.assertEqual(
+                    book_import.path_for(book["cover"]).read_bytes(), PIXEL
+                )
+                self.assertEqual(
+                    book_import.path_for(book["originalUrl"]).read_bytes(),
+                    source.read_bytes(),
+                )
+                document = etree.parse(
+                    str(book_import.path_for(book["chapters"][0]["url"]))
+                )
+                self.assertEqual(
+                    len(document.xpath('//*[@id="part-a" or @id="part-b"]')), 2
+                )
+                self.assertTrue(
+                    document.xpath('//*[local-name()="em"][text()="emphasis"]')
+                )
+                if extension == ".mobi":
+                    self.assertTrue(
+                        document.xpath('//*[local-name()="div"][@style="height:1em"]')
+                    )
+                with (
+                    patch.object(epub_export, "BOOK_ROOT", book_import.BOOK_ROOT),
+                    patch.object(epub_export, "CACHE", self.root / "cache"),
+                ):
+                    result = epub_export.build(book)
+                    output = self.root / "cache/exports" / result["id"]
+                    if checker := os.environ.get("EPUBCHECK_JAR"):
+                        checked = subprocess.run(
+                            ["java", "-jar", checker, str(output), "--failonwarnings"],
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                        )
+                        self.assertEqual(
+                            checked.returncode, 0, checked.stdout + checked.stderr
+                        )
+
+    def test_kindle_directory_cannot_reference_files_outside_its_package(self):
+        source, unpacked, extracted = self.kindle(".mobi")
+        navigation = unpacked / "toc.ncx"
+        navigation.write_text(
+            navigation.read_text().replace("book.html#part-a", "../private.html#part-a")
+        )
+        with patch("mobi.extract", return_value=(str(unpacked), str(extracted))):
+            with self.assertRaisesRegex(ValueError, "Kindle 文件无法导入"):
+                import_book(source)
+        self.assertFalse(unpacked.exists())
+
+    def test_kindle_ambiguous_packages_do_not_silently_drop_the_native_directory(self):
+        source, unpacked, extracted = self.kindle(".mobi")
+        (unpacked / "other.opf").write_bytes((unpacked / "content.opf").read_bytes())
+        with patch("mobi.extract", return_value=(str(unpacked), str(extracted))):
+            with self.assertRaisesRegex(ValueError, "Kindle 文件无法导入"):
+                import_book(source)
+        self.assertFalse(unpacked.exists())
 
     def test_zip_cannot_escape_import_directory(self):
         source = self.root / "bad.epub"

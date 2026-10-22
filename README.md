@@ -2,7 +2,7 @@
 
 一个面向 macOS 的个人阅读应用：原生 EPUB、保留版面的 PDF、可分页的文字书，以及随窗口大小调整字号的掌上阅读窗口。
 
-A local-first reading prototype with native EPUB navigation, enhanced PDF selection, paginated text, and a compact macOS reading window.
+A local-first macOS reading app with native EPUB navigation, enhanced PDF selection, paginated text, and a compact reading window.
 
 当前已有可独立安装的 macOS App，功能与代码继续用于**产品交互与代码评审**。主体是 HTML / CSS / JavaScript、Python 本地服务，以及原生主窗口、OCR、掌上窗口和钥匙串组件。完整功能与安装交付的验收清单见 [App 改造与交付](docs/APP_READINESS.md)。
 
@@ -25,11 +25,11 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 
 构建结果默认位于用户的 `Library/Caches/Page Between/build/`。当前在 Apple Silicon、macOS 27.0.1 验证，签名为本机构建的 ad-hoc 签名；其他系统版本和正式分发尚待验收。旧书库可使用 `python scripts/migrate_library.py data` 复制到安装版，已有目标不会覆盖，原目录保留。
 
-当前 App 仍在持续开发，完整交互与安装验收见 [完整验收清单](docs/APP_READINESS.md)。以下是从源码运行原型的方式。
+0.5.7 已完成本机交付与原始功能清单验收；用户已确认掌上窗口在其他 App 聚焦时可用真正的左右方向键双向翻页。普通版与匿名演示版均已安装，并提供经过重新解压、签名验证的独立安装压缩包。具体证据与适用平台见 [完整验收清单](docs/APP_READINESS.md)，此前各轮记录保留在 [QA.md](QA.md)。
 
 2.28 修复 MinerU 上传后重启时可能重复创建云任务的问题。上传完成状态随进度保存，云端暂未确认文件时继续查询原任务；若上传中断，先等待确认，再提示使用「重新提交解析」，不会自动另建任务。Token 和签名上传地址不写入任务记录。
 
-2.23 调整全局快捷键的系统事件接收入口，并保护后台翻页尚未保存的位置，避免被其他窗口的同步覆盖。窗口内用 ← / →，后台用 ⌃⌥⌘← / ⌃⌥⌘→；实际后台组合键是否送达仍需桌面验证。诊断会分别保存登记状态、收到的快捷键次数及 WebKit 执行错误，保存在本机数据目录。
+2.23 调整全局快捷键的系统事件接收入口，并保护后台翻页尚未保存的位置，避免被其他窗口的同步覆盖。窗口内用 ← / →，后台用 ⌃⌥⌘← / ⌃⌥⌘→；0.5.7 已由用户实际确认后台双向翻页正常。诊断分别保存登记状态、收到的快捷键次数及 WebKit 执行错误，保存在本机数据目录。
 
 桌面版阅读设置中可选后台翻页按键：方向键、P / N（上一页 / 下一页），或关闭后台翻页；组合键均为 Control + Option + Command。设置会保存，并同步到已经打开的小窗。仅在小窗正文就绪后登记按键，关闭小窗会释放；关闭后台按键仍可在窗口内用普通方向键翻页。网页版会说明桌面窗口提供的能力。
 

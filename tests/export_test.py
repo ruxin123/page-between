@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+import base64
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,70 @@ from lxml import etree
 
 
 class Export(unittest.TestCase):
+    def test_odt_bookmark_artifacts_do_not_break_navigation_or_nested_headings(self):
+        markdown = self.root / "outline.md"
+        markdown.write_text(
+            "# First\n\nOriginal paragraph.\n\n## Detail\n\nMore text.\n\n## Further\n\nFurther text.\n\n# Second\n\n[Return to first](#first)."
+        )
+        source = self.root / "outline.odt"
+        subprocess.run(
+            ["pandoc", str(markdown), "-t", "odt", "-o", str(source)],
+            check=True,
+            capture_output=True,
+        )
+        original = source.read_bytes()
+        book = book_import.import_book(source)
+        with zipfile.ZipFile(self.output(epub_export.build(book))) as archive:
+            for name in archive.namelist():
+                if name.endswith(".xhtml"):
+                    doc = etree.fromstring(archive.read(name))
+                    identifiers = doc.xpath("//@id")
+                    self.assertEqual(len(identifiers), len(set(identifiers)))
+                    self.assertFalse(
+                        doc.xpath(
+                            '//*[local-name()="nav"]//*[local-name()="span" and not(node())]'
+                        )
+                    )
+        self.assertEqual(
+            book_import.path_for(book["originalUrl"]).read_bytes(), original
+        )
+
+    def test_converted_export_rebuilds_embedded_images_without_changing_saved_content(
+        self,
+    ):
+        pixel = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jv1cAAAAASUVORK5CYII="
+        )
+
+        source = self.root / "embedded.html"
+        source.write_text(
+            '<h1>Original export sample</h1><p>Original paragraph.</p><img alt="Original image" src="data:image/png;base64,'
+            + base64.b64encode(pixel).decode()
+            + '"/>'
+        )
+        book = book_import.import_book(source)
+        converted = self.root / "books" / book["id"] / "converted.epub"
+        converted.write_bytes(b"old incomplete converted cache")
+        result = epub_export.build(book)
+        with zipfile.ZipFile(self.output(result)) as archive:
+            images = [
+                archive.read(name)
+                for name in archive.namelist()
+                if name.endswith(".png")
+            ]
+            self.assertIn(pixel, images)
+            self.assertFalse(
+                any(
+                    b"../data:image" in archive.read(name)
+                    for name in archive.namelist()
+                    if name.endswith(".xhtml")
+                )
+            )
+        self.assertEqual(converted.read_bytes(), b"old incomplete converted cache")
+        self.assertEqual(
+            book_import.path_for(book["originalUrl"]).read_bytes(), source.read_bytes()
+        )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

@@ -10,7 +10,7 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（0.5.5 / 前端 2.26）
+## macOS App 构建（0.5.6 / 前端 2.27）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -36,6 +36,8 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 ![共享正文目录与当前位置，原创匿名样本](docs/screenshots/epub-directory.png)
 
 2.26 将章节定位用于答疑出处：同一页有多章时，选段引用按实际段落归属；书内检索也保存目录章节锚点，新对话使用对应章节名称。附加注释单独标为原书附加内容。索引更新会自动重建缓存，历史对话保留原有来源快照。
+
+2.27 修复 HTML / Markdown 内嵌图片的转换和导出，并补齐无标题文档的 EPUB 信息及 ODT 目录锚点。导入采用单文件：图片应已内嵌或包含在 DOCX、ODT、FB2 等文件包中；引用未提供的外部图片会给出具体错误。旧转换结果中的图片链接可直接阅读，重新导出时从原始文件生成标准副本。
 
 ![掌上窗口快捷键设置，原创匿名演示](docs/screenshots/palm-shortcuts.png)
 

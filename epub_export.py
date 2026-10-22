@@ -17,18 +17,18 @@ from urllib.parse import unquote, urlsplit
 from lxml import etree
 from pypdf import PdfReader
 
-from book_import import BOOK_ROOT, flatten_toc, path_for
+from book_import import BOOK_ROOT, CONVERT, convert_document, flatten_toc, path_for
 from book_index import REFERENCE, references
 from paths import CACHE
 from pdf_enhancement import enrichment_data, PDF_LOCK, open_pdf
 from storage import load
 
 
-def complete_package(path):
-    """Check local package links and fill missing packaging metadata, not book content.
+def complete_package(path, *, converted=False):
+    """Complete package metadata and converter-generated navigation artifacts.
 
     This is an export preflight, not a replacement for EPUBCheck. A compliant native
-    book stays byte-for-byte unchanged. Repairs only affect the exported copy.
+    book stays byte-for-byte unchanged. Original input files are never modified.
     """
     container_ns = "urn:oasis:names:tc:opendocument:xmlns:container"
     opf_ns = "http://www.idpf.org/2007/opf"
@@ -107,9 +107,51 @@ def complete_package(path):
                 for item in manifest:
                     if item.get("media-type") != "application/xhtml+xml":
                         continue
-                    chapter = read_xml(
-                        local_resource(posixpath.dirname(name), item.get("href"))
+                    chapter_name = local_resource(
+                        posixpath.dirname(name), item.get("href")
                     )
+                    chapter = read_xml(chapter_name)
+                    chapter_changed = False
+                    if "nav" in item.get("properties", "").split():
+                        for span in reversed(
+                            chapter.xpath(
+                                '//*[local-name()="nav"]//*[local-name()="span"]'
+                            )
+                        ):
+                            if not len(span) and not (span.text or "").strip():
+                                parent, previous, tail = (
+                                    span.getparent(),
+                                    span.getprevious(),
+                                    span.tail,
+                                )
+                                parent.remove(span)
+                                if tail:
+                                    if previous is not None:
+                                        previous.tail = (previous.tail or "") + tail
+                                    else:
+                                        parent.text = (parent.text or "") + tail
+                                chapter_changed = True
+                    if converted:
+                        # Some ODT readers generate repeated empty bookmark IDs in headings.
+                        identifiers = set()
+                        for node in chapter.iter():
+                            if not isinstance(node.tag, str) or not node.get("id"):
+                                continue
+                            identifier = node.get("id")
+                            if (
+                                identifier in identifiers
+                                and etree.QName(node).localname == "span"
+                                and not len(node)
+                                and not (node.text or "").strip()
+                            ):
+                                node.attrib.pop("id")
+                                chapter_changed = True
+                            else:
+                                identifiers.add(identifier)
+                    if chapter_changed:
+                        replacements[chapter_name] = etree.tostring(
+                            chapter, encoding="UTF-8", xml_declaration=True
+                        )
                     if epub3:
                         properties = item.get("properties", "").split()
                         for flag, namespace in (
@@ -259,6 +301,10 @@ def package_original(book, target):
     folder = BOOK_ROOT / book["id"]
     if book.get("format") == "EPUB":
         shutil.copyfile(path_for(book["originalUrl"]), target)
+        return True
+    original = path_for(book["originalUrl"])
+    if original.suffix.lower() in CONVERT:
+        convert_document(original, target, title=book["title"])
         return True
     converted = folder / "converted.epub"
     if converted.is_file():

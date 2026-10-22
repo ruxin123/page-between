@@ -5,9 +5,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 from lxml import etree
@@ -23,6 +25,117 @@ PIXEL = base64.b64decode(
 
 
 class Adapters(unittest.TestCase):
+    def test_embedded_data_images_are_real_resources_in_html_and_markdown_imports(self):
+        samples = {
+            "png": ("image/png;base64," + base64.b64encode(PIXEL).decode(), PIXEL),
+            "svg": (
+                "image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2010%2010%22%3E%3Ccircle%20cx=%225%22%20cy=%225%22%20r=%224%22/%3E%3C/svg%3E",
+                b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>',
+            ),
+        }
+        for variant in ("html", "md", "raw-block", "raw-inline"):
+            extension = "html" if variant == "html" else "md"
+            for kind, (uri, expected) in samples.items():
+                with self.subTest(format=variant, image=kind):
+                    source = self.root / (
+                        "image-" + kind + "-" + variant + "." + extension
+                    )
+                    source.write_text(
+                        '<h1>Original image sample</h1><p>Original text.</p><img src="data:'
+                        + uri
+                        + '" alt="Original illustration"/>'
+                        if extension == "html"
+                        else "# Original image sample\n\nOriginal text.\n\n![Original illustration](data:"
+                        + uri
+                        + ")"
+                    )
+                    if variant in ("raw-block", "raw-inline"):
+                        tag = (
+                            '<img src="data:' + uri + '" alt="Original illustration"/>'
+                        )
+                        source.write_text(
+                            "# Original raw image\n\n"
+                            + (
+                                "<div>" + tag + "</div>"
+                                if variant == "raw-block"
+                                else "Original inline image "
+                                + tag
+                                + " and remaining text."
+                            )
+                        )
+                    book = import_book(source)
+                    content = book_import.BOOK_ROOT / book["id"] / "content"
+                    assets = [
+                        path
+                        for path in content.rglob("*" + "." + kind)
+                        if not path.name.startswith("._")
+                    ]
+                    self.assertEqual(len(assets), 1)
+                    self.assertEqual(assets[0].read_bytes(), expected)
+                    html = "".join(
+                        book_import.path_for(chapter["url"]).read_text()
+                        for chapter in book["chapters"]
+                    )
+                    self.assertNotIn("../data:image", html)
+                    self.assertEqual(
+                        book_import.path_for(book["originalUrl"]).read_bytes(),
+                        source.read_bytes(),
+                    )
+
+    def test_external_images_are_not_fetched_and_failed_conversion_preserves_the_target(
+        self,
+    ):
+        requests = []
+
+        class Provider(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                requests.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(PIXEL)
+
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+        worker = threading.Thread(target=provider.serve_forever, daemon=True)
+        worker.start()
+        target = self.root / "previous.epub"
+        target.write_bytes(b"previous completed output")
+        source = self.root / "external.md"
+        try:
+            for address in (
+                f"http://127.0.0.1:{provider.server_port}/private.png",
+                "private.png",
+            ):
+                (self.root / "private.png").write_bytes(PIXEL)
+                source.write_text(
+                    "# Original sample\n\n![Unavailable asset](" + address + ")"
+                )
+                with self.assertRaisesRegex(ValueError, "图片未包含"):
+                    book_import.convert_document(source, target)
+                self.assertEqual(target.read_bytes(), b"previous completed output")
+            source.write_text(
+                "# Original sample\n\n![Invalid](data:text/plain;base64,cHJpdmF0ZQ==)"
+            )
+            with self.assertRaisesRegex(ValueError, "内嵌图片"):
+                book_import.convert_document(source, target)
+            self.assertEqual(requests, [])
+            source.write_text(
+                '# Original raw block\n\n<div><img src="data:image/png;base64,'
+                + base64.b64encode(PIXEL).decode()
+                + '"/><iframe src="http://127.0.0.1:'
+                + str(provider.server_port)
+                + '/private.png"></iframe></div>'
+            )
+            book_import.convert_document(source, self.root / "isolated.epub")
+            self.assertEqual(requests, [])
+            self.assertEqual(target.read_bytes(), b"previous completed output")
+        finally:
+            provider.shutdown()
+            provider.server_close()
+            worker.join()
+
     def setUp(self):
         (book_import.ROOT / "tmp").mkdir(exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(

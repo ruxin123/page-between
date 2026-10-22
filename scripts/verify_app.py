@@ -117,6 +117,10 @@ def verify(app, epubcheck=None, samples=()):
                 package = container.find("{*}rootfiles/{*}rootfile")
                 assert package.get("media-type") == "application/oebps-package+xml"
                 metadata = ET.fromstring(archive.read(package.get("full-path")))
+                image_resources = sum(
+                    item.get("media-type", "").startswith("image/")
+                    for item in metadata.findall("{*}manifest/{*}item")
+                )
                 assert not metadata.get("version", "").startswith("3.") or (
                     len(
                         metadata.findall(
@@ -135,6 +139,7 @@ def verify(app, epubcheck=None, samples=()):
                     timeout=60,
                 )
                 assert checked.returncode == 0, checked.stdout + checked.stderr
+            return image_resources
 
         def export_epub(ident):
             prepared = json.loads(
@@ -429,6 +434,7 @@ def verify(app, epubcheck=None, samples=()):
                 }
             sample_results = []
             for sample in samples:
+                image_resources = None
                 original = sample.read_bytes()
                 imported = json.loads(
                     request(
@@ -444,7 +450,7 @@ def verify(app, epubcheck=None, samples=()):
                     if imported["type"] == "epub":
                         for chapter in imported["chapters"]:
                             assert request(chapter["url"])[2]
-                    check_epub(
+                    image_resources = check_epub(
                         export_epub(imported["id"])[1],
                         "sample-" + sample.suffix.lower().lstrip("."),
                     )
@@ -453,6 +459,7 @@ def verify(app, epubcheck=None, samples=()):
                         "format": imported["format"],
                         "chapters": len(imported.get("chapters", [])),
                         "toc": len(imported.get("toc", [])),
+                        "imageResources": image_resources,
                     }
                 )
             subprocess.run(

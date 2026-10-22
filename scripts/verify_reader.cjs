@@ -407,6 +407,7 @@ async function shortcutPreferences(browser, failures) {
     await backgroundPositionSync(browser, failures);
     const interrupted = await browser.newPage({
       viewport: { width: 1280, height: 900 },
+      reducedMotion: "no-preference",
     });
     interrupted.on("pageerror", (error) => failures.push(error.message));
     await interrupted.goto(base + "/#/read/demo-b");
@@ -417,16 +418,22 @@ async function shortcutPreferences(browser, failures) {
     await interrupted.locator("#page-label").click();
     await interrupted.locator("#page-jump-input").fill(last);
     await interrupted.locator("#page-jump-input").press("Enter");
+    await interrupted.evaluate(() => {
+      const view = document.querySelector("#reading-viewport"),
+        animate = view.animate;
+      view.animate = function (...arguments_) {
+        const animation = animate.apply(this, arguments_);
+        view.animate = animate;
+        queueMicrotask(() => {
+          window.testAnimationCancelled = true;
+          animation.cancel();
+        });
+        return animation;
+      };
+    });
     await interrupted.keyboard.press("ArrowRight");
     await interrupted.waitForFunction(
-      () =>
-        document.querySelector("#reading-viewport").getAnimations().length > 0,
-    );
-    await interrupted.evaluate(() =>
-      document
-        .querySelector("#reading-viewport")
-        .getAnimations()
-        .forEach((animation) => animation.cancel()),
+      () => window.testAnimationCancelled === true,
     );
     await interrupted.locator("#next-button:not([disabled])").waitFor();
     const recovered = await pageNumber(interrupted, false);
@@ -579,6 +586,55 @@ async function shortcutPreferences(browser, failures) {
     await page.close();
     assert.deepEqual(failures, []);
     console.log(engine, "untrusted book scripts remain blocked");
+    await api("/api/state", {
+      positions: {
+        "demo-a": {
+          index: 2,
+          page: 0,
+          top: 0,
+          anchor: null,
+          fragment: "",
+          updatedAt: Date.now(),
+        },
+      },
+    });
+    const legacyImage = await browser.newPage({
+      viewport: { width: 1280, height: 900 },
+    });
+    legacyImage.on("pageerror", (error) => failures.push(error.message));
+    const inlineImage =
+      "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    await legacyImage.route(
+      "**/demo-data/books/demo-a/content/OPS/chapter-1.xhtml",
+      async (route) => {
+        const response = await route.fetch();
+        const text = await response.text();
+        assert.ok(text.includes('src="figure.svg"'));
+        await route.fulfill({
+          response,
+          body: text.replace(
+            'src="figure.svg"',
+            'src="../' + inlineImage + '"',
+          ),
+        });
+      },
+    );
+    await legacyImage.goto(base + "/#/read/demo-a");
+    await ready(legacyImage);
+    await legacyImage.waitForFunction(() => {
+      const image = document
+        .querySelector("#epub-frame")
+        .contentDocument.querySelector("#reader-flow img");
+      return (
+        image?.src.startsWith("data:image/gif;") && image.naturalWidth === 1
+      );
+    });
+    await legacyImage.close();
+    assert.deepEqual(failures, []);
+    console.log(
+      engine,
+      "legacy converted inline images display without changing stored content",
+    );
   } finally {
     await browser.close();
     await api("/api/state", {

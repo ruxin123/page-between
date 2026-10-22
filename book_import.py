@@ -6,6 +6,7 @@ import mimetypes
 import re
 import shutil
 import subprocess
+import tempfile
 import zipfile
 import os
 from datetime import datetime, timezone
@@ -36,6 +37,49 @@ SUPPORTED = {".pdf", ".epub", ".txt", ".cbz", ".mobi", ".azw", ".azw3", *CONVERT
 
 def defaults(extension):
     return extension.lower() in {".pdf", ".txt"}
+
+
+def convert_document(source, target, *, title=None):
+    pandoc = shutil.which("pandoc")
+    if not pandoc:
+        raise ValueError("转换组件不可用，请安装完整 App。")
+    with tempfile.TemporaryDirectory(prefix=".convert-", dir=target.parent) as staging:
+        output, log = Path(staging) / "book.epub", Path(staging) / "messages.json"
+        try:
+            subprocess.run(
+                [
+                    pandoc,
+                    str(source),
+                    "--sandbox",
+                    "--from=" + CONVERT[source.suffix.lower()],
+                    "--to=epub3",
+                    "--lua-filter=" + str(ROOT / "normalize-headings.lua"),
+                    "--metadata=reader-fallback-title:" + (title or source.stem),
+                    "--resource-path=" + str(source.parent),
+                    "--log=" + str(log),
+                    "-o",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=90,
+            )
+        except subprocess.CalledProcessError as error:
+            if "reader-embedded-image:" in (error.stderr or ""):
+                raise ValueError(
+                    "文件中的内嵌图片无法读取或过大，请检查图片后重试。"
+                ) from None
+            raise ValueError("文件转换失败，请检查文件是否完整。") from error
+        messages = json.loads(log.read_text())
+        if any(item.get("type") == "CouldNotFetchResource" for item in messages):
+            raise ValueError(
+                "文件引用的图片未包含在文件内，请先保存为内嵌图片的 HTML 或 EPUB 后导入。"
+            )
+        from epub_export import complete_package
+
+        complete_package(output, converted=True)
+        output.replace(target)
 
 
 def safe_target(base, href, root):
@@ -887,29 +931,7 @@ def import_book(source, *, enabled=None, ident=None, title=None, shelf=None):
             }
         else:
             converted = destination / "converted.epub"
-            pandoc = shutil.which("pandoc")
-            if not pandoc:
-                raise ValueError("这个格式需要先安装 Pandoc。")
-            try:
-                subprocess.run(
-                    [
-                        pandoc,
-                        str(original),
-                        "--sandbox",
-                        "--from=" + CONVERT[extension],
-                        "--to=epub3",
-                        "--lua-filter=" + str(ROOT / "normalize-headings.lua"),
-                        "--resource-path=" + str(source.parent),
-                        "-o",
-                        str(converted),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=90,
-                )
-            except subprocess.CalledProcessError as error:
-                raise ValueError("文件转换失败，请检查文件是否完整。") from error
+            convert_document(original, converted, title=source.stem)
             extract_zip(converted, content)
         if extension not in {".cbz", ".mobi", ".azw", ".azw3"}:
             metadata = epub_metadata(content)

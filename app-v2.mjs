@@ -25,7 +25,7 @@ import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
 import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.26";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.27";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -108,7 +108,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.26";
+document.body.dataset.readerBuild = "2.27";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -659,7 +659,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.26",
+        build: "2.27",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1764,6 +1764,11 @@ async function renderEpub(position, revision) {
     const source = await response.text();
     if (revision !== renderRevision) return;
     const parsed = new DOMParser().parseFromString(source, "text/html");
+    for (const image of parsed.querySelectorAll("img[src]")) {
+      const source = image.getAttribute("src");
+      const recovered = source.replace(/^(?:\.{1,2}\/)+(data:image\/)/i, "$1");
+      if (recovered !== source) image.setAttribute("src", recovered);
+    }
     // WebKit needs allow-scripts for trusted parent listeners; book code stays removed and forbidden by CSP.
     parsed
       .querySelectorAll("script,iframe,object,embed,base")

@@ -10,7 +10,7 @@ A local-first reading prototype with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（0.5.6 / 前端 2.27）
+## macOS App 构建（0.5.7 / 前端 2.28）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -26,6 +26,8 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 构建结果默认位于用户的 `Library/Caches/Page Between/build/`。当前在 Apple Silicon、macOS 27.0.1 验证，签名为本机构建的 ad-hoc 签名；其他系统版本和正式分发尚待验收。旧书库可使用 `python scripts/migrate_library.py data` 复制到安装版，已有目标不会覆盖，原目录保留。
 
 当前 App 仍在持续开发，完整交互与安装验收见 [完整验收清单](docs/APP_READINESS.md)。以下是从源码运行原型的方式。
+
+2.28 修复 MinerU 上传后重启时可能重复创建云任务的问题。上传完成状态随进度保存，云端暂未确认文件时继续查询原任务；若上传中断，先等待确认，再提示使用「重新提交解析」，不会自动另建任务。Token 和签名上传地址不写入任务记录。
 
 2.23 调整全局快捷键的系统事件接收入口，并保护后台翻页尚未保存的位置，避免被其他窗口的同步覆盖。窗口内用 ← / →，后台用 ⌃⌥⌘← / ⌃⌥⌘→；实际后台组合键是否送达仍需桌面验证。诊断会分别保存登记状态、收到的快捷键次数及 WebKit 执行错误，保存在本机数据目录。
 

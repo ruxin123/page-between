@@ -170,14 +170,8 @@ class MinerU(unittest.TestCase):
                     else:
                         counts["queried"] += 1
                         item = (
-                            {
-                                "state": "running",
-                                "extract_progress": {
-                                    "extracted_pages": 1,
-                                    "total_pages": 2,
-                                },
-                            }
-                            if counts["queried"] == 1
+                            {"state": "waiting-file"}
+                            if counts["queried"] <= 2
                             else {
                                 "state": "done",
                                 "full_zip_url": f"http://127.0.0.1:{self.server.server_port}/result.zip?signature=temporary-fixture",
@@ -207,12 +201,16 @@ class MinerU(unittest.TestCase):
                     cancel = threading.Event()
 
                     def phase(message):
-                        if message.startswith("云端解析"):
+                        if message.startswith(("云端解析", "等待云端确认上传")):
                             cancel.set()
 
                     with self.assertRaises(mineru.Paused):
                         mineru.run(book, [2, 4], phase, cancel)
                     self.assertEqual(counts["created"], 1)
+                    for path in (root / "books").rglob("job.json"):
+                        self.assertTrue(
+                            json.loads(path.read_text())["chunks"]["0"]["uploaded"]
+                        )
                     cancel.clear()
                     patch_result = mineru.run(
                         book, [2, 4], lambda message: None, cancel
@@ -267,6 +265,67 @@ class MinerU(unittest.TestCase):
                 http.shutdown()
                 http.server_close()
                 worker.join()
+
+    def test_unconfirmed_upload_and_malformed_results_keep_the_existing_cloud_task(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "sample.pdf"
+            make_pdf(source)
+            with (
+                patch.object(book_import, "BOOK_ROOT", root / "books"),
+                patch.object(mineru, "BOOK_ROOT", root / "books"),
+                patch.object(
+                    mineru.service_settings,
+                    "effective",
+                    return_value={
+                        "baseUrl": "https://mineru.net/api/v4",
+                        "model": "vlm",
+                        "key": "fixture-credential",
+                    },
+                ),
+            ):
+                book = book_import.import_book(source)
+                cancel = threading.Event()
+                with (
+                    patch.object(
+                        mineru,
+                        "api",
+                        return_value={
+                            "batch_id": "existing-batch",
+                            "file_urls": ["https://mineru.net/upload"],
+                        },
+                    ),
+                    patch.object(
+                        mineru,
+                        "upload",
+                        side_effect=mineru.MinerUError("Upload interrupted"),
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        mineru.MinerUError, "Upload interrupted"
+                    ):
+                        mineru.run(book, [2, 4], lambda message: None, cancel)
+                for response, message in (
+                    ({"extract_result": [{"state": "waiting-file"}]}, "已保留任务"),
+                    ({"extract_result": []}, "已保留原任务"),
+                    ({"extract_result": None}, "已保留原任务"),
+                ):
+                    with (
+                        self.subTest(response=response),
+                        patch.object(mineru, "api", return_value=response) as api,
+                        patch.object(mineru, "upload") as upload,
+                        patch.object(mineru.time, "monotonic", side_effect=[0, 61]),
+                    ):
+                        with self.assertRaisesRegex(mineru.MinerUError, message):
+                            mineru.run(book, [2, 4], lambda message: None, cancel)
+                        self.assertEqual(api.call_count, 1)
+                        self.assertEqual(
+                            api.call_args.args[1],
+                            "/extract-results/batch/existing-batch",
+                        )
+                        upload.assert_not_called()
 
 
 if __name__ == "__main__":

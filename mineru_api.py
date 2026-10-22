@@ -373,8 +373,14 @@ def run(book, pages, phase, cancel, *, fresh=False):
                 results = api(
                     config, "/extract-results/batch/" + quote(chunk["batchId"], safe="")
                 ).get("extract_result", [])
-                task = results[0] if len(results) == 1 else None
-            if task is None or task.get("state") == "waiting-file":
+                if (
+                    not isinstance(results, list)
+                    or len(results) != 1
+                    or not isinstance(results[0], dict)
+                ):
+                    raise MinerUError("云任务结果格式不正确，已保留原任务。")
+                task = results[0]
+            else:
                 check()
                 batch = api(
                     config,
@@ -394,14 +400,18 @@ def run(book, pages, phase, cancel, *, fresh=False):
                     not isinstance(urls, list)
                     or len(urls) != 1
                     or not isinstance(batch_id, str)
+                    or not batch_id
                 ):
                     raise MinerUError("MinerU 未返回有效的上传任务。")
                 chunk["batchId"] = batch_id
                 checkpoint()
                 phase(f"上传所选页段 · {len(subset)} 页")
                 upload(config, urls[0], source)
+                chunk["uploaded"] = True
+                checkpoint()
                 task = None
-            deadline = time.monotonic() + 1800
+            started = time.monotonic()
+            deadline = started + 1800
             while True:
                 check()
                 if task is None:
@@ -409,7 +419,11 @@ def run(book, pages, phase, cancel, *, fresh=False):
                         config,
                         "/extract-results/batch/" + quote(chunk["batchId"], safe=""),
                     ).get("extract_result", [])
-                    if len(results) != 1 or not isinstance(results[0], dict):
+                    if (
+                        not isinstance(results, list)
+                        or len(results) != 1
+                        or not isinstance(results[0], dict)
+                    ):
                         raise MinerUError("云任务结果格式不正确。")
                     task = results[0]
                 status = task.get("state")
@@ -423,12 +437,27 @@ def run(book, pages, phase, cancel, *, fresh=False):
                     chunk["state"] = "downloaded"
                     checkpoint()
                     break
-                progress = task.get("extract_progress", {})
-                phase(
-                    f"云端解析 · {offset + int(progress.get('extracted_pages') or 0)} / {len(pages)} 页"
-                )
+                if status == "waiting-file":
+                    # Upload acknowledgement can lag behind a successful PUT, including after restart.
+                    phase("等待云端确认上传 · 已保留当前任务")
+                    if not chunk.get("uploaded") and time.monotonic() - started > 60:
+                        raise Paused(
+                            "云端尚未确认收到文件，已保留任务；可继续等待，若此前上传中断可勾选「重新提交解析」后重试。"
+                        )
+                else:
+                    if not chunk.get("uploaded"):
+                        chunk["uploaded"] = True
+                        checkpoint()
+                    progress = task.get("extract_progress", {})
+                    phase(
+                        f"云端解析 · {offset + int(progress.get('extracted_pages') or 0)} / {len(pages)} 页"
+                    )
                 if time.monotonic() > deadline:
-                    raise Paused("云端仍在处理，已保存任务，可稍后继续查询。")
+                    raise Paused(
+                        "云端尚未确认收到文件，已保存任务；可继续等待或勾选「重新提交解析」后重试。"
+                        if status == "waiting-file"
+                        else "云端仍在处理，已保存任务，可稍后继续查询。"
+                    )
                 cancel.wait(3)
                 task = None
         check()

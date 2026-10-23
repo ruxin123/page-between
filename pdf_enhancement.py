@@ -8,18 +8,23 @@ import threading
 import statistics
 import io
 import shutil
+import hashlib
+import math
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 
 from book_import import ROOT, path_for
 
 from paths import CACHE as CACHE_ROOT, RUNTIME
+from storage import save
 
 OCR = RUNTIME / "ocr-page"
 CACHE = CACHE_ROOT / "ocr-v4"
 LOCKS = collections.defaultdict(threading.Lock)
 PDF_LOCK = threading.RLock()
+OCR_SLOTS = threading.BoundedSemaphore(2)
 
 
 @contextmanager
@@ -37,6 +42,119 @@ def open_pdf(path):
 
 def source_path(book):
     return path_for(book["url"])
+
+
+@lru_cache(maxsize=64)
+def document_hash(path, size, modified, changed):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def source_digest(book):
+    source = source_path(book)
+    stat = source.stat()
+    return document_hash(
+        str(source.resolve()), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+    )
+
+
+def selection_directory(book):
+    source = source_path(book)
+    identity = {
+        "source": source_digest(book),
+        "language": book.get("language", "en"),
+        "recognition": "character-boxes-v4",
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(identity, sort_keys=True).encode()
+    ).hexdigest()[:24]
+    return source.parent / "selection-text-v1" / fingerprint
+
+
+def save_selection(book, page, data):
+    folder = selection_directory(book)
+    if (
+        not isinstance(data, dict)
+        or data.get("page") != page
+        or not isinstance(data.get("lines"), list)
+        or any(
+            not isinstance(data.get(key), (int, float))
+            or not math.isfinite(data[key])
+            or data[key] <= 0
+            for key in ("width", "height")
+        )
+    ):
+        raise ValueError("本页文字识别结果不完整，请重试。")
+    data = {**data, "selectionFingerprint": folder.name}
+    save(folder / f"{page}.json", data)
+    return data
+
+
+def saved_selection(book, page):
+    folder = selection_directory(book)
+    path = folder / f"{page}.json"
+    try:
+        data = json.loads(path.read_text())
+        if (
+            data.get("selectionFingerprint") == folder.name
+            and data.get("page") == page
+            and isinstance(data.get("lines"), list)
+        ):
+            return data
+    except (OSError, ValueError, AttributeError):
+        pass
+    english = not book.get("language", "en").startswith("zh")
+    legacy = CACHE / book["id"] / f"{page}-full{'-eng' if english else ''}.json"
+    try:
+        data = json.loads(legacy.read_text())
+        if (
+            legacy.stat().st_mtime_ns >= source_path(book).stat().st_mtime_ns
+            and data.get("page") == page
+            and isinstance(data.get("lines"), list)
+            and data.get("engine") == ("tesseract-eng" if english else "apple-vision")
+        ):
+            return save_selection(book, page, data)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+@lru_cache(maxsize=4096)
+def valid_saved_selection(path, size, modified, changed, fingerprint, page):
+    try:
+        data = json.loads(Path(path).read_text())
+        return (
+            data.get("selectionFingerprint") == fingerprint
+            and data.get("page") == page
+            and isinstance(data.get("lines"), list)
+        )
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def prepared_pages(book):
+    folder = selection_directory(book)
+    if not (folder / "legacy-migrated.json").exists():
+        for path in (CACHE / book["id"]).glob("*-full*.json"):
+            number = path.name.split("-", 1)[0]
+            if number.isdigit() and 1 <= int(number) <= book["pages"]:
+                saved_selection(book, int(number))
+        save(folder / "legacy-migrated.json", {"complete": True})
+    result = []
+    for path in folder.glob("*.json"):
+        if not path.stem.isdigit() or not 1 <= int(path.stem) <= book["pages"]:
+            continue
+        stat = path.stat()
+        if valid_saved_selection(
+            str(path),
+            stat.st_size,
+            stat.st_mtime_ns,
+            stat.st_ctime_ns,
+            folder.name,
+            int(path.stem),
+        ):
+            result.append(int(path.stem))
+    return sorted(result)
 
 
 def enrichment_data(book):
@@ -115,75 +233,117 @@ def hocr_lines(source, width, height):
     return lines
 
 
-def recognize(book, page, mode="full"):
-    if not 1 <= page <= book["pages"]:
+def recognize(book, page, mode="full", *, allow_native=False, include_enrichment=True):
+    if type(page) is not int or not 1 <= page <= book["pages"]:
         raise ValueError("页码超出了书籍范围。")
-    key = (book["id"], page, mode)
+    key = (str(selection_directory(book)), page, mode)
     english = not book.get("language", "en").startswith("zh") and mode != "fast"
     path = CACHE / book["id"] / f"{page}-{mode}{'-eng' if english else ''}.json"
     with LOCKS[key]:
-        if path.is_file():
+        if mode == "full":
+            data = saved_selection(book, page)
+            if data and (allow_native or not data.get("native")):
+                return (
+                    apply_enrichment(data, book, page, mode)
+                    if include_enrichment
+                    else data
+                )
+        elif path.is_file():
             return apply_enrichment(json.loads(path.read_text()), book, page, mode)
-        if english:
-            with open_pdf(source_path(book)) as document, PDF_LOCK:
-                original = document[page - 1]
-                try:
-                    bitmap = original.render(scale=1900 / original.get_width())
+        with OCR_SLOTS:
+            if allow_native and mode == "full":
+                with open_pdf(source_path(book)) as document, PDF_LOCK:
+                    original = document[page - 1]
                     try:
-                        image = bitmap.to_pil().copy()
+                        text = original.get_textpage()
+                        try:
+                            native_text = text.get_text_range().strip()
+                        finally:
+                            text.close()
+                        size = [original.get_width(), original.get_height()]
                     finally:
-                        bitmap.close()
-                finally:
-                    original.close()
-            stream = io.BytesIO()
-            image.save(stream, format="PNG")
-            tesseract = shutil.which("tesseract")
-            if not tesseract:
-                raise ValueError("英文扫描页需要先安装 Tesseract。")
-            result = subprocess.run(
-                [
-                    tesseract,
-                    "stdin",
-                    "stdout",
-                    "-l",
-                    "eng",
-                    "--psm",
-                    "3",
-                    "-c",
-                    "tessedit_create_hocr=1",
-                    "-c",
-                    "hocr_char_boxes=1",
-                ],
-                input=stream.getvalue(),
-                capture_output=True,
-                timeout=120,
-            )
-            if result.returncode:
-                raise ValueError("本页文字识别失败，请重试。")
-            width, height = image.size
-            lines = hocr_lines(result.stdout, width, height)
-            data = {
-                "page": page,
-                "width": width,
-                "height": height,
-                "engine": "tesseract-eng",
-                "lines": lines,
-            }
+                        original.close()
+                if native_text:
+                    data = save_selection(
+                        book,
+                        page,
+                        {
+                            "page": page,
+                            "width": size[0],
+                            "height": size[1],
+                            "native": True,
+                            "engine": "pdf-native",
+                            "lines": [],
+                        },
+                    )
+                    return (
+                        apply_enrichment(data, book, page, mode)
+                        if include_enrichment
+                        else data
+                    )
+            data = recognize_page(book, page, mode, english)
+        if mode == "full":
+            data = save_selection(book, page, data)
         else:
-            command = [str(OCR), str(source_path(book)), str(page)]
-            if mode != "full":
-                command.append("--" + mode)
-            result = subprocess.run(
-                command, capture_output=True, text=True, timeout=180
-            )
-            if result.returncode:
-                raise ValueError("本页文字识别失败，可重试或继续阅读原页。")
-            data = json.loads(result.stdout)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(path)
-        return apply_enrichment(data, book, page, mode)
+            save(path, data)
+        return apply_enrichment(data, book, page, mode) if include_enrichment else data
+
+
+def recognize_page(book, page, mode, english):
+    if english:
+        with open_pdf(source_path(book)) as document, PDF_LOCK:
+            original = document[page - 1]
+            try:
+                bitmap = original.render(scale=1900 / original.get_width())
+                try:
+                    image = bitmap.to_pil().copy()
+                finally:
+                    bitmap.close()
+            finally:
+                original.close()
+        stream = io.BytesIO()
+        image.save(stream, format="PNG")
+        tesseract = shutil.which("tesseract")
+        if not tesseract:
+            raise ValueError("英文扫描页需要先安装 Tesseract。")
+        result = subprocess.run(
+            [
+                tesseract,
+                "stdin",
+                "stdout",
+                "-l",
+                "eng",
+                "--psm",
+                "3",
+                "-c",
+                "tessedit_create_hocr=1",
+                "-c",
+                "hocr_char_boxes=1",
+            ],
+            input=stream.getvalue(),
+            capture_output=True,
+            timeout=120,
+        )
+        if result.returncode:
+            raise ValueError("本页文字识别失败，请重试。")
+        width, height = image.size
+        lines = hocr_lines(result.stdout, width, height)
+        data = {
+            "page": page,
+            "width": width,
+            "height": height,
+            "engine": "tesseract-eng",
+            "lines": lines,
+        }
+    else:
+        command = [str(OCR), str(source_path(book)), str(page)]
+        if mode != "full":
+            command.append("--" + mode)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+        if result.returncode:
+            raise ValueError("本页文字识别失败，可重试或继续阅读原页。")
+        data = json.loads(result.stdout)
+    return data
 
 
 def joined_rows(lines):

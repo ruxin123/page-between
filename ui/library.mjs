@@ -60,7 +60,7 @@ export function createLibraryView(doc) {
   function createCard() {
     const card = doc.createElement("article");
     card.className = "library-book";
-    card.innerHTML = `<button class="cover-open"></button><button class="book-more icon-button">${icon("more")}</button><div class="book-card-foot"><div class="book-card-copy"><h3></h3><p></p><div class="book-tags"><span class="book-format"></span><span aria-hidden="true">·</span><span class="book-status"></span></div></div><button class="shelf-star">${icon("star")}</button></div>`;
+    card.innerHTML = `<button class="cover-open"></button><button class="book-more icon-button">${icon("more")}</button><div class="book-card-foot"><div class="book-card-copy"><h3></h3><p></p><div class="book-tags"><span class="book-format"></span><span aria-hidden="true">·</span><span class="book-status"></span></div><button class="book-process" hidden>文档处理</button></div><button class="shelf-star">${icon("star")}</button></div>`;
     return card;
   }
   function updateCard(card, book) {
@@ -81,6 +81,14 @@ export function createLibraryView(doc) {
     const options = card.querySelector(".book-more");
     options.dataset.options = book.id;
     options.setAttribute("aria-label", `${book.title}的设置`);
+    const processing = card.querySelector(".book-process");
+    processing.hidden = book.type !== "pdf";
+    processing.dataset.process = book.id;
+    processing.setAttribute("aria-label", `处理 PDF 文档 ${book.title}`);
+    processing.textContent =
+      book.localPreparation?.status === "running"
+        ? `划词准备 ${book.localPreparation.completed} / ${book.pages}`
+        : "文档处理";
     const title = card.querySelector("h3");
     title.textContent = book.title;
     title.title = book.title;
@@ -88,7 +96,11 @@ export function createLibraryView(doc) {
     card.querySelector(".book-format").textContent = book.format;
     card.querySelector(".book-status").textContent =
       book.processing === "pending"
-        ? "文字与目录准备中"
+        ? book.type === "pdf"
+          ? book.processingKind === "mineru"
+            ? "云端内容增强中"
+            : "目录准备中"
+          : "文字与目录准备中"
         : book.processing === "error"
           ? "处理待重试"
           : book.type === "epub"

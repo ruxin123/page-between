@@ -25,7 +25,7 @@ import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
 import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.28";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.29";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -108,7 +108,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.28";
+document.body.dataset.readerBuild = "2.29";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -174,7 +174,19 @@ const documentParsing = createDocumentParsing({
   getPosition: (id) =>
     current?.id === id && readerReady ? makePosition() : positions[id],
   refresh: async () => {
+    const previous = current;
+    const position = current && readerReady ? makePosition() : null;
     await refreshLibrary();
+    if (
+      route === "reader" &&
+      current?.type === "pdf" &&
+      current.id === previous?.id
+    ) {
+      if (previous.parseEnabled !== current.parseEnabled)
+        await renderCurrent(position || location);
+      else if (previous.enhancementRevision !== current.enhancementRevision)
+        refreshPdfEnhancements();
+    }
     renderJobs();
     if (route === "library") renderLibrary();
   },
@@ -340,7 +352,7 @@ function renderJobs() {
     entries
       .map(
         (job) =>
-          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "处理中" : job.status === "error" ? "待处理" : job.status === "paused" ? "已暂停" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><div class="job-actions">${job.kind === "mineru" && job.status === "running" ? `<button class="secondary-button" data-pause-job="${escapeHTML(job.book)}">暂停</button>` : job.kind === "mineru" && ["paused", "error"].includes(job.status) ? `<button class="secondary-button" data-cloud="${escapeHTML(job.book)}" data-pages="${escapeHTML(formatPages(job.pages))}">继续任务</button>` : job.status === "error" ? `<button class="secondary-button" data-retry="${escapeHTML(job.book)}">重新解析</button><button class="secondary-button" data-options="${escapeHTML(job.book)}">书籍设置</button>` : ""}<button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></div></article>`,
+          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "处理中" : job.status === "error" ? "待处理" : job.status === "paused" ? "已暂停" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><div class="job-actions">${job.kind === "mineru" && job.status === "running" ? `<button class="secondary-button" data-pause-job="${escapeHTML(job.book)}">暂停</button>` : job.kind === "mineru" && ["paused", "error"].includes(job.status) ? `<button class="secondary-button" data-cloud="${escapeHTML(job.book)}" data-pages="${escapeHTML(formatPages(job.pages))}">继续任务</button>` : job.status === "error" && job.kind !== "selection" ? `<button class="secondary-button" data-retry="${escapeHTML(job.book)}">重新解析</button><button class="secondary-button" data-options="${escapeHTML(job.book)}">书籍设置</button>` : ""}${books.find((book) => book.id === job.book)?.type === "pdf" ? `<button class="secondary-button" data-process="${escapeHTML(job.book)}">文档处理</button>` : ""}<button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></div></article>`,
       )
       .join("") ||
     '<div class="empty-state">还没有处理任务，导入一本书即可开始。</div>';
@@ -659,7 +671,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.28",
+        build: "2.29",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1290,7 +1302,10 @@ async function prepareOcr(book, page, viewport, revision, root) {
     }
     return;
   }
-  if (root.dataset.ocr === "loading") return;
+  if (root.dataset.ocr === "loading") {
+    showPdfOcrStatus(root);
+    return;
+  }
   root.dataset.ocr = "loading";
   const key = book.id + ":" + page;
   if (page === location.index) {
@@ -1301,10 +1316,12 @@ async function prepareOcr(book, page, viewport, revision, root) {
     if (!ocrCache.has(key))
       ocrCache.set(
         key,
-        api(`/api/ocr?book=${book.id}&page=${page}`).catch((error) => {
-          ocrCache.delete(key);
-          throw error;
-        }),
+        api(`/api/ocr?book=${book.id}&page=${page}&client=${writer}`).catch(
+          (error) => {
+            ocrCache.delete(key);
+            throw error;
+          },
+        ),
       );
     const data = await ocrCache.get(key);
     if (
@@ -1313,18 +1330,27 @@ async function prepareOcr(book, page, viewport, revision, root) {
       !root.isConnected
     )
       return;
+    let blocks = data.blocks;
+    if (
+      current.enrichmentUrl &&
+      (book.enhancementRevision !== current.enhancementRevision || !blocks)
+    ) {
+      blocks = (await api(`/api/enrichment?book=${book.id}&page=${page}`))
+        .blocks;
+      if (revision !== renderRevision || !root.isConnected) return;
+    }
     renderOCR(data, viewport, root.querySelector(".textLayer"));
     await alignTextLayer(
       root.querySelector(".textLayer"),
-      data.blocks,
+      blocks,
       post,
       book.id,
       page,
     );
     if (revision !== renderRevision || !root.isConnected) return;
-    if (data.blocks)
+    if (blocks)
       renderObjects(
-        data.blocks,
+        blocks,
         viewport,
         root.querySelector(".object-layer"),
         page,
@@ -1336,16 +1362,122 @@ async function prepareOcr(book, page, viewport, revision, root) {
         : "本页没有识别到文字。";
       clearTimeout(ocrTimer);
       ocrTimer = setTimeout(() => {
-        if (revision === renderRevision) $("ocr-status").hidden = true;
+        if (
+          revision === renderRevision &&
+          page === location.index &&
+          root.dataset.ocr === "ready"
+        )
+          $("ocr-status").hidden = true;
       }, 1800);
     }
   } catch (error) {
     root.dataset.ocr = "error";
+    root._ocrError = error.message;
     if (revision === renderRevision && page === location.index) {
-      $("ocr-status").textContent = error.message;
-      $("ocr-status").hidden = false;
+      showPdfOcrStatus(root);
     }
   }
+}
+function showPdfOcrStatus(root) {
+  if (!root || Number(root.dataset.page) !== location?.index) return;
+  if (root.dataset.ocr === "loading") {
+    clearTimeout(ocrTimer);
+    $("ocr-status").textContent = `正在准备第 ${location.index} 页可选文字…`;
+    $("ocr-status").hidden = false;
+  } else if (root.dataset.ocr === "error") {
+    const retry = document.createElement("button");
+    retry.textContent = "重试本页";
+    retry.onclick = () => {
+      delete root.dataset.ocr;
+      ensurePdfPages();
+    };
+    $("ocr-status").replaceChildren(
+      document.createTextNode(root._ocrError + " "),
+      retry,
+    );
+    $("ocr-status").hidden = false;
+  } else if (["ready", "native"].includes(root.dataset.ocr))
+    $("ocr-status").hidden = true;
+}
+let pdfWarmStamp = null,
+  pdfWarmQueue = Promise.resolve(),
+  pdfEnhancementTimer;
+function warmPdfPages() {
+  if (!current?.parseEnabled) return leavePdfPreparation();
+  const stamp = current.id + ":" + location.index;
+  if (stamp === pdfWarmStamp) return;
+  pdfWarmStamp = stamp;
+  const value = {
+    action: "nearby",
+    book: current.id,
+    page: location.index,
+    client: writer,
+  };
+  pdfWarmQueue = pdfWarmQueue
+    .catch(() => {})
+    .then(() => post("/api/pdf/prepare", value))
+    .catch(() => {
+      if (pdfWarmStamp === stamp) pdfWarmStamp = null;
+    });
+}
+function leavePdfPreparation() {
+  if (pdfWarmStamp === null) return;
+  pdfWarmStamp = null;
+  pdfWarmQueue = pdfWarmQueue
+    .catch(() => {})
+    .then(() => post("/api/pdf/prepare", { action: "leave", client: writer }))
+    .catch(() => {});
+}
+async function refreshPdfObjects(book, root, revision) {
+  if (!book.parseEnabled || !book.enrichmentUrl || !root?._viewport) return;
+  const data = await api(
+    `/api/enrichment?book=${book.id}&page=${root.dataset.page}`,
+  );
+  if (
+    revision !== renderRevision ||
+    current?.id !== book.id ||
+    !root.isConnected
+  )
+    return;
+  renderObjects(
+    data.blocks,
+    root._viewport,
+    root.querySelector(".object-layer"),
+    Number(root.dataset.page),
+  );
+  if (["native", "ready"].includes(root.dataset.ocr))
+    await alignTextLayer(
+      root.querySelector(".textLayer"),
+      data.blocks,
+      post,
+      book.id,
+      Number(root.dataset.page),
+    );
+}
+function refreshPdfEnhancements() {
+  clearTimeout(pdfEnhancementTimer);
+  for (const key of ocrCache.keys())
+    if (key.startsWith(current.id + ":")) ocrCache.delete(key);
+  const book = current,
+    revision = renderRevision;
+  let deferred = false;
+  for (const root of $("pdf-paper").children) {
+    if (root.dataset.rendered !== "ready") continue;
+    if (currentSelection?.position?.index === Number(root.dataset.page)) {
+      deferred = true;
+      continue;
+    }
+    refreshPdfObjects(book, root, revision).catch(() => {});
+  }
+  if (deferred)
+    pdfEnhancementTimer = setTimeout(() => {
+      if (
+        revision === renderRevision &&
+        route === "reader" &&
+        current?.id === book.id
+      )
+        refreshPdfEnhancements();
+    }, 500);
 }
 let pdfDocument,
   pdfRevision = 0,
@@ -1419,22 +1551,10 @@ async function paintPdfPage(index, revision) {
     });
     await layer.render();
     root.dataset.ocr = "native";
-    if (current.parseEnabled && current.enrichmentUrl) {
-      try {
-        const data = await api(
-          `/api/enrichment?book=${current.id}&page=${index}`,
-        );
-        if (revision === renderRevision && root.isConnected) {
-          renderObjects(data.blocks, viewport, objects, index);
-          await alignTextLayer(text, data.blocks, post, current.id, index);
-        }
-      } catch {
-        /* Original pages and native text stay available. */
-      }
-    }
   }
   root.dataset.rendered = "ready";
   root._viewport = viewport;
+  refreshPdfObjects(current, root, revision).catch(() => {});
   if (index === location.index && !root.dataset.ocr)
     prepareOcr(current, index, viewport, revision, root);
 }
@@ -1463,9 +1583,10 @@ function ensurePdfPages() {
     !active.dataset.ocr &&
     active._viewport
   ) {
-    active.dataset.ocr = "loading";
     prepareOcr(current, index, active._viewport, revision, active);
   }
+  showPdfOcrStatus(active);
+  warmPdfPages();
   for (const element of $("pdf-paper").children) {
     if (
       Math.abs(Number(element.dataset.page) - index) > 3 &&
@@ -2075,6 +2196,7 @@ async function renderCurrent(position) {
   );
   $("epub-frame").hidden = current.type !== "epub";
   $("pdf-paper").hidden = current.type !== "pdf";
+  $("reader-process").hidden = current.type !== "pdf";
   $("reader-loading").hidden = false;
   $("reader-loading").dataset.state = "loading";
   $("reader-loading").textContent =
@@ -2113,6 +2235,7 @@ async function renderCurrent(position) {
   try {
     if (current.type === "pdf") await renderPdf(position, revision);
     else {
+      leavePdfPreparation();
       pdfTasks.forEach((task) => task.cancel());
       pdfTasks.clear();
       pdfDocument = null;
@@ -2302,6 +2425,7 @@ function showRoute() {
         ? requested[0]
         : "library";
   if (route === "reader" && next !== "reader") {
+    leavePdfPreparation();
     savePosition(true);
     readerReady = false;
     $("question-panel").hidden = true;
@@ -2643,6 +2767,11 @@ function setFocus(value) {
 }
 
 document.addEventListener("click", async (event) => {
+  const processing = event.target.closest("[data-process]");
+  if (processing) {
+    documentParsing.open(processing.dataset.process);
+    return;
+  }
   const reference = event.target.closest("[data-book-reference]");
   if (reference) {
     event.preventDefault();
@@ -2788,6 +2917,9 @@ $("book-save").onclick = () => saveBookOptions();
 $("book-cloud").onclick = async () => {
   const id = editingBook.id;
   if (await saveBookOptions(true)) documentParsing.open(id);
+};
+$("reader-process").onclick = () => {
+  if (current?.type === "pdf") documentParsing.open(current.id);
 };
 $("reader-home").onclick = () => {
   savePosition(true);
@@ -3125,6 +3257,11 @@ window.addEventListener("resize", () => {
 });
 window.addEventListener("hashchange", showRoute);
 window.addEventListener("pagehide", () => {
+  if (pdfWarmStamp !== null)
+    navigator.sendBeacon(
+      "/api/pdf/prepare",
+      JSON.stringify({ action: "leave", client: writer }),
+    );
   if (current && readerReady) {
     const position = makePosition();
     navigator.sendBeacon(
@@ -3188,12 +3325,17 @@ async function poll(resume = false) {
           previousStructure !== current.structureRevision ||
           (current.type === "txt" && previousCount !== current.chapters.length))
       ) {
-        if (current.type === "txt") current.loaded = false;
-        if (current.type === "pdf")
+        if (current.type === "pdf") {
           for (const key of ocrCache.keys())
             if (key.startsWith(current.id + ":")) ocrCache.delete(key);
-        location = initialLocation(current);
-        renderCurrent(location);
+          if (previousFlag !== current.parseEnabled)
+            await renderCurrent(makePosition());
+          else refreshPdfEnhancements();
+        } else {
+          if (current.type === "txt") current.loaded = false;
+          location = initialLocation(current);
+          renderCurrent(location);
+        }
       }
     }
     const state = await api("/api/state");

@@ -9,6 +9,9 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from contextlib import contextmanager
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import NameObject, NumberObject
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import book_import
@@ -326,6 +329,262 @@ class MinerU(unittest.TestCase):
                             "/extract-results/batch/existing-batch",
                         )
                         upload.assert_not_called()
+
+
+class WholeBookBatches(unittest.TestCase):
+    def test_old_missing_page_plan_is_adopted_without_resubmitting_completed_batches(
+        self,
+    ):
+        book = self.book(4)
+        target = self.root / "books" / book["id"] / "mineru-enhancement.json"
+        original = {
+            "1": {"engine": "mineru", "blocks": [{"text": "Already accepted 1"}]}
+        }
+        save = __import__("storage").save
+        save(target, original)
+        book["enrichmentUrl"] = book_import.url_for(target)
+        cancel = threading.Event()
+
+        def phase(message):
+            if message.startswith("准备页段 3-"):
+                cancel.set()
+
+        with (
+            patch.object(mineru, "MAX_BATCH_PAGES", 2),
+            self.cloud() as (uploaded, created),
+        ):
+            with self.assertRaises(mineru.Paused):
+                mineru.run(book, [2, 3, 4], phase, cancel)
+            save(target, original)
+            old_manifest = next(target.parent.glob("mineru/*/job.json"))
+            legacy = json.loads(old_manifest.read_text())
+            legacy.pop("planPages")
+            save(old_manifest, legacy)
+            cancel.clear()
+            complete = mineru.run(book, [1, 2, 3, 4], lambda message: None, cancel)
+            self.assertEqual(uploaded, [[2, 3], [4]])
+            self.assertEqual(len(created), 2)
+            self.assertEqual(complete["mineruPages"], [1, 2, 3, 4])
+            current = next(target.parent.glob("mineru/*/job.json"))
+            state = json.loads(current.read_text())
+            self.assertEqual(state["pages"], [1, 2, 3, 4])
+            self.assertEqual(state["planPages"], [2, 3, 4])
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.patches = [
+            patch.object(book_import, "BOOK_ROOT", self.root / "books"),
+            patch.object(mineru, "BOOK_ROOT", self.root / "books"),
+            patch.object(
+                mineru.service_settings,
+                "effective",
+                return_value={
+                    "baseUrl": "https://mineru.net/api/v4",
+                    "model": "vlm",
+                    "key": "fixture-credential",
+                },
+            ),
+        ]
+        for override in self.patches:
+            override.start()
+
+    def tearDown(self):
+        for override in reversed(self.patches):
+            override.stop()
+        self.temporary.cleanup()
+
+    def book(self, count):
+        source = self.root / "original.pdf"
+        writer = PdfWriter()
+        for number in range(1, count + 1):
+            page = writer.add_blank_page(width=200, height=300)
+            page[NameObject("/OriginalNumber")] = NumberObject(number)
+        writer.write(source)
+        writer.close()
+        return book_import.import_book(source, enabled=True)
+
+    @staticmethod
+    def page(index, number):
+        return {
+            "page_idx": index,
+            "page_size": [200, 300],
+            "para_blocks": [
+                {
+                    "type": "text",
+                    "bbox": [10, 10, 190, 50],
+                    "lines": [{"spans": [{"content": f"Original page {number}"}]}],
+                }
+            ],
+        }
+
+    @contextmanager
+    def cloud(self, corrupt=None):
+        uploaded, batches = [], {}
+        created = []
+
+        def api(config, path, body=None):
+            if body is not None:
+                ident = str(len(created) + 1)
+                created.append(ident)
+                return {
+                    "batch_id": ident,
+                    "file_urls": ["https://mineru.net/upload/" + ident],
+                }
+            ident = path.rsplit("/", 1)[-1]
+            self.assertIn(ident, batches)
+            return {
+                "extract_result": [
+                    {
+                        "state": "done",
+                        "full_zip_url": "https://mineru.net/result/" + ident,
+                    }
+                ]
+            }
+
+        def upload(config, url, source):
+            self.assertLessEqual(source.stat().st_size, mineru.MAX_UPLOAD_BYTES)
+            numbers = [int(page["/OriginalNumber"]) for page in PdfReader(source).pages]
+            self.assertLessEqual(len(numbers), mineru.MAX_BATCH_PAGES)
+            batches[url.rsplit("/", 1)[-1]] = numbers
+            uploaded.append(numbers)
+
+        def download(config, url, target):
+            ident = url.rsplit("/", 1)[-1]
+            numbers = batches[ident]
+            if ident == corrupt:
+                numbers = numbers[:-1]
+            with zipfile.ZipFile(target, "w") as archive:
+                archive.writestr(
+                    "layout.json",
+                    json.dumps(
+                        {
+                            "pdf_info": [
+                                self.page(index, number)
+                                for index, number in enumerate(numbers)
+                            ]
+                        }
+                    ),
+                )
+
+        with (
+            patch.object(mineru, "api", side_effect=api),
+            patch.object(mineru, "upload", side_effect=upload),
+            patch.object(mineru, "download", side_effect=download),
+        ):
+            yield uploaded, created
+
+    def test_batches_publish_immediately_and_resume_a_frozen_plan_after_coverage_changes(
+        self,
+    ):
+        book = self.book(305)
+        existing = [1, 150, 305]
+        target = self.root / "books" / book["id"] / "mineru-enhancement.json"
+        save = __import__("storage").save
+        save(
+            target,
+            {
+                str(page): {
+                    "engine": "mineru",
+                    "blocks": [{"text": f"Already accepted {page}"}],
+                }
+                for page in existing
+            },
+        )
+        book["enrichmentUrl"] = book_import.url_for(target)
+        cancel = threading.Event()
+        published = []
+
+        def phase(message):
+            if message.startswith("准备页段 151-"):
+                cancel.set()
+
+        with self.cloud() as (uploaded, created):
+            with self.assertRaises(mineru.Paused):
+                mineru.run(
+                    book,
+                    list(range(1, 306)),
+                    phase,
+                    cancel,
+                    publish=lambda value: published.append(len(value["mineruPages"])),
+                )
+            self.assertEqual(len(json.loads(target.read_text())), 153)
+            self.assertEqual(published, [153])
+            cancel.clear()
+            result = mineru.run(book, list(range(1, 306)), lambda message: None, cancel)
+            self.assertEqual([len(group) for group in uploaded], [150, 150, 2])
+            self.assertEqual(len(created), 3)
+            self.assertEqual(
+                [page for group in uploaded for page in group],
+                [page for page in range(1, 306) if page not in existing],
+            )
+            self.assertEqual(result["mineruPages"], list(range(1, 306)))
+            combined = json.loads(target.read_text())
+            for page in range(1, 306):
+                self.assertEqual(
+                    combined[str(page)]["blocks"][0]["text"],
+                    f"Already accepted {page}"
+                    if page in existing
+                    else f"Original page {page}",
+                )
+
+    def test_incomplete_batch_keeps_published_pages_and_does_not_resubmit_on_startup(
+        self,
+    ):
+        book = self.book(4)
+        cancel = threading.Event()
+        with (
+            patch.object(mineru, "MAX_BATCH_PAGES", 2),
+            self.cloud(corrupt="2") as (uploaded, created),
+        ):
+            with self.assertRaisesRegex(mineru.MinerUError, "缺少页面"):
+                mineru.run(book, [1, 2, 3, 4], lambda message: None, cancel)
+            self.assertEqual(mineru.progress(book)["parsedPages"], [1, 2])
+            with self.assertRaisesRegex(mineru.MinerUError, "此前批次"):
+                mineru.run(book, [1, 2, 3, 4], lambda message: None, cancel)
+            self.assertEqual(len(created), 2)
+            result = mineru.run(
+                book, [1, 2, 3, 4], lambda message: None, cancel, retry=True
+            )
+            self.assertEqual(result["mineruPages"], [1, 2, 3, 4])
+            self.assertEqual(uploaded, [[1, 2], [3, 4], [3, 4]])
+        with self.assertRaisesRegex(mineru.MinerUError, "重复页号"):
+            mineru.normalized_pages(
+                {"pdf_info": [self.page(0, 1), self.page(0, 2)]}, [1, 2]
+            )
+
+    def test_byte_limit_adapts_batches_and_single_oversized_page_never_submits(self):
+        book = self.book(12)
+        reader = PdfReader(book_import.path_for(book["url"]))
+        writer = PdfWriter()
+        for page in reader.pages[:2]:
+            writer.add_page(page)
+        writer.add_metadata({"/Title": "Page Between document sample"})
+        stream = io.BytesIO()
+        writer.write(stream)
+        writer.close()
+        with (
+            patch.object(mineru, "MAX_UPLOAD_BYTES", len(stream.getvalue()) + 1),
+            self.cloud() as (uploaded, created),
+        ):
+            result = mineru.run(
+                book, list(range(1, 13)), lambda message: None, threading.Event()
+            )
+            self.assertEqual(result["mineruPages"], list(range(1, 13)))
+            self.assertTrue(all(len(group) <= 2 for group in uploaded))
+        with (
+            patch.object(mineru, "MAX_UPLOAD_BYTES", 1),
+            patch.object(mineru, "api") as api,
+        ):
+            with self.assertRaisesRegex(mineru.MinerUError, "无法自动拆分单页"):
+                mineru.run(
+                    book,
+                    [1],
+                    lambda message: None,
+                    threading.Event(),
+                    fresh="new-operation",
+                )
+            api.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -24,7 +24,14 @@ async function api(path, body) {
   return result;
 }
 async function ready(page) {
-  await page.locator("#ai-open:not([disabled])").waitFor({ state: "attached" });
+  await page.waitForFunction(
+    () =>
+      document.body.dataset.view === "reader" &&
+      document.querySelector("#reading-viewport")?.getAttribute("aria-busy") ===
+        "false" &&
+      !document.querySelector("#ai-open").disabled &&
+      document.querySelector("#reader-loading").hidden,
+  );
 }
 async function pageNumber(page, epub) {
   return page.evaluate(

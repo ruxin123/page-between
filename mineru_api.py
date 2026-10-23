@@ -19,7 +19,7 @@ from lxml import etree
 from ai_tutor import NoRedirect
 from book_import import BOOK_ROOT, ROOT, extract_zip, path_for, url_for
 from storage import load, save
-from pdf_enhancement import enrichment_data
+from pdf_enhancement import enrichment_data, source_digest
 import service_settings
 
 
@@ -29,6 +29,50 @@ class MinerUError(ValueError):
 
 class Paused(MinerUError):
     pass
+
+
+MAX_BATCH_PAGES = 150
+MAX_UPLOAD_BYTES = 200_000_000
+
+
+def canonical_pages(book):
+    target = BOOK_ROOT / book["id"] / "mineru-enhancement.json"
+    previous = load(target, None)
+    if previous is None:
+        previous = enrichment_data({**book, "parseEnabled": True})
+    if not isinstance(previous, dict):
+        raise MinerUError("已有解析记录无法读取，请保留原书并恢复书库备份。")
+    fingerprint = source_digest(book)
+    return {
+        key: value
+        for key, value in previous.items()
+        if str(key).isdigit()
+        and 1 <= int(key) <= book["pages"]
+        and isinstance(value, dict)
+        and value.get("sourceHash", fingerprint) == fingerprint
+    }
+
+
+def progress(book):
+    pages = sorted(
+        int(page)
+        for page, value in canonical_pages(book).items()
+        if value.get("engine") == "mineru"
+    )
+    return {"completed": len(pages), "total": book["pages"], "parsedPages": pages}
+
+
+def result_patch(book, data):
+    pages = sorted(
+        int(page) for page, value in data.items() if value.get("engine") == "mineru"
+    )
+    return {
+        "enrichmentUrl": url_for(BOOK_ROOT / book["id"] / "mineru-enhancement.json"),
+        "enhancedPages": sorted(int(page) for page in data),
+        "mineruPages": pages,
+        "enhancementRevision": time.time_ns(),
+        "processingNote": f"MinerU 已增强 {len(pages)} / {book['pages']} 页；原书版面保留。",
+    }
 
 
 def page_range(value, total):
@@ -226,11 +270,17 @@ def normalized_pages(document, originals):
     pages = document.get("pdf_info") if isinstance(document, dict) else None
     if not isinstance(pages, list):
         raise MinerUError("结果缺少可定位的页面结构，请检查 MinerU 输出版本。")
+    if len(pages) != len(originals):
+        raise MinerUError("解析结果缺少页面，已保留其他成功页；可补全未解析页。")
     result = {}
     for index, page in enumerate(pages):
         source_index = page.get("page_idx", index)
         if type(source_index) is not int or not 0 <= source_index < len(originals):
             raise MinerUError("解析结果的页序无法映射回原书。")
+        if str(originals[source_index]) in result:
+            raise MinerUError(
+                "解析结果包含重复页号，已保留其他成功页；可补全未解析页。"
+            )
         size = page.get("page_size", [])
         if len(size) != 2 or any(
             not isinstance(value, (int, float))
@@ -285,7 +335,33 @@ def normalized_pages(document, originals):
     return result
 
 
-def run(book, pages, phase, cancel, *, fresh=False):
+def _input_chunk(reader, pages, destination, cancel):
+    subset = pages[:MAX_BATCH_PAGES]
+    temporary = destination.with_suffix(".part")
+    try:
+        while subset:
+            writer = PdfWriter()
+            for page in subset:
+                if cancel.is_set():
+                    raise Paused("云解析已暂停，可稍后继续。")
+                writer.add_page(reader.pages[page - 1])
+            writer.add_metadata({"/Title": "Page Between document sample"})
+            with temporary.open("wb") as stream:
+                writer.write(stream)
+            writer.close()
+            if temporary.stat().st_size <= MAX_UPLOAD_BYTES:
+                temporary.replace(destination)
+                return subset
+            if len(subset) == 1:
+                raise MinerUError(
+                    f"PDF 第 {subset[0]} 页超过上传大小限制，无法自动拆分单页。"
+                )
+            subset = subset[: max(1, len(subset) // 2)]
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def run(book, pages, phase, cancel, *, fresh=False, publish=None, retry=False):
     if (
         not pages
         or pages != sorted(set(pages))
@@ -298,8 +374,7 @@ def run(book, pages, phase, cancel, *, fresh=False):
         "mineru", service_settings.effective("mineru"), require_key=True
     )
     original = path_for(book["url"])
-    with original.open("rb") as stream:
-        source_hash = hashlib.file_digest(stream, "sha256").hexdigest()
+    source_hash = source_digest(book)
     identity = {
         "source": source_hash,
         "pages": pages,
@@ -310,111 +385,110 @@ def run(book, pages, phase, cancel, *, fresh=False):
         :24
     ]
     folder = BOOK_ROOT / book["id"] / "mineru" / digest
+    target = BOOK_ROOT / book["id"] / "mineru-enhancement.json"
+    previous = canonical_pages(book)
+    missing = [
+        page for page in pages if previous.get(str(page), {}).get("engine") != "mineru"
+    ]
+    if not fresh and not missing:
+        if not target.exists():
+            save(target, previous)
+        return {
+            **result_patch(book, previous),
+            "processingNote": "所选页已有解析结果，已复用；原书版面保留。",
+        }
     reset_id = fresh if isinstance(fresh, str) else uuid.uuid4().hex if fresh else None
     existing = load(folder / "job.json", {})
-    previous = enrichment_data(book)
-    if not fresh and (not existing or existing.get("state") == "done"):
-        missing = [
-            page
-            for page in pages
-            if previous.get(str(page), {}).get("engine") != "mineru"
-        ]
-        if not missing:
-            return {
-                "enrichmentUrl": book["enrichmentUrl"],
-                "enhancedPages": sorted(
-                    int(page) for page in previous if str(page).isdigit()
-                ),
-                "processingNote": "所选页已有解析结果，已复用；原书版面保留。",
-            }
-        if missing != pages:
-            return run(book, missing, phase, cancel)
-    if reset_id and existing.get("resetId") != reset_id and folder.exists():
+    # Adopt the old missing-page operation before publishing changes its missing-page set.
+    if not existing and not fresh and missing != pages:
+        old_identity = {**identity, "pages": missing}
+        old_digest = hashlib.sha256(
+            json.dumps(old_identity, sort_keys=True).encode()
+        ).hexdigest()[:24]
+        old_folder = folder.with_name(old_digest)
+        legacy = load(old_folder / "job.json", {})
+        if (
+            legacy
+            and legacy.get("state") != "done"
+            and not legacy.get("resetId")
+            and all(legacy.get(key) == value for key, value in old_identity.items())
+        ):
+            old_folder.rename(folder)
+            existing = {**legacy, **identity, "planPages": legacy["pages"]}
+    invalid = existing.get("state") == "invalid"
+    if (
+        existing
+        and not reset_id
+        and any(existing.get(key) != value for key, value in identity.items())
+    ):
+        raise MinerUError("保存的云任务与原书或服务设置不一致，请重新提交所选页。")
+    if invalid and not retry:
+        raise MinerUError(
+            "此前批次结果不完整，成功页已保存；请在文档处理中补全未解析页。"
+        )
+    if existing and (
+        (reset_id and existing.get("resetId") != reset_id)
+        or invalid
+        or (existing.get("state") == "done" and not fresh)
+    ):
         folder.rename(folder.with_name(digest + "-previous-" + str(time.time_ns())))
+        existing = {}
     folder.mkdir(parents=True, exist_ok=True)
+    state = existing or {
+        **identity,
+        "chunks": {},
+        "resetId": reset_id,
+        "planPages": pages if fresh else missing,
+    }
+    state.setdefault("planPages", state["pages"])
+    plan = state["planPages"]
+    if (
+        not isinstance(plan, list)
+        or len(set(plan)) != len(plan)
+        or any(type(page) is not int or page not in pages for page in plan)
+    ):
+        raise MinerUError("保存的解析计划与原书页段不匹配，请重新提交所选页。")
+    state["state"] = "running"
     manifest = folder / "job.json"
-    state = load(manifest, {**identity, "chunks": {}, "resetId": reset_id})
-    reader = None
-    output = {}
 
     def checkpoint():
         save(manifest, state)
 
-    checkpoint()
-
     def check():
         if cancel.is_set():
             raise Paused("云解析已暂停，可稍后继续。")
+        if source_digest(book) != source_hash:
+            raise Paused(
+                "原 PDF 文件已变化，已停止本次解析；请重新打开书籍后选择页段。"
+            )
 
-    for offset in range(0, len(pages), 150):
-        check()
-        subset = pages[offset : offset + 150]
-        chunk = state["chunks"].setdefault(str(offset), {"pages": subset})
-        archive = folder / f"result-{offset}.zip"
-        phase(f"准备页段 {offset + 1}-{offset + len(subset)} / {len(pages)}")
-        if not archive.exists():
+    checkpoint()
+    offset, reader = 0, None
+    try:
+        while offset < len(plan):
+            check()
+            phase(
+                f"准备页段 {offset + 1}-{min(offset + MAX_BATCH_PAGES, len(plan))} / {len(plan)}"
+            )
+            chunk = state["chunks"].get(str(offset))
             source = folder / f"input-{offset}.pdf"
-            if not source.exists():
+            archive = folder / f"result-{offset}.zip"
+            if chunk is None:
                 reader = reader or PdfReader(original)
-                writer = PdfWriter()
-                for page in subset:
-                    check()
-                    writer.add_page(reader.pages[page - 1])
-                writer.add_metadata({"/Title": "Page Between document sample"})
-                temporary_source = source.with_suffix(".part")
-                with temporary_source.open("wb") as stream:
-                    writer.write(stream)
-                writer.close()
-                temporary_source.replace(source)
-            if source.stat().st_size > 200 * 1024**2:
-                raise MinerUError("所选页段超过上传大小限制，请缩小范围。")
-            task = None
-            if chunk.get("batchId"):
-                results = api(
-                    config, "/extract-results/batch/" + quote(chunk["batchId"], safe="")
-                ).get("extract_result", [])
-                if (
-                    not isinstance(results, list)
-                    or len(results) != 1
-                    or not isinstance(results[0], dict)
-                ):
-                    raise MinerUError("云任务结果格式不正确，已保留原任务。")
-                task = results[0]
-            else:
-                check()
-                batch = api(
-                    config,
-                    "/file-urls/batch",
-                    {
-                        "files": [{"name": "page-between-pages.pdf", "is_ocr": True}],
-                        "model_version": config["model"],
-                        "language": "ch"
-                        if book.get("language", "").startswith("zh")
-                        else "en",
-                        "enable_formula": True,
-                        "enable_table": True,
-                    },
-                )
-                urls, batch_id = batch.get("file_urls"), batch.get("batch_id")
-                if (
-                    not isinstance(urls, list)
-                    or len(urls) != 1
-                    or not isinstance(batch_id, str)
-                    or not batch_id
-                ):
-                    raise MinerUError("MinerU 未返回有效的上传任务。")
-                chunk["batchId"] = batch_id
+                subset = _input_chunk(reader, plan[offset:], source, cancel)
+                chunk = {"pages": subset}
+                state["chunks"][str(offset)] = chunk
                 checkpoint()
-                phase(f"上传所选页段 · {len(subset)} 页")
-                upload(config, urls[0], source)
-                chunk["uploaded"] = True
-                checkpoint()
+            subset = chunk["pages"]
+            if (
+                not subset
+                or any(type(page) is not int for page in subset)
+                or subset != plan[offset : offset + len(subset)]
+            ):
+                raise MinerUError("保存的批次页序与解析计划不一致，请重新提交所选页。")
+            if not archive.exists():
                 task = None
-            started = time.monotonic()
-            deadline = started + 1800
-            while True:
-                check()
-                if task is None:
+                if chunk.get("batchId"):
                     results = api(
                         config,
                         "/extract-results/batch/" + quote(chunk["batchId"], safe=""),
@@ -424,71 +498,137 @@ def run(book, pages, phase, cancel, *, fresh=False):
                         or len(results) != 1
                         or not isinstance(results[0], dict)
                     ):
-                        raise MinerUError("云任务结果格式不正确。")
+                        raise MinerUError("云任务结果格式不正确，已保留原任务。")
                     task = results[0]
-                status = task.get("state")
-                if status == "failed":
-                    raise MinerUError(
-                        "MinerU 未能解析这个页段，可重新提交或继续阅读原页。"
-                    )
-                if status == "done":
-                    phase("下载并校验解析结果")
-                    download(config, task.get("full_zip_url"), archive)
-                    chunk["state"] = "downloaded"
-                    checkpoint()
-                    break
-                if status == "waiting-file":
-                    # Upload acknowledgement can lag behind a successful PUT, including after restart.
-                    phase("等待云端确认上传 · 已保留当前任务")
-                    if not chunk.get("uploaded") and time.monotonic() - started > 60:
-                        raise Paused(
-                            "云端尚未确认收到文件，已保留任务；可继续等待，若此前上传中断可勾选「重新提交解析」后重试。"
-                        )
                 else:
-                    if not chunk.get("uploaded"):
-                        chunk["uploaded"] = True
+                    if not source.exists() or source.stat().st_size > MAX_UPLOAD_BYTES:
+                        reader = reader or PdfReader(original)
+                        subset = _input_chunk(reader, subset, source, cancel)
+                        chunk["pages"] = subset
                         checkpoint()
-                    progress = task.get("extract_progress", {})
-                    phase(
-                        f"云端解析 · {offset + int(progress.get('extracted_pages') or 0)} / {len(pages)} 页"
+                    check()
+                    batch = api(
+                        config,
+                        "/file-urls/batch",
+                        {
+                            "files": [
+                                {"name": "page-between-pages.pdf", "is_ocr": True}
+                            ],
+                            "model_version": config["model"],
+                            "language": "ch"
+                            if book.get("language", "").startswith("zh")
+                            else "en",
+                            "enable_formula": True,
+                            "enable_table": True,
+                        },
                     )
-                if time.monotonic() > deadline:
-                    raise Paused(
-                        "云端尚未确认收到文件，已保存任务；可继续等待或勾选「重新提交解析」后重试。"
-                        if status == "waiting-file"
-                        else "云端仍在处理，已保存任务，可稍后继续查询。"
-                    )
-                cancel.wait(3)
-                task = None
-        check()
-        extracted = folder / f"result-{offset}"
-        if not extracted.exists():
-            temporary = Path(tempfile.mkdtemp(prefix=".extract-", dir=folder))
+                    urls, batch_id = batch.get("file_urls"), batch.get("batch_id")
+                    if (
+                        not isinstance(urls, list)
+                        or len(urls) != 1
+                        or not isinstance(batch_id, str)
+                        or not batch_id
+                    ):
+                        raise MinerUError("MinerU 未返回有效的上传任务。")
+                    chunk["batchId"] = batch_id
+                    checkpoint()
+                    phase(f"上传所选页段 · {len(subset)} 页")
+                    upload(config, urls[0], source)
+                    chunk["uploaded"] = True
+                    checkpoint()
+                started = time.monotonic()
+                deadline = started + 1800
+                while True:
+                    check()
+                    if task is None:
+                        results = api(
+                            config,
+                            "/extract-results/batch/"
+                            + quote(chunk["batchId"], safe=""),
+                        ).get("extract_result", [])
+                        if (
+                            not isinstance(results, list)
+                            or len(results) != 1
+                            or not isinstance(results[0], dict)
+                        ):
+                            raise MinerUError("云任务结果格式不正确，已保留原任务。")
+                        task = results[0]
+                    status = task.get("state")
+                    if status == "failed":
+                        raise MinerUError(
+                            "MinerU 未能解析这个页段，可重新提交或继续阅读原页。"
+                        )
+                    if status == "done":
+                        phase("下载并校验解析结果")
+                        download(config, task.get("full_zip_url"), archive)
+                        chunk["state"] = "downloaded"
+                        checkpoint()
+                        break
+                    if status == "waiting-file":
+                        phase("等待云端确认上传 · 已保留当前任务")
+                        if (
+                            not chunk.get("uploaded")
+                            and time.monotonic() - started > 60
+                        ):
+                            raise Paused(
+                                "云端尚未确认收到文件，已保留任务；可继续等待，若此前上传中断可勾选「重新提交解析」后重试。"
+                            )
+                    else:
+                        if not chunk.get("uploaded"):
+                            chunk["uploaded"] = True
+                            checkpoint()
+                        extraction = task.get("extract_progress", {})
+                        phase(
+                            f"云端解析 · {offset + int(extraction.get('extracted_pages') or 0)} / {len(plan)} 页"
+                        )
+                    if time.monotonic() > deadline:
+                        raise Paused(
+                            "云端尚未确认收到文件，已保存任务；可继续等待或勾选「重新提交解析」后重试。"
+                            if status == "waiting-file"
+                            else "云端仍在处理，已保存任务，可稍后继续查询。"
+                        )
+                    cancel.wait(3)
+                    task = None
+            check()
+            extracted = folder / f"result-{offset}"
+            if not extracted.exists():
+                temporary = Path(tempfile.mkdtemp(prefix=".extract-", dir=folder))
+                try:
+                    extract_zip(archive, temporary)
+                    temporary.rename(extracted)
+                finally:
+                    shutil.rmtree(temporary, ignore_errors=True)
+            layout = next(extracted.rglob("layout.json"), None) or next(
+                extracted.rglob("*_middle.json"), None
+            )
+            if layout is None:
+                raise MinerUError("结果中没有可定位的页面结构。")
             try:
-                extract_zip(archive, temporary)
-                temporary.rename(extracted)
-            finally:
-                shutil.rmtree(temporary, ignore_errors=True)
-        layout = next(extracted.rglob("layout.json"), None)
-        if layout is None:
-            layout = next(extracted.rglob("*_middle.json"), None)
-        if layout is None:
-            raise MinerUError("结果中没有可定位的页面结构。")
-        output.update(normalized_pages(load(layout, {}), subset))
-    check()
-    previous = {
-        key: value
-        for key, value in enrichment_data(book).items()
-        if str(key).isdigit() and isinstance(value, dict)
-    }
-    previous.update(output)
-    target = BOOK_ROOT / book["id"] / "mineru-enhancement.json"
-    save(target, previous)
+                output = normalized_pages(load(layout, {}), subset)
+            except MinerUError:
+                state["state"] = "invalid"
+                state["invalidPages"] = subset
+                checkpoint()
+                raise
+            check()
+            previous = canonical_pages(book)
+            for value in output.values():
+                value["sourceHash"] = source_hash
+            previous.update(output)
+            save(target, previous)
+            patch = result_patch(book, previous)
+            book.update(patch)
+            if publish:
+                publish(patch)
+            chunk["state"] = "published"
+            checkpoint()
+            phase(
+                f"已增强 {len(patch['mineruPages'])} / {book['pages']} 页，已完成页可直接阅读。"
+            )
+            offset += len(subset)
+    finally:
+        if reader:
+            reader.close()
     state["state"] = "done"
     checkpoint()
-    return {
-        "enrichmentUrl": url_for(target),
-        "enhancedPages": sorted(int(page) for page in previous),
-        "enhancementRevision": time.time_ns(),
-        "processingNote": f"已增强 {len(previous)} 页；原书版面保留。",
-    }
+    return result_patch(book, canonical_pages(book))

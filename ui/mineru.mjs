@@ -19,74 +19,250 @@ export function createDocumentParsing({
   toast,
 }) {
   const $ = (id) => document.getElementById(id);
+  let localError = "";
   let book,
-    busy = false;
+    snapshot,
+    busy = false,
+    configured = false,
+    resumeMode = false,
+    timer,
+    revision = 0;
+  const text = (id, value) => {
+    if ($(id).textContent !== value) $(id).textContent = value;
+  };
+  const range = (value) => {
+    $("cloud-pages").value = value;
+    resumeMode = false;
+  };
   const nearby = () => {
     const start = getPosition(book.id)?.index || 1;
-    $("cloud-pages").value = start + "-" + Math.min(book.pages, start + 5);
+    range(start + "-" + Math.min(book.pages, start + 5));
   };
+  function render() {
+    if (!snapshot) return;
+    const local = snapshot.local,
+      cloud = snapshot.mineru;
+    text("local-preparation-count", `${local.completed} / ${local.total} 页`);
+    $("local-preparation-progress").max = local.total;
+    $("local-preparation-progress").value = local.completed;
+    text(
+      "local-preparation-status",
+      local.status === "ready"
+        ? "全部页面已准备，识别到的文字可直接选中。"
+        : local.status === "paused"
+          ? "整本准备已暂停，已完成页保留。"
+          : local.status === "error"
+            ? local.failedPages.length
+              ? `${local.failedPages.length} 页未成功，已完成页保留。${local.error}`
+              : local.error
+            : local.activePage
+              ? `正在提前准备第 ${local.activePage} 页，可继续阅读。`
+              : local.status === "running"
+                ? "整本准备中，可继续阅读。"
+                : local.completed
+                  ? "已准备的文字随书保存在本机，阅读时继续提前准备。"
+                  : "尚未提前准备，打开扫描页后会优先准备当前页。",
+    );
+    text(
+      "local-prepare-all",
+      local.status === "ready"
+        ? "已全部准备"
+        : local.status === "paused"
+          ? "继续准备整本"
+          : local.status === "error"
+            ? "重试未完成页"
+            : "提前准备整本",
+    );
+    $("local-prepare-all").disabled =
+      busy || ["running", "ready"].includes(local.status);
+    $("local-prepare-pause").hidden = local.status !== "running";
+    $("local-prepare-pause").disabled = busy;
+    text("cloud-progress-count", `${cloud.completed} / ${cloud.total} 页`);
+    $("cloud-progress").max = cloud.total;
+    $("cloud-progress").value = cloud.completed;
+    text(
+      "cloud-job-status",
+      cloud.status === "running"
+        ? cloud.phase
+        : cloud.status === "paused"
+          ? `已暂停。${cloud.phase}`
+          : cloud.status === "error"
+            ? cloud.phase
+            : cloud.completed === cloud.total
+              ? "全部页面已增强，已有结果保留在本机。"
+              : `还有 ${cloud.total - cloud.completed} 页未通过 MinerU 增强，可补全或选择页段。`,
+    );
+    const running = cloud.status === "running";
+    $("cloud-fill").disabled =
+      busy || !configured || running || cloud.completed === cloud.total;
+    $("cloud-resume").hidden =
+      !["paused", "error"].includes(cloud.status) || !cloud.pages.length;
+    $("cloud-resume").disabled = busy || !configured;
+    $("cloud-pause").hidden = !running;
+    $("cloud-pause").disabled = busy;
+    $("cloud-start").disabled = busy || !configured || running;
+    text("cloud-start", resumeMode ? "继续云解析" : "开始所选页解析");
+    if (localError) text("local-preparation-status", localError);
+  }
+  async function loadStatus(expected = revision) {
+    const value = await api(
+      "/api/pdf/preparation?book=" + encodeURIComponent(book.id),
+    );
+    if (
+      expected !== revision ||
+      !$("cloud-dialog").open ||
+      value.book !== book.id
+    )
+      return;
+    snapshot = value;
+    render();
+  }
+  async function poll(expected) {
+    try {
+      await loadStatus(expected);
+    } catch (error) {
+      if (expected === revision && $("cloud-dialog").open)
+        text("cloud-status", error.message);
+    }
+    if (expected === revision && $("cloud-dialog").open)
+      timer = setTimeout(() => poll(expected), 1500);
+  }
   async function open(id, pages) {
     if (busy) return;
     book = getBook(id);
     if (!book || book.type !== "pdf") return;
+    const expected = ++revision;
+    clearTimeout(timer);
+    snapshot = null;
+    localError = "";
+    configured = false;
+    resumeMode = !!pages?.length;
     $("book-dialog").close();
     $("jobs-dialog").close();
-    $("cloud-book-title").textContent = book.title;
-    $("cloud-page-count").textContent =
-      `本书共 ${book.pages} 页，使用文件页序。${book.enhancedPages?.length ? `已增强 ${book.enhancedPages.length} 页。` : ""}`;
+    text("cloud-book-title", book.title);
+    text("cloud-page-count", `本书共 ${book.pages} 页，使用 PDF 文件页序。`);
     if (pages?.length) $("cloud-pages").value = formatPages(pages);
     else nearby();
     $("cloud-fresh").checked = false;
-    $("cloud-start").disabled = true;
-    $("cloud-status").textContent = "正在检查本机服务设置…";
+    for (const id of ["local-prepare-all", "cloud-fill", "cloud-start"])
+      $(id).disabled = true;
+    text("cloud-status", "正在检查本机服务设置…");
     $("cloud-dialog").showModal();
     try {
-      const data = await api("/api/settings");
-      $("cloud-start").disabled = !data.services.mineru.ready;
-      $("cloud-status").textContent = data.services.mineru.ready
-        ? "将使用已配置的 MinerU 服务。解析额度与处理时间由服务方提供。"
-        : "请先配置 MinerU 服务。";
+      const [settings] = await Promise.all([
+        api("/api/settings"),
+        loadStatus(expected),
+      ]);
+      if (expected !== revision || !$("cloud-dialog").open) return;
+      configured = settings.services.mineru.ready;
+      text(
+        "cloud-status",
+        configured
+          ? "使用已配置的 MinerU 服务，默认复用已有结果与未完成任务。"
+          : "本地划词可直接准备；使用 MinerU 前请先配置服务。",
+      );
+      render();
     } catch (error) {
-      $("cloud-status").textContent = error.message;
+      if (expected === revision) text("cloud-status", error.message);
+    }
+    if (expected === revision && $("cloud-dialog").open)
+      timer = setTimeout(() => poll(expected), 1500);
+  }
+  $("cloud-dialog").addEventListener("close", () => {
+    revision++;
+    clearTimeout(timer);
+  });
+  $("cloud-pages").addEventListener("input", () => {
+    resumeMode = false;
+    render();
+  });
+  $("cloud-fresh").addEventListener("change", () => {
+    resumeMode = false;
+    render();
+  });
+  $("cloud-current").onclick = nearby;
+  $("cloud-all").onclick = () => range("1-" + book.pages);
+  $("cloud-settings").onclick = () => $("cloud-dialog").close();
+  async function localAction(action) {
+    if (busy) return;
+    localError = "";
+    busy = true;
+    render();
+    try {
+      await post("/api/pdf/prepare", { book: book.id, action });
+      await refresh();
+      await loadStatus();
+      toast(
+        action === "pause"
+          ? "整本划词准备已暂停，已完成页保留。"
+          : "整本划词准备已在本机后台开始。",
+        { kind: "success" },
+      );
+    } catch (error) {
+      localError = error.message;
+      text("local-preparation-status", error.message);
+    } finally {
+      busy = false;
+      render();
     }
   }
-  $("cloud-current").onclick = nearby;
-  $("cloud-all").onclick = () => {
-    $("cloud-pages").value = "1-" + book.pages;
-  };
-  $("cloud-settings").onclick = () => $("cloud-dialog").close();
-  $("cloud-form").onsubmit = async (event) => {
-    event.preventDefault();
-    if (busy) return;
+  $("local-prepare-all").onclick = () => localAction("all");
+  $("local-prepare-pause").onclick = () => localAction("pause");
+  async function startCloud() {
+    if (busy || !configured || snapshot?.mineru.status === "running") return;
     busy = true;
-    $("cloud-start").disabled = true;
+    render();
     try {
       await post("/api/jobs/mineru", {
         book: book.id,
         pages: $("cloud-pages").value,
         fresh: $("cloud-fresh").checked,
+        resume: resumeMode && !$("cloud-fresh").checked,
       });
-      $("cloud-dialog").close();
+      resumeMode = false;
       await refresh();
-      toast("云解析已在后台开始，可继续阅读原书。", { kind: "success" });
+      await loadStatus();
+      toast("云解析已在后台开始，成功的页段会逐批生效。", { kind: "success" });
     } catch (error) {
-      $("cloud-status").textContent = error.message;
+      text("cloud-status", error.message);
     } finally {
       busy = false;
-      $("cloud-start").disabled = false;
-    }
-  };
-  async function pause(id) {
-    try {
-      const result = await post("/api/jobs/pause", { book: id });
-      toast(
-        result.paused ? "正在暂停，当前请求结束后保留进度。" : "任务已经结束。",
-        { kind: "success" },
-      );
-      await refresh();
-    } catch (error) {
-      toast(error.message, { kind: "error" });
+      render();
     }
   }
+  $("cloud-form").onsubmit = (event) => {
+    event.preventDefault();
+    startCloud();
+  };
+  $("cloud-fill").onclick = () => {
+    range("1-" + book.pages);
+    $("cloud-fresh").checked = false;
+    startCloud();
+  };
+  $("cloud-resume").onclick = () => {
+    range(formatPages(snapshot.mineru.pages));
+    resumeMode = true;
+    $("cloud-fresh").checked = false;
+    startCloud();
+  };
+  async function pause(id) {
+    if (busy) return;
+    busy = true;
+    render();
+    try {
+      const result = await post("/api/jobs/pause", { book: id });
+      toast(result.paused ? "正在暂停，已完成页保留。" : "任务已经结束。", {
+        kind: "success",
+      });
+      await refresh();
+      if ($("cloud-dialog").open && book?.id === id) await loadStatus();
+    } catch (error) {
+      toast(error.message, { kind: "error" });
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+  $("cloud-pause").onclick = () => pause(book.id);
   return { open, pause };
 }

@@ -3261,3 +3261,102 @@ body[data-mode="palm"] .question-panel textarea {
 .job-label.paused {
   color: var(--secondary);
 }
+
+/* PDF preparation stays in one on-demand panel, separate from the reading surface. */
+.cloud-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+}
+.cloud-dialog > .cloud-book-title {
+  margin: 8px 24px 24px;
+  overflow-wrap: anywhere;
+}
+.cloud-dialog > .dialog-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+.document-process-section {
+  padding: 0 24px 24px;
+}
+.document-process-section + .document-process-section {
+  margin-top: 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.document-process-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.document-process-heading h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.document-process-heading > span {
+  color: var(--secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.document-process-section progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--line);
+  accent-color: var(--accent);
+}
+.document-process-section progress::-webkit-progress-bar {
+  background: var(--line);
+}
+.document-process-section progress::-webkit-progress-value {
+  background: var(--accent);
+}
+.document-process-section progress::-moz-progress-bar {
+  background: var(--accent);
+}
+.document-process-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.document-process-section .cloud-form {
+  margin-top: 20px;
+  padding: 0;
+}
+.reader-process-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.book-process {
+  margin-top: 8px;
+  padding: 4px 0;
+  color: var(--accent);
+  font-size: 12px;
+  text-align: left;
+}
+.book-process:hover {
+  text-decoration: underline;
+}
+@media (max-width: 760px) {
+  .reader-process-button span {
+    display: none;
+  }
+  .reader-process-button {
+    padding: 0 8px;
+  }
+}

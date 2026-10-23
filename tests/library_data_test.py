@@ -20,6 +20,38 @@ from storage import load, save
 
 
 class LibraryRecovery(unittest.TestCase):
+    def test_saved_selection_text_survives_backup_restore_and_cache_cleanup(self):
+        folder = (
+            self.library
+            / "books"
+            / self.book["id"]
+            / "selection-text-v1"
+            / "diagnostic-fingerprint"
+        )
+        saved_page = folder / "1.json"
+        save(
+            saved_page,
+            {
+                "page": 1,
+                "selectionFingerprint": folder.name,
+                "lines": [{"text": "Original saved selection"}],
+            },
+        )
+        original = saved_page.read_bytes()
+        task = folder.parent.parent / "selection-preparation.json"
+        save(task, {"fingerprint": folder.name, "status": "paused", "errors": {}})
+        package = self.package()
+        saved_page.unlink()
+        task.unlink()
+        data.prepare_restore(package)
+        data.approve_restore()
+        data.apply_pending_restore()
+        self.assertEqual(saved_page.read_bytes(), original)
+        self.assertEqual(load(task, {})["status"], "paused")
+        data.queue_cache_cleanup()
+        data.apply_cache_cleanup()
+        self.assertEqual(saved_page.read_bytes(), original)
+
     def altered_package(self, mutate):
         package = self.package()
         with zipfile.ZipFile(package) as archive:

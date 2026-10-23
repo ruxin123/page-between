@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.28" />
+    <link rel="stylesheet" href="/layout.css?v=2.29" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -230,7 +230,7 @@
               <h2>让空间保持轻盈</h2>
               <p class="setting-note">
                 清理
-                OCR、搜索和导出缓存。原书、进度、书签、对话与服务设置保留，缓存会按需重建。
+                临时识别、搜索和导出缓存。随书保存的划词文字、原书、进度、书签、对话与服务设置保留。
               </p>
               <div class="service-actions">
                 <button id="data-clear-cache" class="secondary-button">
@@ -331,6 +331,14 @@
             id="reading-mode"
             aria-label="浏览方式"
           ></button
+          ><button
+            class="secondary-button reader-process-button"
+            id="reader-process"
+            aria-label="文档处理"
+            hidden
+            title="准备划词与增强 PDF 内容"
+          >
+            <i data-icon="settings"></i><span>文档处理</span></button
           ><button
             class="type-button"
             id="reader-settings-open"
@@ -671,7 +679,7 @@
       <div class="dialog-footer">
         <span id="book-save-note"></span
         ><button id="book-cloud" class="secondary-button" hidden>
-          精细解析…</button
+          文档处理…</button
         ><button id="book-export" class="secondary-button">导出 EPUB…</button
         ><button id="book-chapters" class="secondary-button" hidden>
           调整章节…</button
@@ -781,47 +789,115 @@
     </dialog>
     <dialog id="cloud-dialog" class="book-dialog cloud-dialog">
       <form method="dialog" class="dialog-heading">
-        <h2>精细解析</h2>
-        <button class="icon-button" aria-label="关闭精细解析">
+        <h2>文档处理</h2>
+        <button class="icon-button" aria-label="关闭文档处理">
           <i data-icon="close"></i>
         </button>
       </form>
-      <form id="cloud-form" class="cloud-form">
-        <p id="cloud-book-title" class="cloud-book-title"></p>
-        <p class="setting-note">
-          先在本机生成仅含指定页段的 PDF 副本，再交给 MinerU
-          提取文字、公式与图表。原文件保留，解析期间可以继续阅读。
+      <p id="cloud-book-title" class="cloud-book-title"></p>
+      <section
+        class="document-process-section"
+        aria-labelledby="local-preparation-heading"
+      >
+        <div class="document-process-heading">
+          <h3 id="local-preparation-heading">本地划词准备</h3>
+          <span id="local-preparation-count"></span>
+        </div>
+        <progress
+          id="local-preparation-progress"
+          aria-label="本地划词准备进度"
+          max="1"
+          value="0"
+        ></progress>
+        <p id="local-preparation-status" class="setting-note" role="status">
+          正在读取准备进度…
         </p>
-        <label class="service-field"
-          >PDF 文件页序<input
-            id="cloud-pages"
-            required
-            maxlength="2000"
-            placeholder="例如 29-34 或 2,5-8" /><small
-            id="cloud-page-count"
-          ></small
-        ></label>
-        <div class="cloud-range-actions">
-          <button type="button" id="cloud-current" class="secondary-button">
-            当前页附近</button
-          ><button type="button" id="cloud-all" class="secondary-button">
-            整本
+        <p class="setting-note">
+          阅读时提前准备后 3 页和前 1
+          页。结果随书保存在本机，重启、升级和书库备份后仍可用。
+        </p>
+        <div class="document-process-actions">
+          <button type="button" id="local-prepare-all" class="secondary-button">
+            提前准备整本</button
+          ><button
+            type="button"
+            id="local-prepare-pause"
+            class="secondary-button"
+            hidden
+          >
+            暂停整本准备
           </button>
         </div>
-        <label class="setting-check"
-          >重新提交解析<input id="cloud-fresh" type="checkbox"
-        /></label>
-        <p class="setting-note">
-          默认复用已有结果与未完成任务。开始后会开启本书的文档解析；可在处理面板暂停。
-        </p>
-        <p id="cloud-status" class="setting-note" role="status"></p>
-        <a id="cloud-settings" href="#/settings/mineru">管理 MinerU 服务</a>
-        <div class="cloud-footer">
-          <button class="primary-button" id="cloud-start" type="submit">
-            开始解析
+      </section>
+      <section
+        class="document-process-section"
+        aria-labelledby="cloud-processing-heading"
+      >
+        <div class="document-process-heading">
+          <h3 id="cloud-processing-heading">MinerU 内容增强</h3>
+          <span id="cloud-progress-count"></span>
+        </div>
+        <progress
+          id="cloud-progress"
+          aria-label="MinerU 内容增强进度"
+          max="1"
+          value="0"
+        ></progress>
+        <p id="cloud-job-status" class="setting-note" role="status"></p>
+        <div class="document-process-actions">
+          <button type="button" id="cloud-fill" class="primary-button" disabled>
+            补全未解析页</button
+          ><button
+            type="button"
+            id="cloud-resume"
+            class="secondary-button"
+            hidden
+          >
+            继续原任务</button
+          ><button
+            type="button"
+            id="cloud-pause"
+            class="secondary-button"
+            hidden
+          >
+            暂停云解析
           </button>
         </div>
-      </form>
+        <p class="setting-note">
+          按批提交所选页，成功一批即可阅读一批。使用已配置服务的解析额度；原书保留，处理时可继续阅读。
+        </p>
+        <form id="cloud-form" class="cloud-form">
+          <label class="service-field"
+            >PDF 文件页序<input
+              id="cloud-pages"
+              required
+              maxlength="2000"
+              placeholder="例如 29-34 或 2,5-8" /><small
+              id="cloud-page-count"
+            ></small
+          ></label>
+          <div class="cloud-range-actions">
+            <button type="button" id="cloud-current" class="secondary-button">
+              当前页附近</button
+            ><button type="button" id="cloud-all" class="secondary-button">
+              整本
+            </button>
+          </div>
+          <label class="setting-check"
+            >重新提交解析<input id="cloud-fresh" type="checkbox"
+          /></label>
+          <p class="setting-note">
+            默认复用已有结果与未完成任务。开始后会开启本书的文档解析；可在处理面板暂停。
+          </p>
+          <p id="cloud-status" class="setting-note" role="status"></p>
+          <a id="cloud-settings" href="#/settings/mineru">管理 MinerU 服务</a>
+          <div class="cloud-footer">
+            <button class="primary-button" id="cloud-start" type="submit">
+              开始解析
+            </button>
+          </div>
+        </form>
+      </section>
     </dialog>
     <dialog id="page-dialog" class="book-dialog">
       <form id="page-jump-form">
@@ -860,6 +936,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.28"></script>
+    <script type="module" src="/app-v2.mjs?v=2.29"></script>
   </body>
 </html>

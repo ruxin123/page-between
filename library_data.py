@@ -18,7 +18,7 @@ import unicodedata
 from paths import DATA, DATA_PREFIX, CACHE, APP_MODE
 from storage import load, save
 from epub_export import filename
-from pdf_enhancement import enrichment_data
+from pdf_enhancement import enrichment_data, prepared_pages
 from book_import import SUPPORTED, text_chapter_index
 
 RECORDS = {"library.json", "state.json", "ai-conversations.json"}
@@ -768,8 +768,17 @@ def queue_cache_cleanup():
 def apply_cache_cleanup():
     marker = record_path("pending-cache-clear")
     if marker.exists():
+        migrated = True
+        for book in load(DATA / "library.json", {"books": []})["books"]:
+            if book.get("type") == "pdf":
+                try:
+                    prepared_pages(book)
+                except (OSError, ValueError, KeyError):
+                    migrated = False
         for name in ("ocr-v3", "book-index-v1", "book-index-v2", "exports"):
             shutil.rmtree(CACHE / name, ignore_errors=True)
+        if migrated:
+            shutil.rmtree(CACHE / "ocr-v4", ignore_errors=True)
         for directory in cloud_cache_folders():
             shutil.rmtree(directory, ignore_errors=True)
         marker.unlink()

@@ -337,6 +337,39 @@ def verify(app, epubcheck=None, samples=()):
             assert request(legacy_book["originalUrl"])[2] == legacy.getvalue()
             ocr = json.loads(request("/api/ocr?book=demo-e&page=1")[2])
             assert ocr["lines"] and ocr["engine"] == "tesseract-eng"
+            request(
+                "/api/pdf/prepare",
+                json.dumps({"book": "demo-e", "action": "all"}).encode(),
+                content_type="application/json",
+            )
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                local = json.loads(request("/api/pdf/preparation?book=demo-e")[2])[
+                    "local"
+                ]
+                task = root / "Library/books/demo-e/selection-preparation.json"
+                if (
+                    local["completed"] == 4
+                    and task.is_file()
+                    and json.loads(task.read_text()).get("status") == "ready"
+                ):
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError(
+                    "Frozen whole-book selection preparation did not finish"
+                )
+            prepared_files = {
+                path.relative_to(root / "Library").as_posix(): __import__("hashlib")
+                .sha256(path.read_bytes())
+                .hexdigest()
+                for path in (root / "Library/books/demo-e/selection-text-v1").rglob(
+                    "*.json"
+                )
+            }
+            assert (
+                len([name for name in prepared_files if Path(name).stem.isdigit()]) == 4
+            )
             search = json.loads(
                 request(
                     "/api/index/search",
@@ -394,6 +427,27 @@ def verify(app, epubcheck=None, samples=()):
             process.wait(timeout=10)
             base = start()
             assert json.loads(request("/api/state")[2])["prefs"]["fontSize"] == 23
+            for name, checksum in prepared_files.items():
+                assert (
+                    __import__("hashlib")
+                    .sha256((root / "Library" / name).read_bytes())
+                    .hexdigest()
+                    == checksum
+                )
+            saved_page = next(
+                (root / "Library/books/demo-e/selection-text-v1").glob("*/2.json")
+            )
+            before_prepared = saved_page.stat().st_mtime_ns
+            assert json.loads(request("/api/ocr?book=demo-e&page=2")[2])["lines"]
+            assert saved_page.stat().st_mtime_ns == before_prepared, (
+                "Restored prepared text was recognized again"
+            )
+            assert (
+                json.loads(request("/api/pdf/preparation?book=demo-e")[2])["local"][
+                    "completed"
+                ]
+                == 4
+            )
             assert len(json.loads(request("/api/library")[2])["books"]) == 8
             restored = json.loads(
                 request(
@@ -471,6 +525,8 @@ def verify(app, epubcheck=None, samples=()):
                 "demoBooks": 5,
                 "import": True,
                 "bundledOCR": True,
+                "wholeBookLocalPreparation": True,
+                "savedSelectionBackupAndRestart": True,
                 "protectedSession": True,
                 "restartPersistence": True,
                 "bookSearch": True,

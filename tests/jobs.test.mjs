@@ -60,4 +60,26 @@ const paused = taskEntries(books, [
 assert.equal(paused.status, "paused");
 assert.equal(paused.kind, "mineru");
 assert.deepEqual(paused.pages, [2, 3]);
+books[0].localPreparation = {
+  status: "running",
+  completed: 4,
+  total: 12,
+  activePage: 9,
+  failedPages: [],
+};
+const simultaneous = taskEntries(books, [
+  {
+    book: "a",
+    kind: "mineru",
+    status: "paused",
+    phase: "云端已暂停",
+    pages: [1, 2],
+  },
+]);
+assert.equal(simultaneous.length, 3);
+assert.equal(simultaneous[0].kind, "mineru");
+assert.equal(simultaneous[0].status, "paused");
+assert.equal(simultaneous[2].kind, "selection");
+assert.equal(simultaneous[2].status, "running");
+assert.match(simultaneous[2].phase, /4 \/ 12/);
 console.log("任务按书聚合、历史失败恢复与关闭增强状态：通过。");

@@ -1,7 +1,7 @@
 export function taskEntries(books, jobs) {
   const latest = new Map();
   for (const job of jobs) if (!latest.has(job.book)) latest.set(job.book, job);
-  return books.map((book) => {
+  const entries = books.map((book) => {
     const job = latest.get(book.id);
     const disabled = book.parseEnabled === false && book.type !== "txt";
     // The book records current state; historical errors are not active alerts.
@@ -30,4 +30,35 @@ export function taskEntries(books, jobs) {
               : "已导入，可直接阅读。"),
     };
   });
+  for (const book of books) {
+    const local = book.localPreparation;
+    if (
+      book.type !== "pdf" ||
+      !book.parseEnabled ||
+      !local ||
+      (!local.activePage &&
+        !["running", "paused", "error"].includes(local.status))
+    )
+      continue;
+    entries.push({
+      book: book.id,
+      kind: "selection",
+      pages: [],
+      title: book.title + " · 本地划词",
+      status:
+        local.status === "error"
+          ? "error"
+          : local.status === "paused"
+            ? "paused"
+            : "running",
+      phase:
+        `${local.completed} / ${local.total} 页已准备。` +
+        (local.activePage
+          ? `正在准备第 ${local.activePage} 页。`
+          : local.status === "paused"
+            ? "整本准备已暂停，已完成页保留。"
+            : local.error || "在本机后台准备，结果随书保存。"),
+    });
+  }
+  return entries;
 }

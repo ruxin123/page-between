@@ -32,8 +32,9 @@ from book_import import (
     url_for,
     path_for,
 )
-from pdf_enhancement import build_contents, recognize, page_enrichment
+from pdf_enhancement import build_contents, recognize, page_enrichment, apply_enrichment
 from pdf_selection import align_spans
+from pdf_preparation import PDFPreparation
 
 from paths import DATA, RUNTIME, DEMO, APP_MODE, DATA_PREFIX, CACHE
 from storage import load, save
@@ -81,7 +82,34 @@ def update_book(ident, patch):
         return book
 
 
-def start_job(ident, kind="local", pages=None, fresh=False):
+PDF_PREPARATION = PDFPreparation(book_for)
+
+
+def document_status(book):
+    cloud = mineru_api.progress(book)
+    job = next(
+        (
+            entry
+            for entry in library()["jobs"]
+            if entry.get("book") == book["id"] and entry.get("kind") == "mineru"
+        ),
+        None,
+    )
+    cloud.update(
+        status=job.get("status", "idle") if job else "idle",
+        phase=job.get("phase", "") if job else "",
+        pages=job.get("pages", []) if job else [],
+    )
+    return {
+        "book": book["id"],
+        "total": book["pages"],
+        "parseEnabled": book["parseEnabled"],
+        "local": PDF_PREPARATION.status(book),
+        "mineru": cloud,
+    }
+
+
+def start_job(ident, kind="local", pages=None, fresh=False, retry=False):
     with MUTEX:
         if ident in RUNNING:
             return False
@@ -148,8 +176,26 @@ def start_job(ident, kind="local", pages=None, fresh=False):
                 phase("已关闭增强解析", "ready")
                 return
             if kind == "mineru":
+
+                def publish(patch):
+                    with MUTEX:
+                        latest = book_for(ident)
+                        if (
+                            cancellation.is_set()
+                            or not latest
+                            or not latest["parseEnabled"]
+                        ):
+                            raise mineru_api.Paused("云解析已暂停，已完成页保留。")
+                        update_book(ident, patch)
+
                 patch = mineru_api.run(
-                    book, pages, phase, cancellation, fresh=reset_id or False
+                    book,
+                    pages,
+                    phase,
+                    cancellation,
+                    fresh=reset_id or False,
+                    publish=publish,
+                    retry=retry,
                 )
                 if book_for(ident)["parseEnabled"] and not cancellation.is_set():
                     update_book(ident, patch)
@@ -420,16 +466,33 @@ class Handler(SimpleHTTPRequestHandler):
                     else {"conversations": ai_tutor.history(book["id"])}
                 )
             if route.path == "/api/library":
-                return self.json(library())
+                data = library()
+                for book in data["books"]:
+                    if book.get("type") == "pdf":
+                        try:
+                            book["localPreparation"] = PDF_PREPARATION.status(book)
+                        except (OSError, ValueError, KeyError):
+                            book["localPreparation"] = {
+                                "status": "error",
+                                "completed": 0,
+                                "total": book.get("pages", 0),
+                                "failedPages": [],
+                                "activePage": None,
+                                "error": "暂时无法读取本机文字准备进度，请检查书籍文件。",
+                            }
+                return self.json(data)
             if route.path == "/api/data/info":
                 with RECOVERY_LOCK:
                     return self.json(library_data.information())
             if route.path == "/api/library-version":
                 return self.json(
                     {
-                        "revision": (DATA / "library.json").stat().st_mtime_ns
-                        if (DATA / "library.json").exists()
-                        else 0
+                        "revision": max(
+                            (DATA / "library.json").stat().st_mtime_ns
+                            if (DATA / "library.json").exists()
+                            else 0,
+                            PDF_PREPARATION.revision,
+                        )
                     }
                 )
             if route.path == "/api/formats":
@@ -490,13 +553,25 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("找不到这本 PDF。")
                 if not book["parseEnabled"]:
                     return self.json({"disabled": True, "lines": []})
-                return self.json(recognize(book, page))
+                if not 1 <= page <= book["pages"]:
+                    raise ValueError("原书页码无效。")
+                client = query.get("client", [""])[0]
+                if client and not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", client):
+                    raise ValueError("阅读窗口标识无效。")
+                data = PDF_PREPARATION.foreground(book, page, client)
+                latest = book_for(book["id"]) or book
+                return self.json(apply_enrichment({**data}, latest, page, "full"))
             if route.path == "/api/enrichment":
                 book = book_for(query.get("book", [""])[0])
                 page = int(query.get("page", ["0"])[0])
                 if not book or book["type"] != "pdf" or not 1 <= page <= book["pages"]:
                     raise ValueError("原书页码无效。")
                 return self.json({"blocks": page_enrichment(book, page)})
+            if route.path == "/api/pdf/preparation":
+                book = book_for(query.get("book", [""])[0])
+                if not book or book["type"] != "pdf":
+                    raise ValueError("请选择一本 PDF。")
+                return self.json(document_status(book))
             if route.path == "/api/palm-status":
                 return self.json(load(DATA / "palm-window.json", {}))
             requested = Path(unquote(route.path))
@@ -698,6 +773,33 @@ class Handler(SimpleHTTPRequestHandler):
                         )
                     }
                 )
+            if route.path == "/api/pdf/prepare":
+                action = payload.get("action", "nearby")
+                client = payload.get("client", "")
+                if action in {"nearby", "leave"} and (
+                    not isinstance(client, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", client)
+                ):
+                    raise ValueError("阅读窗口标识无效。")
+                if action == "leave":
+                    PDF_PREPARATION.leave(client)
+                    return self.json({"left": True})
+                book = book_for(payload.get("book"))
+                if not book or book["type"] != "pdf":
+                    raise ValueError("请选择一本 PDF。")
+                if action == "nearby":
+                    page = payload.get("page")
+                    if type(page) is not int or not 1 <= page <= book["pages"]:
+                        raise ValueError("原书页码无效。")
+                    if book["parseEnabled"]:
+                        PDF_PREPARATION.nearby(book, page, client)
+                    return self.json({"queued": book["parseEnabled"]})
+                if action == "all":
+                    book = update_book(book["id"], {"parseEnabled": True})
+                    return self.json({"local": PDF_PREPARATION.start(book)})
+                if action == "pause":
+                    return self.json({"local": PDF_PREPARATION.pause(book)})
+                raise ValueError("文字准备操作无效。")
             if route.path == "/api/jobs/mineru":
                 book = book_for(payload.get("book"))
                 if not book or book["type"] != "pdf":
@@ -705,6 +807,8 @@ class Handler(SimpleHTTPRequestHandler):
                 pages = mineru_api.page_range(payload.get("pages"), book["pages"])
                 if type(payload.get("fresh", False)) is not bool:
                     raise ValueError("解析选项无效。")
+                if type(payload.get("resume", False)) is not bool:
+                    raise ValueError("继续任务选项无效。")
                 service_settings.validated(
                     "mineru", service_settings.effective("mineru"), require_key=True
                 )
@@ -713,12 +817,37 @@ class Handler(SimpleHTTPRequestHandler):
                         return self.json(
                             {"error": "这本书已有任务进行中，请稍后再试。"}, 409
                         )
+                    previous = next(
+                        (
+                            entry
+                            for entry in library()["jobs"]
+                            if entry.get("book") == book["id"]
+                            and entry.get("kind") == "mineru"
+                        ),
+                        None,
+                    )
+                    fresh = payload.get("fresh", False)
+                    if payload.get("resume") and (
+                        not previous
+                        or previous.get("status") not in {"paused", "error"}
+                        or previous.get("pages") != pages
+                        or fresh
+                    ):
+                        raise ValueError("原任务或页段已变化，请重新选择解析范围。")
+                    if (
+                        not fresh
+                        and previous
+                        and previous.get("status") in {"paused", "error"}
+                        and previous.get("pages") == pages
+                    ):
+                        fresh = previous.get("resetId") or False
                     update_book(book["id"], {"parseEnabled": True})
                     start_job(
                         book["id"],
                         kind="mineru",
                         pages=pages,
-                        fresh=payload.get("fresh", False),
+                        fresh=fresh,
+                        retry=True,
                     )
                 return self.json({"book": book_for(book["id"]), "started": True})
             if route.path == "/api/jobs/pause":
@@ -992,6 +1121,7 @@ def main():
 
         threading.Thread(target=follow_parent, daemon=True).start()
     resume_pending_jobs()
+    PDF_PREPARATION.restore(library()["books"])
     if APP_MODE:
         print(json.dumps({"ready": True, "port": server.server_port}), flush=True)
     else:

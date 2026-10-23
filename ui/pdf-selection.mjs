@@ -233,6 +233,11 @@ export function canonicalSelection(range, root) {
         }
         pieces.push(group.text.slice(lo, hi));
         corrected = true;
+      } else if (layer.dataset.ocrEngine === "tesseract-eng") {
+        const fragment = layer.ownerDocument.createRange();
+        fragment.setStart(first.node.firstChild, first.start);
+        fragment.setEnd(items.at(-1).node.firstChild, items.at(-1).end);
+        pieces.push(fragment.toString());
       } else
         pieces.push(
           items.map((item) => item.text.slice(item.start, item.end)).join(" "),

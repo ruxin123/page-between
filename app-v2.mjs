@@ -14,6 +14,7 @@ import { createTutor } from "/ui/tutor.mjs";
 import { createServiceSettings } from "/ui/settings.mjs";
 import { createDocumentParsing, formatPages } from "/ui/mineru.mjs";
 import { copyPng } from "/ui/clipboard.mjs";
+import { renderOcrLayer, ocrTextUnits } from "/ui/ocr-layer.mjs";
 import {
   alignTextLayer,
   canonicalSelection,
@@ -25,7 +26,7 @@ import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
 import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.29";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.30";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -108,7 +109,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.29";
+document.body.dataset.readerBuild = "2.30";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -671,7 +672,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.29",
+        build: "2.30",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1253,38 +1254,7 @@ function renderObjects(blocks, viewport, root, page) {
   }
 }
 function renderOCR(data, viewport, root) {
-  delete root._canonical;
-  root.replaceChildren();
-  root.lang = current.language;
-  const measure = document.createElement("canvas").getContext("2d");
-  for (const line of data.lines) {
-    const words = line.segments?.length
-      ? line.segments
-      : [{ text: line.text, bbox: line.bbox }];
-    for (const word of words) {
-      const [x0, y0, x1, y1] = word.bbox;
-      if (x1 <= x0 || y1 <= y0) continue;
-      const span = document.createElement("span"),
-        height = (y1 - y0) * viewport.height;
-      span.textContent = word.text;
-      const family = current.language?.startsWith("zh")
-        ? "Songti SC, serif"
-        : "Times New Roman, serif";
-      measure.font = `${height}px ${family}`;
-      const width = Math.max(1, measure.measureText(word.text.trimEnd()).width);
-      Object.assign(span.style, {
-        left: `${x0 * viewport.width}px`,
-        top: `${y0 * viewport.height}px`,
-        fontSize: `${height}px`,
-        height: `${height}px`,
-        width: `${width}px`,
-        fontFamily: family,
-        transform: `scaleX(${((x1 - x0) * viewport.width) / width})`,
-      });
-      root.append(span);
-    }
-    root.append(document.createElement("br"));
-  }
+  renderOcrLayer(root, data, viewport, current.language);
 }
 async function prepareOcr(book, page, viewport, revision, root) {
   if (!book.parseEnabled) {
@@ -3098,12 +3068,17 @@ function tutorContext(selection = null) {
           offset = position.blockOffset || 0;
       }
     } else {
-      separator = " ";
-      units = [...(page?.querySelectorAll(".textLayer span") || [])]
-        .filter(
-          (node) => node.firstChild?.nodeType === 3 && node.textContent.trim(),
-        )
-        .map((node) => node.textContent);
+      const layer = page?.querySelector(".textLayer");
+      separator = layer?.dataset.ocrEngine === "tesseract-eng" ? "" : " ";
+      units =
+        layer?.dataset.ocrEngine === "tesseract-eng"
+          ? ocrTextUnits(layer)
+          : [...(layer?.querySelectorAll("span") || [])]
+              .filter(
+                (node) =>
+                  node.firstChild?.nodeType === 3 && node.textContent.trim(),
+              )
+              .map((node) => node.textContent);
       if (selection) {
         unitIndex = position._textOrdinal || 0;
         offset = position._textOffset || 0;

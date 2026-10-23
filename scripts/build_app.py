@@ -6,6 +6,7 @@ import json
 import platform
 import plistlib
 import shutil
+import ssl
 import subprocess
 import sys
 from pathlib import Path
@@ -112,6 +113,11 @@ def build(demo=False):
     ]
     for name in ("node", "pandoc", "tesseract"):
         command += ["--add-binary", str(Path(tools[name]).resolve()) + ":bin"]
+    # Some bundled Python runtimes load this companion when creating any SSL context.
+    # Preserve that runtime policy in the frozen app as well.
+    ssl_companion = Path(ssl.__file__).with_name("codex-rejected-cas.pem")
+    if ssl_companion.is_file():
+        command += ["--add-data", str(ssl_companion) + ":."]
     tessdata = (
         Path(tools["tesseract"]).resolve().parents[1] / "share/tessdata/eng.traineddata"
     )
@@ -169,8 +175,8 @@ def build(demo=False):
         "CFBundleExecutable": "page-between",
         "CFBundlePackageType": "APPL",
         "CFBundleIconFile": "App.icns",
-        "CFBundleShortVersionString": "0.5.8",
-        "CFBundleVersion": "231",
+        "CFBundleShortVersionString": "0.5.9",
+        "CFBundleVersion": "232",
         "NSHighResolutionCapable": True,
         "PageBetweenDemo": demo,
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},

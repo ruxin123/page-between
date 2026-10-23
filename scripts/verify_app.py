@@ -6,6 +6,7 @@ import io
 import json
 import os
 import queue
+import shutil
 import subprocess
 import struct
 import tempfile
@@ -370,6 +371,73 @@ def verify(app, epubcheck=None, samples=()):
             assert (
                 len([name for name in prepared_files if Path(name).stem.isdigit()]) == 4
             )
+            scan_original = next(
+                item for item in library["books"] if item["id"] == "demo-e"
+            )
+            scan_bytes = request(scan_original["originalUrl"])[2]
+            selection_book = json.loads(
+                request(
+                    "/api/import?name=prepared-search.pdf&parse=1",
+                    scan_bytes + b"\n% Independent saved-selection search fixture\n",
+                )[2]
+            )["book"]
+            assert not selection_book.get("enrichmentUrl")
+            selection_query = next(
+                word
+                for line in ocr["lines"]
+                for word in line["text"].split()
+                if len(word) >= 6 and word.isascii() and word.isalpha()
+            )
+            request(
+                "/api/pdf/prepare",
+                json.dumps({"book": selection_book["id"], "action": "all"}).encode(),
+                content_type="application/json",
+            )
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                local = json.loads(
+                    request("/api/pdf/preparation?book=" + selection_book["id"])[2]
+                )["local"]
+                if local["completed"] == 4:
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError("Independent scan preparation did not finish")
+
+            def search_prepared_scan():
+                result = json.loads(
+                    request(
+                        "/api/index/search",
+                        json.dumps(
+                            {
+                                "book": selection_book["id"],
+                                "query": selection_query,
+                                "position": {"index": 2},
+                                "previousOnly": True,
+                            }
+                        ).encode(),
+                        content_type="application/json",
+                    )[2]
+                )
+                assert result["status"]["covered"] == 4
+                assert result["results"] and all(
+                    item["position"]["index"] == 1 for item in result["results"]
+                )
+
+            search_prepared_scan()
+            prepared_files.update(
+                {
+                    path.relative_to(root / "Library").as_posix(): __import__("hashlib")
+                    .sha256(path.read_bytes())
+                    .hexdigest()
+                    for path in (
+                        root
+                        / "Library/books"
+                        / selection_book["id"]
+                        / "selection-text-v1"
+                    ).rglob("*.json")
+                }
+            )
             search = json.loads(
                 request(
                     "/api/index/search",
@@ -448,7 +516,9 @@ def verify(app, epubcheck=None, samples=()):
                 ]
                 == 4
             )
-            assert len(json.loads(request("/api/library")[2])["books"]) == 8
+            assert len(json.loads(request("/api/library")[2])["books"]) == 9
+            shutil.rmtree(root / "cache/book-index-v2", ignore_errors=True)
+            search_prepared_scan()
             restored = json.loads(
                 request(
                     "/api/ai/conversations?book="
@@ -527,6 +597,7 @@ def verify(app, epubcheck=None, samples=()):
                 "bundledOCR": True,
                 "wholeBookLocalPreparation": True,
                 "savedSelectionBackupAndRestart": True,
+                "savedSelectionSearchAfterRestore": True,
                 "protectedSession": True,
                 "restartPersistence": True,
                 "bookSearch": True,

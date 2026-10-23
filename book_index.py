@@ -15,7 +15,12 @@ from pypdf import PdfReader
 
 from book_import import path_for, XML, text_chapter_index, flatten_toc, position_label
 from paths import CACHE
-from pdf_enhancement import enrichment_data
+from pdf_enhancement import (
+    enrichment_data,
+    prepared_pages,
+    saved_selection,
+    selection_directory,
+)
 from pdf_selection import utf16
 from storage import load
 
@@ -66,15 +71,18 @@ def tokens(text, *, unigrams=False):
 
 
 def fingerprint(book):
-    ocr = CACHE / "ocr-v3" / book["id"]
-    files = [
-        (path.name, path.stat().st_mtime_ns)
-        for path in sorted(ocr.glob("*-full*.json"))
-    ]
+    files = []
+    if book["type"] == "pdf" and book.get("parseEnabled"):
+        folder = selection_directory(book)
+        for page in prepared_pages(book):
+            stat = (folder / f"{page}.json").stat()
+            files.append(
+                (folder.name, page, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            )
     return hashlib.sha256(
         json.dumps(
             [
-                7,
+                8,
                 book.get("sourceHash"),
                 book.get("enhancementRevision"),
                 book.get("enrichmentUrl"),
@@ -205,21 +213,17 @@ def text_units(book):
                     continue
                 if not book.get("parseEnabled"):
                     continue
-                cached = sorted(
-                    (CACHE / "ocr-v3" / book["id"]).glob(f"{index}-full*.json")
-                )
-                if cached:
-                    data = load(cached[-1], {})
-                    for line in data.get("lines", []):
-                        y = line.get("bbox", [0, 0, 1, 1])[1]
-                        if line.get("text"):
-                            yield (
-                                index,
-                                int(y * 100000),
-                                line["text"],
-                                {"index": index, "pdfY": y},
-                                "text",
-                            )
+                data = saved_selection(book, index) or {}
+                for line in data.get("lines", []):
+                    y = line.get("bbox", [0, 0, 1, 1])[1]
+                    if line.get("text"):
+                        yield (
+                            index,
+                            int(y * 100000),
+                            line["text"],
+                            {"index": index, "pdfY": y},
+                            "text",
+                        )
 
 
 def connection(book):

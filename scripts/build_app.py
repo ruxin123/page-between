@@ -170,7 +170,7 @@ def build(demo=False):
         "CFBundlePackageType": "APPL",
         "CFBundleIconFile": "App.icns",
         "CFBundleShortVersionString": "0.5.8",
-        "CFBundleVersion": "230",
+        "CFBundleVersion": "231",
         "NSHighResolutionCapable": True,
         "PageBetweenDemo": demo,
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},

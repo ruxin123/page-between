@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import book_index
 import book_import
 import chapter_edit
+import pdf_enhancement
 from ai_tutor import source_for
 from pdf_selection import utf16
 from scripts.create_demo import make_epub, make_pdf, make_scan
@@ -112,6 +114,7 @@ class BookIndex(unittest.TestCase):
         self.overrides = [
             patch.object(book_index, "CACHE", self.root / "cache"),
             patch.object(book_import, "BOOK_ROOT", self.root / "books"),
+            patch.object(pdf_enhancement, "CACHE", self.root / "cache/ocr-v4"),
         ]
         for override in self.overrides:
             override.start()
@@ -141,6 +144,51 @@ class BookIndex(unittest.TestCase):
         self.assertEqual(
             book_index.search(book, "定理 1.2")["results"][0]["label"], "定理 1.2"
         )
+
+    def test_saved_pdf_selection_rebuilds_search_and_survives_cache_removal(self):
+        native, scan = self.root / "native.pdf", self.root / "scan.pdf"
+        make_pdf(native)
+        make_scan(native, scan)
+        book = book_import.import_book(scan)
+        self.assertEqual(book_index.search(book, "durable")["status"]["covered"], 0)
+        with patch.object(
+            pdf_enhancement,
+            "recognize",
+            side_effect=AssertionError("No OCR during search"),
+        ):
+            for page in (1, 2):
+                pdf_enhancement.save_selection(
+                    book,
+                    page,
+                    {
+                        "page": page,
+                        "width": 540,
+                        "height": 740,
+                        "engine": "tesseract-eng",
+                        "lines": [
+                            {
+                                "text": f"Theorem 9.{page}. Durable selection text.",
+                                "bbox": [0.1, 0.2, 0.8, 0.3],
+                            }
+                        ],
+                    },
+                )
+                result = book_index.search(book, "durable")
+                self.assertEqual(result["status"]["covered"], page)
+                self.assertEqual(len(result["results"]), page)
+            earlier = book_index.search(
+                book, "durable", position={"index": 2}, previous_only=True
+            )
+            self.assertEqual(len(earlier["results"]), 1)
+            self.assertEqual(
+                earlier["results"][0]["position"], {"index": 1, "pdfY": 0.2}
+            )
+            shutil.rmtree(book_index.CACHE)
+            rebuilt = book_index.search(book, "durable")
+            self.assertEqual(rebuilt["status"]["covered"], 2)
+            self.assertEqual(len(rebuilt["results"]), 2)
+            book["language"] = "zh"
+            self.assertEqual(book_index.search(book, "durable")["status"]["covered"], 0)
 
     def test_native_epub_and_pdf_and_scan_coverage_are_distinct(self):
         source = self.root / "sample.epub"

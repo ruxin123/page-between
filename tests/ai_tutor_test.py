@@ -266,6 +266,51 @@ class Tutor(unittest.TestCase):
             result.xpath("//script|//img|//*[@src or @href or @onclick or @style]")
         )
 
+    def test_math_styles_and_spaced_array_columns_render_without_rewriting_code(self):
+        if not tutor.shutil.which("pandoc"):
+            self.skipTest("Pandoc is required for math rendering")
+        equation = r"h(t)=\left\{\begin{array}{l l}t^2&\text{if }t\ge0\\0&\text{if }t<0\end{array}\right."
+        literal = r"\begin{array}{l l}"
+        quote = r"**说明** $\mathbf{v}:\mathbb{R}\to\mathbb{R}$" + "\n\n" + equation + "\n\n`" + literal + "`"
+        payload = {"quote": quote, "position": {"index": 1}}
+        before = json.dumps(payload)
+        with patch.object(tutor, "page_enrichment", return_value=[{"type":"equation","text":equation}]), patch.object(tutor, "complete", side_effect=AssertionError("Preview stays local")):
+            result = html.fromstring(tutor.source_preview({**self.book,"type":"pdf","pages":1},payload))
+        self.assertEqual(json.dumps(payload),before)
+        self.assertTrue(result.xpath("//math//mstyle"))
+        self.assertFalse(result.xpath("//math//span"))
+        self.assertEqual(len(result.xpath('//math[@display="block"]//mtable/mtr')),2)
+        self.assertEqual(result.xpath("string(//code)"),literal)
+
+    def test_old_answer_html_is_repaired_without_changing_saved_content(self):
+        if not tutor.shutil.which("pandoc"):
+            self.skipTest("Pandoc is required for math rendering")
+        content = r"旧回答 $\mathbf{w}=\mathbb{R}^2$"
+        with patch.object(tutor,"complete",return_value=content):
+            created=tutor.ask(self.book,self.payload)
+        data=tutor.records();message=data['conversations'][0]['messages'][-1]
+        message.pop('htmlVersion',None);message['html']='<p>Old broken display cache</p>'
+        tutor.save(tutor.DATA/'ai-conversations.json',data)
+        before=(tutor.DATA/'ai-conversations.json').read_bytes()
+        with patch.object(tutor,"complete",side_effect=AssertionError("Reading history must not call the model")):
+            result=tutor.conversation(created['id'],self.book['id'])
+        self.assertEqual(result['messages'][-1]['content'],content)
+        self.assertIn('<mstyle',result['messages'][-1]['html'])
+        self.assertEqual(result['messages'][-1]['htmlVersion'],tutor.HTML_VERSION)
+        self.assertEqual((tutor.DATA/'ai-conversations.json').read_bytes(),before)
+
+    def test_formula_spacing_and_duplicate_page_numbers_are_display_only(self):
+        if not tutor.shutil.which('pandoc'):
+            self.skipTest('Pandoc required')
+        equations = [r'p\text{ and }q\text{ continuous}\tag{23}', "p\\sim q\\tag{24'}"]
+        quote = equations[0] + '\n\n(23)\n\n' + equations[1] + '\n\n(24’)'
+        with patch.object(tutor,'page_enrichment',return_value=[{'type':'equation','text':e} for e in equations]):
+            result=html.fromstring(tutor.source_preview({**self.book,'type':'pdf','pages':1},{'quote':quote,'position':{'index':1}}))
+        self.assertFalse(result.xpath('//ol|//li'))
+        self.assertTrue(result.xpath('//mspace[@width]'))
+        self.assertEqual(result.xpath('//mtext[text()="(23)"]/text()'),['(23)'])
+        self.assertIn("(24')", [t.replace('’', "'") for t in result.xpath('//mtext/text()')])
+
     def test_configuration_hides_credentials_and_rejects_unsafe_urls(self):
         with patch.dict(
             tutor.service_settings.os.environ,

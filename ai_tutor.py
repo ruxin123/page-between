@@ -11,11 +11,12 @@ import subprocess
 import threading
 import time
 import uuid
+from functools import lru_cache
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from lxml import etree
-from paths import DATA
+from paths import DATA, ROOT
 from storage import load, save
 from book_import import text_chapter_index, position_label
 import service_settings
@@ -26,6 +27,7 @@ from pdf_enhancement import page_enrichment
 LOCK = threading.RLock()
 ACTIVE = set()
 CANCELLATIONS = {}
+HTML_VERSION = 2
 SYSTEM = """你是本书的阅读辅导助手。优先用提供的原文、附近内容与本次对话回答。
 引用选段时标注 [1]，引用附近内容时标注 [2]；不得捏造未提供的本书定理、页码或章节。
 若提供了 [3] 起的本书此前资料，优先用其中定义、定理和已建立的结论解释，并按对应编号引用。
@@ -127,7 +129,18 @@ def conversation(ident, book):
         )
         if not item:
             raise TutorError("找不到这条本书对话。")
-        return copy.deepcopy(item)
+        result = copy.deepcopy(item)
+    # Old HTML is only a display cache. Rebuild it without changing saved source text.
+    for message in result["messages"]:
+        if (
+            message.get("role") == "assistant"
+            and message.get("status") != "generating"
+            and message.get("htmlVersion") != HTML_VERSION
+            and isinstance(message.get("content"), str)
+            and message["content"]
+        ):
+            message.update(html=answer_html(message["content"]), htmlVersion=HTML_VERSION)
+    return result
 
 
 def source_for(book, source, *, resource_root=None):
@@ -255,70 +268,95 @@ def source_preview(book, payload):
         else:
             continue
         # Whole objects have paragraph boundaries in copied selections; never rewrite prose substrings.
+        duplicate_number = ""
+        tag = re.search(r"\\tag\s*\{(\d+['’′]*)\}", text) if block["type"] == "equation" else None
+        if tag:
+            number = re.escape(re.sub(r"['’′]", "'", tag[1])).replace("'", "['’′]")
+            duplicate_number = r"(?:\n\n[ \t]*\(" + number + r"\)[ \t]*(?=$|\n\n))?"
         markdown = re.sub(
-            r"(^|\n\n)" + re.escape(text) + r"(?=$|\n\n)",
+            r"(^|\n\n)" + re.escape(text) + r"(?=$|\n\n)" + duplicate_number,
             lambda match: match[1] + formatted,
             markdown,
         )
-    return answer_html(markdown)
+    return answer_html(markdown, source=True)
 
 
-def answer_html(text):
+def answer_html(text, *, source=False):
     pandoc = shutil.which("pandoc")
     if not pandoc:
         return "<p>" + html.escape(text).replace("\n", "<br>") + "</p>"
     try:
-        result = subprocess.run(
-            [
-                pandoc,
-                "-f",
-                "markdown-raw_html-raw_attribute+tex_math_dollars+tex_math_single_backslash",
-                "-t",
-                "html5",
-                "--mathml",
-            ],
-            input=text,
-            text=True,
-            capture_output=True,
-            timeout=8,
-            check=True,
-        )
-        root = etree.fromstring(
-            ("<div>" + result.stdout + "</div>").encode(),
-            etree.HTMLParser(encoding="utf-8", no_network=True),
-        )
-        allowed = set(
-            "div p br em strong code pre ul ol li blockquote h1 h2 h3 h4 hr table thead tbody tr th td span a math mrow mi mn mo mfrac msup msub msubsup msqrt mroot munder mover munderover mtable mtr mtd mtext mspace semantics annotation".split()
-        )
-        for node in list(root.iter()):
-            if not isinstance(node.tag, str):
-                node.getparent().remove(node)
-                continue
-            for name in list(node.attrib):
-                if name not in {
-                    "xmlns",
-                    "display",
-                    "mathvariant",
-                    "encoding",
-                    "rowspan",
-                    "colspan",
-                    "stretchy",
-                    "fence",
-                    "separator",
-                    "accent",
-                    "accentunder",
-                    "columnalign",
-                    "rowalign",
-                }:
-                    del node.attrib[name]
-            if node.tag not in allowed and node.tag not in {"html", "body"}:
-                node.tag = "span"
-        body = root.find("body")
-        return "".join(
-            etree.tostring(child, encoding="unicode", method="html") for child in body
-        )
+        return _answer_html(text, pandoc, source)
     except (OSError, subprocess.SubprocessError, etree.Error):
         return "<p>" + html.escape(text).replace("\n", "<br>") + "</p>"
+
+
+@lru_cache(maxsize=64)
+def _answer_html(text, pandoc, source):
+    result = subprocess.run(
+        [
+            pandoc,
+            "-f",
+            "markdown-raw_html-raw_attribute+tex_math_dollars+tex_math_single_backslash" + ("-fancy_lists" if source else ""),
+            "-t",
+            "html5",
+            "--mathml",
+            "--lua-filter=" + str(ROOT / "normalize-math.lua"),
+        ],
+        input=text,
+        text=True,
+        capture_output=True,
+        timeout=8,
+        check=True,
+    )
+    root = etree.fromstring(
+        ("<div>" + result.stdout + "</div>").encode(),
+        etree.HTMLParser(encoding="utf-8", no_network=True),
+    )
+    allowed = set(
+        "div p br em strong code pre ul ol li blockquote h1 h2 h3 h4 hr table thead tbody tr th td span a math mrow mi mn mo mfrac msup msub msubsup msqrt mroot munder mover munderover mtable mtr mtd mtext mspace mstyle mpadded mphantom menclose mmultiscripts mprescripts none merror ms semantics annotation".split()
+    )
+    for node in list(root.iter()):
+        if not isinstance(node.tag, str):
+            node.getparent().remove(node)
+            continue
+        for name in list(node.attrib):
+            if name not in {
+                "xmlns",
+                "display",
+                "mathvariant",
+                "encoding",
+                "rowspan",
+                "colspan",
+                "stretchy",
+                "fence",
+                "separator",
+                "accent",
+                "accentunder",
+                "columnalign",
+                "rowalign",
+                "width",
+                "height",
+                "depth",
+                "lspace",
+                "rspace",
+                "columnspacing",
+                "rowspacing",
+                "linethickness",
+                "scriptlevel",
+                "displaystyle",
+                "voffset",
+                "notation",
+                "start",
+                "value",
+            }:
+                del node.attrib[name]
+        if node.tag not in allowed and node.tag not in {"html", "body"}:
+            node.tag = "mrow" if any(parent.tag == "math" for parent in node.iterancestors()) else "span"
+    body = root.find("body")
+    return "".join(
+        etree.tostring(child, encoding="unicode", method="html") for child in body
+    )
 
 
 def complete(
@@ -628,7 +666,7 @@ def finish(book, prepared):
                 raise TutorError("已停止生成。")
             data = records()
             item = next(item for item in data["conversations"] if item["id"] == ident)
-            item["messages"][-1].update(content=answer, html=formatted, status="ready")
+            item["messages"][-1].update(content=answer, html=formatted, htmlVersion=HTML_VERSION, status="ready")
             if missing:
                 item["messages"][-1]["citationWarning"] = (
                     "编号 "
@@ -656,7 +694,7 @@ def finish(book, prepared):
                 error="已停止生成。" if stopped else explanation,
             )
             if partial:
-                item["messages"][-1].update(content=partial, html=answer_html(partial))
+                item["messages"][-1].update(content=partial, html=answer_html(partial), htmlVersion=HTML_VERSION)
             item["updatedAt"] = time.time() * 1000
             try:
                 save(DATA / "ai-conversations.json", data)

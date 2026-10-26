@@ -32,7 +32,7 @@ import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
 import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.33";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.34";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -115,7 +115,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.33";
+document.body.dataset.readerBuild = "2.34";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -678,7 +678,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.33",
+        build: "2.34",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),

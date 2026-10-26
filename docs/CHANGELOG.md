@@ -4,8 +4,10 @@
 
 ## 0.5.12 · 2026-10-26
 
-[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.12) · Build 235 · 前端 2.33 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.12)
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.12) · Build 236 · 前端 2.34 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.12)
 
+- 修复粗体公式显示额外 LaTeX、分段公式无法排版，以及数学文字空格挤连。
+- 保留公式编号，消除原页编号被误渲染成重复“1.”；旧对话重新生成显示缓存，复制原文保持不变。
 - 修正原生文字 PDF 的字形缩放与选区定位，减少高亮溢出、行间重叠和小型大写字母局部加深。
 - 高亮按原书字体边界合并成连续行色带，分栏之间保留空白，继续使用原生拖选和原有复制内容。
 - 改善大型 PDF 的页面显示：逐页应用护眼效果，限制画布内存，释放离屏页的图像与解码资源。

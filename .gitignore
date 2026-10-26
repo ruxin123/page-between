@@ -30,6 +30,7 @@
 !/chapter_edit.py
 !/paths.py
 !/normalize-headings.lua
+!/normalize-math.lua
 !/start.command
 !/indexing-flow.drawio
 !/indexing-flow.drawio.svg

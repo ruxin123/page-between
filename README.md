@@ -10,7 +10,7 @@ A local-first macOS reading app with native EPUB navigation, enhanced PDF select
 
 > 仓库中的书目、封面、插图、正文和截图全部使用自编的虚构演示资料。真实书籍、个人阅读记录、OCR 缓存、凭据与旧截图不在版本控制中。
 
-## macOS App 构建（0.5.9 / 前端 2.30）
+## macOS App 构建（0.5.10 / 前端 2.31）
 
 已有原生主窗口、菜单、文件面板、同进程掌上窗口与受管理的本机阅读服务。安装版的数据位于用户的 Application Support / Caches，运行时使用随包组件；下面的开发工具只在构建机器上需要。
 
@@ -26,6 +26,12 @@ python scripts/verify_app.py "$HOME/Library/Caches/Page Between/build/页间.app
 构建结果默认位于用户的 `Library/Caches/Page Between/build/`。当前在 Apple Silicon、macOS 27.0.1 验证，签名为本机构建的 ad-hoc 签名；其他系统版本和正式分发尚待验收。旧书库可使用 `python scripts/migrate_library.py data` 复制到安装版，已有目标不会覆盖，原目录保留。
 
 0.5.7 已完成本机交付与原始功能清单验收；用户已确认掌上窗口在其他 App 聚焦时可用真正的左右方向键双向翻页。普通版与匿名演示版均已安装，并提供经过重新解压、签名验证的独立安装压缩包。具体证据与适用平台见 [完整验收清单](docs/APP_READINESS.md)，此前各轮记录保留在 [QA.md](QA.md)。
+
+0.5.10 / 233 普通版与演示版已在本机升级安装，保留已有书库与配置。两版通过独立服务、模型未配置时的选段渲染及 EPUB 标准检查。
+
+2.31 修复跨行拖选经过行间空白时选区终点跳到页首的问题。扫描 PDF 的选区按每行连续色带显示，行间留白，两侧页边空白不高亮，也不显示逐字符分隔。提问选段在本机渲染 Markdown、公式 MathML 和完整表格，原图仍可查看；复制与发送给模型的原始文字 / LaTeX / TSV 保持不变。已有 OCR 结果可直接使用，无需重做识别。
+
+![本机公式选段预览，原创匿名示例](docs/screenshots/source-formula.png)
 
 0.5.9 / 232 普通版与演示版已在本机升级安装，保留已有书库与配置；两版均通过独立运行和 EPUB 标准校验。
 

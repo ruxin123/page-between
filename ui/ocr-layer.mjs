@@ -78,6 +78,7 @@ export function renderOcrLayer(root, data, viewport, language) {
     family = language?.startsWith("zh")
       ? "Songti SC, serif"
       : "Times New Roman, serif";
+  let previousBottom = 0;
   for (const [index, line] of data.lines.entries()) {
     const cells = english
       ? englishLineCells(line)
@@ -87,11 +88,11 @@ export function renderOcrLayer(root, data, viewport, language) {
     const row = english ? root.ownerDocument.createElement("div") : root;
     let previousRight = 0;
     if (english) {
-      // Inline cells retain the native anchor when a drag crosses character and word boundaries.
+      // Normal flow lets native drag selection find the next line across the scan's blank gaps.
       Object.assign(row.style, {
-        position: "absolute",
+        position: "relative",
         left: "0",
-        top: `${line.bbox[1] * viewport.height}px`,
+        marginTop: `${(line.bbox[1] - previousBottom) * viewport.height}px`,
         width: "100%",
         height: `${(line.bbox[3] - line.bbox[1]) * viewport.height}px`,
         whiteSpace: "pre",
@@ -99,6 +100,7 @@ export function renderOcrLayer(root, data, viewport, language) {
         lineHeight: "0",
       });
       root.append(row);
+      previousBottom = line.bbox[3];
     }
     for (const cell of cells) {
       if (!validBox(cell.bbox)) continue;
@@ -145,6 +147,60 @@ export function renderOcrLayer(root, data, viewport, language) {
     }
     if (english) row.append(root.ownerDocument.createTextNode("\n"));
     else root.append(root.ownerDocument.createElement("br"));
+  }
+}
+
+export function paintOcrSelection(root, selection) {
+  const range =
+    selection?.rangeCount && !selection.isCollapsed
+      ? selection.getRangeAt(0)
+      : null;
+  for (const layer of root.querySelectorAll(".textLayer[data-ocr-engine]")) {
+    const page = layer.parentElement;
+    let overlay = page.querySelector(".ocr-selection-highlights");
+    if (!overlay) {
+      overlay = layer.ownerDocument.createElement("div");
+      overlay.className = "ocr-selection-highlights";
+      overlay.setAttribute("aria-hidden", "true");
+      layer.before(overlay);
+    }
+    const bands = new Map();
+    if (range?.intersectsNode(layer)) {
+      for (const node of layer.querySelectorAll("span")) {
+        if (!node.firstChild || !range.intersectsNode(node)) continue;
+        const selected = layer.ownerDocument.createRange();
+        selected.selectNodeContents(node);
+        if (node.contains(range.startContainer))
+          selected.setStart(range.startContainer, range.startOffset);
+        if (node.contains(range.endContainer))
+          selected.setEnd(range.endContainer, range.endOffset);
+        if (selected.collapsed) continue;
+        const box = selected.getBoundingClientRect();
+        if (!box.width || !box.height) continue;
+        const key = node.dataset.ocrLine ?? node;
+        const band = bands.get(key);
+        bands.set(key, {
+          left: Math.min(band?.left ?? box.left, box.left),
+          right: Math.max(band?.right ?? box.right, box.right),
+          top: Math.min(band?.top ?? box.top, box.top),
+          bottom: Math.max(band?.bottom ?? box.bottom, box.bottom),
+        });
+      }
+    }
+    const box = page.getBoundingClientRect(),
+      scaleX = box.width / page.clientWidth,
+      scaleY = box.height / page.clientHeight;
+    const elements = [...bands.values()].map((band) => {
+      const mark = layer.ownerDocument.createElement("div");
+      Object.assign(mark.style, {
+        left: `${(band.left - box.left) / scaleX}px`,
+        top: `${(band.top - box.top) / scaleY}px`,
+        width: `${(band.right - band.left) / scaleX}px`,
+        height: `${(band.bottom - band.top) / scaleY}px`,
+      });
+      return mark;
+    });
+    overlay.replaceChildren(...elements);
   }
 }
 

@@ -224,6 +224,48 @@ class Tutor(unittest.TestCase):
         if tutor.shutil.which("pandoc"):
             self.assertTrue(root.xpath("//math"))
 
+    def test_source_preview_renders_objects_without_changing_original_text(self):
+        equation = r"\frac{x^2}{1+x}"
+        table = "x\tf(x)\n0\t0\n1\t1"
+        quote = "**原文**\n\n" + equation + "\n\n" + table
+        payload = {"quote": quote, "position": {"index": 1}}
+        before = json.dumps(payload, ensure_ascii=False)
+        book = {**self.book, "type": "pdf", "pages": 1}
+        blocks = [
+            {"type": "equation", "text": equation},
+            {"type": "table", "text": table},
+        ]
+        with patch.object(tutor, "page_enrichment", return_value=blocks), patch.object(
+            tutor, "complete", side_effect=AssertionError("Preview must stay local")
+        ):
+            result = html.fromstring(tutor.source_preview(book, payload))
+        self.assertEqual(json.dumps(payload, ensure_ascii=False), before)
+        if tutor.shutil.which("pandoc"):
+            self.assertTrue(result.xpath("//strong"))
+            self.assertTrue(result.xpath("//math//mfrac"))
+            self.assertEqual(len(result.xpath("//table//tr")), 3)
+
+    def test_source_preview_bounds_and_untrusted_markup(self):
+        for quote in (None, {}, "", "x" * 6001):
+            with self.assertRaises(tutor.TutorError):
+                tutor.source_preview(
+                    self.book, {"quote": quote, "position": {"index": 1}}
+                )
+        with self.assertRaises(tutor.TutorError):
+            tutor.source_preview(
+                self.book, {"quote": "text", "position": {"index": 0}}
+            )
+        quote = (
+            '<script>bad()</script>\n\n'
+            '![remote](https://example.invalid/p.png)\n\n$x^2$'
+        )
+        result = html.fromstring(
+            tutor.source_preview(self.book, {"quote": quote, "position": {"index": 1}})
+        )
+        self.assertFalse(
+            result.xpath("//script|//img|//*[@src or @href or @onclick or @style]")
+        )
+
     def test_configuration_hides_credentials_and_rejects_unsafe_urls(self):
         with patch.dict(
             tutor.service_settings.os.environ,

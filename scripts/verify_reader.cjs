@@ -352,7 +352,13 @@ async function shortcutPreferences(browser, failures) {
         const selected = await selectParagraph(page, epub);
         await page.locator("#ask-selection").click();
         await page.locator("#question-panel").waitFor();
-        assert.equal(await page.locator("#ai-quote").textContent(), selected);
+        await page.waitForFunction(
+          () => !document.querySelector("#ai-quote").hasAttribute("aria-busy"),
+        );
+        assert.equal(
+          (await page.locator("#ai-quote").textContent()).trim(),
+          selected,
+        );
         await page.waitForTimeout(180);
         assert.equal(
           await page.locator("#selection-toolbar").isVisible(),
@@ -533,18 +539,70 @@ async function shortcutPreferences(browser, failures) {
     );
     await pdf.evaluate(() => getSelection().removeAllRanges());
     await pdf.locator("#selection-toolbar").waitFor({ state: "hidden" });
-    for (const name of ["公式", "表格", "插图"]) {
+    const enhancement = await api("/api/enrichment?book=demo-e&page=1");
+    await pdf.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (text) => {
+            window.readerTestCopied = text;
+          },
+        },
+      });
+    });
+    for (const [name, kind] of [
+      ["公式", "equation"],
+      ["表格", "table"],
+      ["插图", "image"],
+    ]) {
       await pdf
         .locator(`.pdf-page[data-page="1"] [aria-label="选择完整${name}"]`)
         .click();
       await pdf.locator("#selection-toolbar").waitFor();
+      const original = enhancement.blocks.find(
+        (block) => block.type === kind,
+      )?.text;
+      if (kind !== "image") {
+        await pdf.locator("#copy-selection").click();
+        assert.equal(
+          await pdf.evaluate(() => window.readerTestCopied),
+          original,
+          "Original selection copy keeps raw LaTeX / TSV",
+        );
+      }
+      await pdf.locator("#ask-selection").click();
+      await pdf.locator("#question-panel").waitFor();
+      await pdf.waitForFunction(
+        () => !document.querySelector("#ai-quote").hasAttribute("aria-busy"),
+      );
+      if (kind === "equation")
+        assert.ok(
+          await pdf.locator("#ai-quote math").count(),
+          "Formula quote is rendered as MathML",
+        );
+      if (kind === "table")
+        assert.equal(
+          await pdf.locator("#ai-quote table tr").count(),
+          original.split("\n").length,
+          "Table quote renders its complete rows",
+        );
+      assert.equal(await pdf.locator("#question-image").isVisible(), true);
+      if (kind !== "image") {
+        await pdf.locator("#copy-question").click();
+        assert.ok(
+          (await pdf.evaluate(() => window.readerTestCopied)).endsWith(
+            "\n\n" + original,
+          ),
+          "Rendered quote still copies its original source",
+        );
+      }
       await pdf.keyboard.press("Escape");
       await pdf.locator("#selection-toolbar").waitFor({ state: "hidden" });
     }
     await pdf.close();
     console.log(
       engine,
-      "PDF glyph selection, whole objects and toolbar cleanup passed",
+      "PDF selection, rendered source objects, original copy and toolbar cleanup passed",
     );
     const page = await browser.newPage({
       viewport: { width: 1280, height: 900 },

@@ -1355,6 +1355,22 @@ body[data-theme="blue"] .pdf-paper.tinted {
   background: var(--selection);
   color: transparent;
 }
+.textLayer[data-ocr-engine]::selection,
+.textLayer[data-ocr-engine] ::selection {
+  background: transparent;
+  color: transparent;
+}
+.ocr-selection-highlights {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+}
+.ocr-selection-highlights > div {
+  position: absolute;
+  background: var(--selection);
+  border-radius: 2px;
+}
 .textLayer .endOfContent {
   display: block;
   position: absolute;
@@ -1745,7 +1761,7 @@ body[data-theme="blue"] .pdf-paper.tinted {
   background: var(--paper);
   border-left: 2px solid var(--accent);
   padding: 12px;
-  max-height: 160px;
+  max-height: 240px;
   overflow: auto;
   margin: 16px 0;
 }
@@ -3228,7 +3244,14 @@ body[data-mode="palm"] .question-panel textarea {
 }
 #ai-quote {
   margin: 12px 0 0;
-  white-space: pre-wrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#ai-quote > :first-child {
+  margin-top: 0;
+}
+#ai-quote > :last-child {
+  margin-bottom: 0;
 }
 
 .cloud-dialog {

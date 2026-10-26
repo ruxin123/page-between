@@ -225,6 +225,44 @@ def verify(app, epubcheck=None, samples=()):
                 == 409
             )
 
+            # Source formatting uses bundled Pandoc before any model is configured.
+            objects = json.loads(request("/api/enrichment?book=demo-e&page=1")[2])[
+                "blocks"
+            ]
+            for kind in ("equation", "table"):
+                original = next(
+                    block["text"] for block in objects if block["type"] == kind
+                )
+                preview = json.loads(
+                    request(
+                        "/api/ai/preview",
+                        json.dumps(
+                            {
+                                "book": "demo-e",
+                                "quote": original,
+                                "position": {"index": 1},
+                            }
+                        ).encode(),
+                        content_type="application/json",
+                    )[2]
+                )["html"]
+                assert ("<math" if kind == "equation" else "<table") in preview
+            assert (
+                request(
+                    "/api/ai/preview",
+                    json.dumps(
+                        {
+                            "book": "demo-e",
+                            "quote": "x" * 6001,
+                            "position": {"index": 1},
+                        }
+                    ).encode(),
+                    content_type="application/json",
+                    expected_status=400,
+                )[0]
+                == 400
+            )
+
             received = []
 
             class ImageProvider(BaseHTTPRequestHandler):

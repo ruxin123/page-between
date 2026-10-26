@@ -24,7 +24,7 @@ const normalize = (text) => text.replace(/\s+/g, " ").trim();
     );
     await page.goto(base + "/ocr-selection-check.html");
     const lines = await page.evaluate(async () => {
-      const { renderOcrLayer, ocrTextUnits } = await import(
+      const { renderOcrLayer, ocrTextUnits, paintOcrSelection } = await import(
         "/ui/ocr-layer.mjs"
       );
       const { canonicalSelection } = await import("/ui/pdf-selection.mjs");
@@ -85,6 +85,9 @@ const normalize = (text) => text.replace(/\s+/g, " ").trim();
           : "";
       window.fixtureTextUnits = () =>
         ocrTextUnits(document.querySelector("#ocr"));
+      document.addEventListener("selectionchange", () =>
+        paintOcrSelection(document.querySelector("#fixture"), getSelection()),
+      );
       return rows;
     });
     for (const zoom of [0.75, 1, 1.35]) {
@@ -155,6 +158,129 @@ const normalize = (text) => text.replace(/\s+/g, " ").trim();
         }
       }
     }
+    let multilineCases = 0;
+    const caret = () =>
+      page.evaluate(() => {
+        const selection = getSelection(),
+          range = document.createRange();
+        range.setStart(document.querySelector("#ocr"), 0);
+        range.setEnd(selection.anchorNode, selection.anchorOffset);
+        const anchor = range.toString().length;
+        range.setEnd(selection.focusNode, selection.focusOffset);
+        return { anchor, focus: range.toString().length };
+      });
+    for (const zoom of [0.75, 1.35]) {
+      await page.locator("#fixture").evaluate((node, value) => {
+        node.style.transform = `scale(${value})`;
+      }, zoom);
+      const rectangle = await page.locator("#fixture").boundingBox();
+      for (const [first, last] of [
+        [0, 2],
+        [2, 0],
+        [1, 2],
+      ]) {
+        for (const gutter of [null, 5, 745]) {
+          await page.mouse.click(10, 10);
+          const point = (row, index, fraction) => [
+            rectangle.x +
+              (lines[row].positions[index][0] +
+                (lines[row].positions[index][1] -
+                  lines[row].positions[index][0]) *
+                  fraction) *
+                zoom,
+            rectangle.y + (lines[row].top + 11) * zoom,
+          ];
+          const start = point(first, 7, 0.15),
+            end = point(last, 20, 0.85);
+          await page.mouse.move(...start);
+          await page.mouse.down();
+          await page.evaluate(() => new Promise(requestAnimationFrame));
+          const initial = await caret();
+          const move = async (x, y) => {
+            await page.mouse.move(x, y);
+            await page.evaluate(() => new Promise(requestAnimationFrame));
+            const current = await caret();
+            assert.equal(
+              current.anchor,
+              initial.anchor,
+              "Cross-line drag retains its native anchor",
+            );
+            if (last > first && y > start[1] + 22 * zoom)
+              assert.ok(
+                current.focus >= initial.anchor,
+                "The inter-line gap must not reverse selection toward page start",
+              );
+            if (last < first && y < start[1] - 22 * zoom)
+              assert.ok(
+                current.focus <= initial.anchor,
+                "An upward drag must not jump toward page end",
+              );
+          };
+          if (gutter !== null)
+            await move(
+              rectangle.x + gutter * zoom,
+              start[1] + Math.sign(last - first) * 28 * zoom,
+            );
+          for (let step = 1; step <= 12; step++)
+            await move(
+              start[0] + ((end[0] - start[0]) * step) / 12,
+              start[1] + ((end[1] - start[1]) * step) / 12,
+            );
+          await page.mouse.up();
+          await page.evaluate(() => new Promise(requestAnimationFrame));
+          const final = await caret(),
+            allText = lines.map((line) => line.text).join("\n");
+          assert.equal(
+            final.focus,
+            lines
+              .slice(0, last)
+              .reduce((sum, line) => sum + line.text.length + 1, 0) + 21,
+          );
+          assert.equal(
+            normalize(await page.evaluate(() => window.copyFixtureSelection())),
+            normalize(
+              allText.slice(
+                Math.min(initial.anchor, final.focus),
+                Math.max(initial.anchor, final.focus),
+              ),
+            ),
+          );
+          const bands = await page
+            .locator(".ocr-selection-highlights > div")
+            .evaluateAll((nodes) =>
+              nodes.map((node) => {
+                const rect = node.getBoundingClientRect();
+                return { left: rect.left, right: rect.right };
+              }),
+            );
+          assert.equal(
+            bands.length,
+            Math.abs(last - first) + 1,
+            "Highlight is one continuous band per selected line",
+          );
+          assert.ok(
+            bands.every(
+              (band) =>
+                band.left >= rectangle.x + 39 * zoom &&
+                band.right <=
+                  rectangle.x +
+                    Math.max(...lines.map((line) => line.positions.at(-1)[1])) *
+                      zoom +
+                    1,
+            ),
+            "Page gutters are never highlighted",
+          );
+          multilineCases++;
+        }
+      }
+    }
+    await page.mouse.click(10, 10);
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    assert.equal(
+      await page.locator(".ocr-selection-highlights > div").count(),
+      0,
+      "Clearing selection also clears the continuous bands",
+    );
     assert.equal(
       normalize(await page.evaluate(() => window.fixtureTextUnits().join(""))),
       normalize(lines.map((line) => line.text).join("\n")),
@@ -250,6 +376,9 @@ const normalize = (text) => text.replace(/\s+/g, " ").trim();
         forwardAndReverse: true,
         cases,
         preciseSelection: true,
+        multilineCases,
+        interLineAnchorStable: true,
+        continuousBandsWithoutGutters: true,
         copiedBoundaries: true,
         questionContext: true,
         mixedCanonicalText: true,

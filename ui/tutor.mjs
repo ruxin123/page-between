@@ -75,7 +75,9 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     revision = 0,
     historyMode = false,
     supportsImages = false,
-    pollTimer;
+    pollTimer,
+    quoteKey,
+    quoteRevision = 0;
   const url = (id) =>
     "/api/ai/conversations?book=" +
     encodeURIComponent(book) +
@@ -91,7 +93,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     $("question-source").textContent = original
       ? "[1] " + original.citation + " · 返回原文"
       : "";
-    $("ai-quote").textContent = original?.quote || "";
+    showQuote(original);
     $("ai-quote").hidden =
       !!original?.image && /^\[完整图(?:像|表)\]$/.test(original.quote || "");
     $("question-source").disabled = !original;
@@ -129,6 +131,32 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
       !$("question-panel").hidden
     )
       pollAnswer();
+  }
+  async function showQuote(original) {
+    const key = JSON.stringify([book, original?.quote, original?.position]);
+    if (key === quoteKey) return;
+    quoteKey = key;
+    const version = ++quoteRevision,
+      quote = original?.quote || "",
+      element = $("ai-quote");
+    element.textContent = quote ? "正在整理选段…" : "";
+    if (!quote) {
+      element.removeAttribute("aria-busy");
+      return;
+    }
+    element.setAttribute("aria-busy", "true");
+    try {
+      const data = await post("/api/ai/preview", {
+        book,
+        quote,
+        position: original.position,
+      });
+      if (version === quoteRevision) element.innerHTML = data.html;
+    } catch {
+      if (version === quoteRevision) element.textContent = quote;
+    } finally {
+      if (version === quoteRevision) element.removeAttribute("aria-busy");
+    }
   }
   function imageControls() {
     const original = active?.source || source;

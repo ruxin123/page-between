@@ -884,6 +884,13 @@ class Handler(SimpleHTTPRequestHandler):
                         "verified": False,
                     }
                 )
+            if route.path == "/api/ai/preview":
+                if not isinstance(payload, dict):
+                    raise ValueError("选段内容无效。")
+                book = book_for(payload.get("book"))
+                if not book:
+                    raise ValueError("找不到这本书。")
+                return self.json({"html": ai_tutor.source_preview(book, payload)})
             if route.path == "/api/ai/cancel":
                 book = book_for(payload.get("book"))
                 if not book:

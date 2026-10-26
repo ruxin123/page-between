@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.30" />
+    <link rel="stylesheet" href="/layout.css?v=2.31" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -571,7 +571,7 @@
               class="ai-source-link"
               title="返回原文位置"
             ></button>
-            <p id="ai-quote"></p>
+            <div id="ai-quote" class="ai-answer"></div>
           </div>
           <img id="question-image" alt="选中的原书完整图表" hidden />
           <div id="ai-messages" class="ai-messages" aria-live="polite"></div>
@@ -936,6 +936,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/app-v2.mjs?v=2.30"></script>
+    <script type="module" src="/app-v2.mjs?v=2.31"></script>
   </body>
 </html>

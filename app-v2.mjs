@@ -14,7 +14,11 @@ import { createTutor } from "/ui/tutor.mjs";
 import { createServiceSettings } from "/ui/settings.mjs";
 import { createDocumentParsing, formatPages } from "/ui/mineru.mjs";
 import { copyPng } from "/ui/clipboard.mjs";
-import { renderOcrLayer, ocrTextUnits } from "/ui/ocr-layer.mjs";
+import {
+  renderOcrLayer,
+  ocrTextUnits,
+  paintOcrSelection,
+} from "/ui/ocr-layer.mjs";
 import {
   alignTextLayer,
   canonicalSelection,
@@ -26,7 +30,7 @@ import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
 import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.30";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.31";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -109,7 +113,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.30";
+document.body.dataset.readerBuild = "2.31";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -672,7 +676,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.30",
+        build: "2.31",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -980,6 +984,7 @@ function clearSelection() {
 }
 function watchSelection(doc) {
   let dragging = false,
+    highlightFrame,
     timer;
   const schedule = (event) => {
     if (
@@ -1012,6 +1017,11 @@ function watchSelection(doc) {
   });
   doc.addEventListener("selectionchange", () => {
     const selection = doc.getSelection();
+    if (doc === document && !highlightFrame)
+      highlightFrame = requestAnimationFrame(() => {
+        highlightFrame = null;
+        paintOcrSelection($("pdf-paper"), doc.getSelection());
+      });
     if (
       (!selection?.rangeCount || selection.isCollapsed) &&
       currentSelection?.document === doc

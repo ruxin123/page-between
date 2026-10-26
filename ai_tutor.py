@@ -21,6 +21,7 @@ from book_import import text_chapter_index, position_label
 import service_settings
 import book_index
 import book_images
+from pdf_enhancement import page_enrichment
 
 LOCK = threading.RLock()
 ACTIVE = set()
@@ -209,6 +210,57 @@ def source_for(book, source, *, resource_root=None):
         except (ValueError, OSError) as error:
             raise TutorError(str(error)) from None
     return result
+
+
+def source_preview(book, payload):
+    quote = payload.get("quote")
+    if not isinstance(quote, str) or not quote.strip() or len(quote) > 6000:
+        raise TutorError("选段内容无效或过长。")
+    source = source_for(book, {"quote": quote, "position": payload.get("position")})
+    blocks = (
+        page_enrichment(book, source["position"]["index"])
+        if book["type"] == "pdf"
+        else []
+    )
+    markdown = quote
+    for block in sorted(
+        blocks, key=lambda item: len(item.get("text", "")), reverse=True
+    ):
+        text = block.get("text", "")
+        if not text or block.get("type") not in {"equation", "table"}:
+            continue
+        if block["type"] == "equation":
+            stripped = text.strip()
+            formatted = (
+                text
+                if (stripped.startswith("$") and stripped.endswith("$"))
+                or (stripped.startswith(r"\[") and stripped.endswith(r"\]"))
+                or (stripped.startswith(r"\(") and stripped.endswith(r"\)"))
+                else "$$\n" + text + "\n$$"
+            )
+        elif "\t" in text:
+            rows = [line.split("\t") for line in text.splitlines()]
+            columns = max(map(len, rows))
+            lines = [
+                "| "
+                + " | ".join(
+                    cell.replace("|", r"\|")
+                    for cell in row + [""] * (columns - len(row))
+                )
+                + " |"
+                for row in rows
+            ]
+            lines.insert(1, "| " + " | ".join(["---"] * columns) + " |")
+            formatted = "\n".join(lines)
+        else:
+            continue
+        # Whole objects have paragraph boundaries in copied selections; never rewrite prose substrings.
+        markdown = re.sub(
+            r"(^|\n\n)" + re.escape(text) + r"(?=$|\n\n)",
+            lambda match: match[1] + formatted,
+            markdown,
+        )
+    return answer_html(markdown)
 
 
 def answer_html(text):

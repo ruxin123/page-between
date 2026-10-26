@@ -40,10 +40,15 @@ export function createBookSearch({ post, toast, getContext, openSource }) {
   const $ = (id) => document.getElementById(id);
   let revision = 0,
     results = [],
+    resultBook,
+    resultRevision,
     context;
   async function search() {
     if (!context) return;
     const version = ++revision;
+    results = [];
+    resultBook = null;
+    $("knowledge-results").replaceChildren();
     $("knowledge-results").setAttribute("aria-busy", "true");
     $("knowledge-status").textContent = "正在准备本书索引…";
     try {
@@ -55,6 +60,8 @@ export function createBookSearch({ post, toast, getContext, openSource }) {
       });
       if (version !== revision) return;
       results = data.results;
+      resultBook = context.book;
+      resultRevision = version;
       const { covered, total, unit, partial } = data.status;
       $("knowledge-status").textContent =
         `可检索 ${covered} / ${total} ${unit}${partial ? (context.type === "pdf" ? " · 尚无文字的扫描页可通过精细解析补充" : " · 无文字的封面和图像页不参与检索") : " · 索引保存在本机"}`;
@@ -102,10 +109,12 @@ export function createBookSearch({ post, toast, getContext, openSource }) {
     }
     const jump = event.target.closest("[data-knowledge-jump]");
     if (jump) {
+      if (resultRevision !== revision || resultBook !== getContext()?.book)
+        return;
       const source = results[Number(jump.dataset.knowledgeJump)];
       if (!source) return;
       $("knowledge-dialog").close();
-      openSource(context.book, source.position);
+      openSource(resultBook, source.position);
       toast("已前往来源，可用返回按钮回到刚才的位置。");
     }
   };

@@ -420,6 +420,18 @@ async function shortcutPreferences(browser, failures) {
     }
     await shortcutPreferences(browser, failures);
     await backgroundPositionSync(browser, failures);
+    await api("/api/state", {
+      prefs: { textMode: "pages" },
+      positions: {
+        "demo-b": {
+          index: 2,
+          page: 0,
+          top: 0,
+          anchor: null,
+          updatedAt: Date.now(),
+        },
+      },
+    });
     const interrupted = await browser.newPage({
       viewport: { width: 1280, height: 900 },
       reducedMotion: "no-preference",
@@ -433,6 +445,12 @@ async function shortcutPreferences(browser, failures) {
     await interrupted.locator("#page-label").click();
     await interrupted.locator("#page-jump-input").fill(last);
     await interrupted.locator("#page-jump-input").press("Enter");
+    await interrupted.waitForFunction(
+      () =>
+        !document.querySelector("#page-dialog").open &&
+        Number(document.querySelector("#text-host").dataset.page) ===
+          Number(document.querySelector("#text-host").dataset.pages),
+    );
     await interrupted.evaluate(() => {
       const view = document.querySelector("#reading-viewport"),
         animate = view.animate;

@@ -32,7 +32,7 @@ import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
 import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.34";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.35";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -115,7 +115,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.34";
+document.body.dataset.readerBuild = "2.35";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -678,7 +678,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.34",
+        build: "2.35",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -872,6 +872,28 @@ function samePlace(a, b) {
     Math.abs((a.anchor.charOffset || 0) - (b.anchor.charOffset || 0)) < 20
   );
 }
+const bookmarkWrites = new Set();
+function updateBookmarkBusy() {
+  const busy = bookmarkWrites.has(current?.id);
+  $("bookmark-button").disabled = !readerReady || busy;
+  $("bookmark-button").setAttribute("aria-busy", String(busy));
+  for (const button of $("bookmarks-list").querySelectorAll(
+    "[data-remove-mark]",
+  ))
+    button.disabled = busy;
+}
+async function writeBookmarks(book, action) {
+  if (bookmarkWrites.has(book)) throw new Error("正在保存书签，请稍候。");
+  bookmarkWrites.add(book);
+  updateBookmarkBusy();
+  try {
+    await action();
+  } finally {
+    bookmarkWrites.delete(book);
+    renderBookmarks();
+    updateBookmarkBusy();
+  }
+}
 function renderBookmarks() {
   if (!current) return;
   const marks = bookmarks.filter((mark) => mark.book === current.id);
@@ -887,9 +909,10 @@ function renderBookmarks() {
     "aria-pressed",
     String(marks.some((mark) => samePlace(mark.position, position))),
   );
+  updateBookmarkBusy();
 }
 async function toggleBookmark() {
-  if (!readerReady) return;
+  if (!readerReady || bookmarkWrites.has(current?.id)) return;
   const position = makePosition();
   const mark = bookmarks.find(
     (mark) => mark.book === current.id && samePlace(mark.position, position),
@@ -910,9 +933,10 @@ async function toggleBookmark() {
             : `${Math.round(position.progress * 100)}%`,
     };
     try {
-      await postState({ bookmarkChanges: { add: [added] } });
-      if (!bookmarks.some((item) => item.id === added.id))
-        bookmarks.push(added);
+      await writeBookmarks(added.book, async () => {
+        const response = await postState({ bookmarkChanges: { add: [added] } });
+        bookmarks = response.bookmarks;
+      });
       toast("已为这里留下书签。", { kind: "success" });
     } catch (error) {
       toast(error.message, { kind: "error" });
@@ -922,16 +946,20 @@ async function toggleBookmark() {
 }
 async function removeBookmark(id) {
   const mark = bookmarks.find((item) => item.id === id);
-  if (!mark) return;
+  if (!mark || bookmarkWrites.has(mark.book)) return;
   try {
-    await postState({ bookmarkChanges: { remove: [id] } });
-    bookmarks = bookmarks.filter((item) => item.id !== id);
-    renderBookmarks();
+    await writeBookmarks(mark.book, async () => {
+      const response = await postState({ bookmarkChanges: { remove: [id] } });
+      bookmarks = response.bookmarks;
+    });
     toast("书签已移除。", {
       undo: async () => {
-        await postState({ bookmarkChanges: { add: [mark] } });
-        if (!bookmarks.some((item) => item.id === id)) bookmarks.push(mark);
-        renderBookmarks();
+        await writeBookmarks(mark.book, async () => {
+          const response = await postState({
+            bookmarkChanges: { add: [mark] },
+          });
+          bookmarks = response.bookmarks;
+        });
       },
     });
   } catch (error) {
@@ -1493,6 +1521,7 @@ let pdfDocument,
   pdfRenderQueue = Promise.resolve();
 const pdfTasks = new Map();
 const pdfQueued = new Set();
+const pdfPageRatios = new WeakMap();
 function releasePdfPage(root) {
   root.querySelectorAll("canvas").forEach((canvas) => {
     canvas.width = 0;
@@ -1655,11 +1684,33 @@ async function paintPdfPage(index, revision) {
     if (active()) root.setAttribute("aria-busy", "false");
   }
 }
+function wantedPdfPages() {
+  const index = location.index;
+  const wanted = new Set([index, index - 1, index + 1]);
+  if (prefs.pdfMode === "scroll") {
+    const view = $("reading-viewport"),
+      end = view.scrollTop + view.clientHeight;
+    for (let page = index - 1; page >= 1; page--) {
+      const root = pdfPageElement(page);
+      if (!root || pdfPageTop(page) + root.offsetHeight <= view.scrollTop)
+        break;
+      wanted.add(page);
+    }
+    for (
+      let page = index;
+      page <= current.pages && pdfPageTop(page) < end;
+      page++
+    )
+      wanted.add(page);
+  }
+  return wanted;
+}
 function ensurePdfPages() {
   if (!pdfDocument || pdfRevision !== renderRevision) return;
   const revision = renderRevision,
     index = location.index;
-  for (const page of [index, index + 1, index - 1])
+  const wanted = wantedPdfPages();
+  for (const page of wanted)
     if (page >= 1 && page <= current.pages) {
       const root = pdfPageElement(page);
       const canvas = root?.querySelector("canvas");
@@ -1682,10 +1733,7 @@ function ensurePdfPages() {
           .then(() => {
             pdfQueued.delete(root);
             // Skip obsolete prefetches after a fast scroll or chapter jump.
-            if (
-              revision === renderRevision &&
-              Math.abs(page - location.index) <= 1
-            )
+            if (revision === renderRevision && wantedPdfPages().has(page))
               return paintPdfPage(page, revision);
           })
           .then(() => {
@@ -1713,7 +1761,7 @@ function ensurePdfPages() {
   warmPdfPages();
   for (const element of $("pdf-paper").children) {
     if (
-      Math.abs(Number(element.dataset.page) - index) > 1 &&
+      !wanted.has(Number(element.dataset.page)) &&
       ["ready", "lost"].includes(element.dataset.rendered) &&
       !getSelection()?.containsNode(element, true)
     ) {
@@ -1721,10 +1769,7 @@ function ensurePdfPages() {
     }
   }
 }
-function updatePdfScroll() {
-  if (!pdfDocument || prefs.pdfMode !== "scroll") return;
-  const view = $("reading-viewport"),
-    at = view.scrollTop + Math.min(160, view.clientHeight * 0.25);
+function pdfPageAt(at) {
   let lo = 1,
     hi = current.pages;
   while (lo < hi) {
@@ -1732,6 +1777,19 @@ function updatePdfScroll() {
     if (pdfPageTop(mid) <= at) lo = mid;
     else hi = mid - 1;
   }
+  return lo;
+}
+function updatePdfScroll() {
+  if (!pdfDocument || prefs.pdfMode !== "scroll") return;
+  const view = $("reading-viewport");
+  const first = pdfPageAt(view.scrollTop);
+  // The progress probe must fit inside short pages instead of skipping them.
+  const probe = Math.min(
+    160,
+    view.clientHeight * 0.25,
+    (pdfPageElement(first)?.offsetHeight || 1) * 0.25,
+  );
+  const lo = pdfPageAt(view.scrollTop + probe);
   if (lo !== location.index) {
     location.index = lo;
     $("ocr-status").hidden = true;
@@ -1769,6 +1827,33 @@ async function renderPdf(position, revision) {
   if (revision !== renderRevision) return;
   const page = await pdf.getPage(position.index);
   if (revision !== renderRevision) return;
+  if (!pdfPageRatios.has(pdf)) {
+    // Read geometry without rendering: estimated heights move mixed-size jump targets.
+    const dimensions = (async () => {
+      const ratios = [];
+      for (let start = 1; start <= pdf.numPages; start += 32) {
+        const batch = await Promise.all(
+          Array.from(
+            { length: Math.min(32, pdf.numPages - start + 1) },
+            async (_, offset) => {
+              try {
+                const entry = await pdf.getPage(start + offset);
+                const size = entry.getViewport({ scale: 1 });
+                return size.height / size.width;
+              } catch {
+                return null; // A damaged page retains its own retry path.
+              }
+            },
+          ),
+        );
+        ratios.push(...batch);
+      }
+      return ratios;
+    })();
+    pdfPageRatios.set(pdf, dimensions);
+  }
+  const ratios = await pdfPageRatios.get(pdf);
+  if (revision !== renderRevision) return;
   pdfDocument = pdf;
   pdfRevision = revision;
   pdfWidth =
@@ -1788,6 +1873,10 @@ async function renderPdf(position, revision) {
   stack.style.height = "auto";
   stack.dataset.book = book.id;
   stack.classList.toggle("continuous", prefs.pdfMode === "scroll");
+  stack.style.paddingBottom =
+    prefs.pdfMode === "scroll"
+      ? `${Math.max(0, $("reading-viewport").clientHeight - pdfWidth * (ratios.at(-1) || viewport.height / viewport.width))}px`
+      : "0px";
   const indices =
     prefs.pdfMode === "scroll"
       ? Array.from({ length: book.pages }, (_, index) => index + 1)
@@ -1797,7 +1886,7 @@ async function renderPdf(position, revision) {
     root.className = "pdf-page";
     root.setAttribute("aria-hidden", "true");
     root.dataset.page = index;
-    root.style.height = `${viewport.height}px`;
+    root.style.height = `${pdfWidth * (ratios[index - 1] || viewport.height / viewport.width)}px`;
     root.style.width = `${pdfWidth}px`;
     stack.append(root);
   }
@@ -2390,7 +2479,7 @@ async function renderCurrent(position) {
   } finally {
     if (revision === renderRevision) {
       $("reading-viewport").setAttribute("aria-busy", "false");
-      $("bookmark-button").disabled = !readerReady;
+      updateBookmarkBusy();
       $("ai-open").disabled = !readerReady;
       $("knowledge-open").disabled = !readerReady;
     }
@@ -2628,16 +2717,49 @@ async function openPalm(id) {
     toast(error.message, { kind: "error" });
   }
 }
+let importBusy = false,
+  importRetry = false,
+  importComplete = false;
+function updateImportControls() {
+  $("import-submit").disabled =
+    importBusy || importComplete || !importFiles.length;
+  $("file-input").disabled = importBusy;
+  $("import-files").inert = importBusy;
+  $("drop-zone").setAttribute("aria-disabled", String(importBusy));
+  $("import-submit").textContent = importBusy
+    ? "正在导入…"
+    : importComplete
+      ? "本轮导入结束"
+      : importRetry
+        ? `重试 ${importFiles.length} 个失败文件`
+        : importFiles.length
+          ? `导入 ${importFiles.length} 本书`
+          : "导入书籍";
+}
 function openImport() {
   $("jobs-dialog").close();
+  if (importBusy) {
+    $("import-dialog").showModal();
+    return;
+  }
   importFiles = [];
+  importRetry = false;
+  importComplete = false;
   $("import-files").innerHTML = "";
   $("import-result").textContent = "";
   $("import-submit").disabled = true;
   $("import-count").textContent = "文件保存在本机";
+  updateImportControls();
   $("import-dialog").showModal();
 }
 function addFiles(files) {
+  if (importBusy) return toast("本轮正在导入，请完成后再添加文件。");
+  importRetry = false;
+  if (importComplete) {
+    importFiles = [];
+    importComplete = false;
+    $("import-result").textContent = "";
+  }
   for (const file of files) {
     const extension = "." + file.name.split(".").at(-1).toLowerCase();
     if (!formatInfo.some((info) => info.extension === extension)) {
@@ -2660,45 +2782,58 @@ function renderImportFiles() {
         `<div class="import-file"><div class="import-file-name"><strong>${escapeHTML(item.file.name)}</strong><small>${(item.file.size / 1024 / 1024).toFixed(1)} MB</small><select aria-label="${escapeHTML(item.file.name)}的书籍类别" data-file-shelf="${index}"><option ${item.shelf === "小说" ? "selected" : ""}>小说</option><option ${item.shelf === "学习" ? "selected" : ""}>学习</option></select></div><label class="parse-toggle"><span>文档解析<small>${item.file.name.toLowerCase().endsWith(".pdf") ? "补充扫描文字选择与原书目录" : item.file.name.toLowerCase().endsWith(".txt") ? "识别章节标题，建立导航" : "原书目录、插图和脚注直接保留；按需补充结构索引"}</small></span><input type="checkbox" data-file-parse="${index}" ${item.parse ? "checked" : ""}></label></div>`,
     )
     .join("");
-  $("import-submit").disabled = !importFiles.length;
-  $("import-submit").textContent = importFiles.length
-    ? `导入 ${importFiles.length} 本书`
-    : "导入书籍";
+  updateImportControls();
   $("import-count").textContent = importFiles.length
     ? `${importFiles.length} 个文件`
     : "文件保存在本机";
 }
 async function submitImport() {
-  if (!importFiles.length) return;
-  $("import-submit").disabled = true;
-  const results = [];
-  for (const [index, item] of importFiles.entries()) {
-    try {
-      $("import-result").textContent =
-        `正在导入 ${index + 1} / ${importFiles.length}：${item.file.name}`;
-      const parameters = new URLSearchParams({
-        name: item.file.name,
-        parse: item.parse ? "1" : "0",
-        shelf: item.shelf,
-      });
-      const response = await api("/api/import?" + parameters, {
-        method: "POST",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: item.file,
-      });
-      results.push(
-        `${response.duplicate ? "已在书库中" : "已导入"}：${response.book.title}`,
-      );
-    } catch (error) {
-      results.push(`${item.file.name}：${error.message}`);
+  if (importBusy || importComplete || !importFiles.length) return;
+  const batch = importFiles.map((item) => ({ ...item }));
+  importBusy = true;
+  updateImportControls();
+  const results = [],
+    failed = [];
+  try {
+    for (const [index, item] of batch.entries()) {
+      try {
+        $("import-result").textContent =
+          `正在导入 ${index + 1} / ${batch.length}：${item.file.name}`;
+        const parameters = new URLSearchParams({
+          name: item.file.name,
+          parse: item.parse ? "1" : "0",
+          shelf: item.shelf,
+        });
+        const response = await api("/api/import?" + parameters, {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: item.file,
+        });
+        results.push(
+          `${response.duplicate ? "已在书库中" : "已导入"}：${response.book.title}`,
+        );
+      } catch (error) {
+        failed.push(item);
+        results.push(`${item.file.name}：${error.message}`);
+      }
     }
+    $("import-result").textContent = results.join("\n");
+    importComplete = failed.length === 0;
+    importRetry = !importComplete;
+    if (importRetry) importFiles = failed;
+    renderImportFiles();
+    await refreshLibrary();
+    renderLibrary();
+  } catch (error) {
+    $("import-result").textContent =
+      results.join("\n") + "\n书库刷新未完成：" + error.message;
+  } finally {
+    importBusy = false;
+    updateImportControls();
   }
-  $("import-result").textContent = results.join("\n");
-  $("import-submit").textContent = "本轮导入结束";
-  await refreshLibrary();
-  renderLibrary();
 }
 function openBookOptions(id) {
+  if (bookSaving) return toast("正在保存书籍设置，请稍候。");
   editingBook = books.find((book) => book.id === id);
   if (!editingBook) return;
   const book = editingBook;
@@ -2709,28 +2844,41 @@ function openBookOptions(id) {
   $("book-chapters").hidden = book.type !== "txt";
   $("book-dialog").showModal();
 }
+let bookSaving = false;
 async function saveBookOptions(forCloud = false) {
+  if (bookSaving || !editingBook) return false;
+  const source = editingBook;
   const patch = {
-    title: $("book-name").value.trim() || editingBook.title,
+    title: $("book-name").value.trim() || source.title,
     shelf: $("book-shelf").value,
   };
   if (!forCloud) patch.parseEnabled = $("book-parse").checked;
   if ($("book-offset")?.value !== " " && $("book-offset")?.value)
     patch.pageOffset = Number($("book-offset").value);
+  bookSaving = true;
+  $("book-form").inert = true;
+  $("book-save").disabled = $("book-cloud").disabled = true;
   try {
     await savePosition(true);
-    await post("/api/books/" + editingBook.id, patch);
-    $("book-dialog").close();
+    await post("/api/books/" + source.id, patch);
+    if (editingBook === source) $("book-dialog").close();
+    const resume =
+      current?.id === source.id && readerReady ? makePosition() : null;
     await refreshLibrary();
-    if (route === "reader" && current?.id === editingBook.id) {
-      location = initialLocation(current);
+    if (route === "reader" && current?.id === source.id) {
+      location = resume || initialLocation(current);
       renderCurrent(location);
     } else renderLibrary();
     toast("书籍设置已保存。");
     return true;
   } catch (error) {
-    $("book-save-note").textContent = error.message;
+    if (editingBook === source) $("book-save-note").textContent = error.message;
+    if (!$("book-dialog").open) toast("书籍设置保存失败：" + error.message);
     return false;
+  } finally {
+    bookSaving = false;
+    $("book-form").inert = false;
+    $("book-save").disabled = $("book-cloud").disabled = false;
   }
 }
 
@@ -3009,10 +3157,10 @@ document.addEventListener("change", (event) => {
           ? event.target.value
           : Number(event.target.value),
     );
-  if (event.target.dataset.fileParse !== undefined)
+  if (!importBusy && event.target.dataset.fileParse !== undefined)
     importFiles[Number(event.target.dataset.fileParse)].parse =
       event.target.checked;
-  if (event.target.dataset.fileShelf !== undefined)
+  if (!importBusy && event.target.dataset.fileShelf !== undefined)
     importFiles[Number(event.target.dataset.fileShelf)].shelf =
       event.target.value;
 });

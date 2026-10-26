@@ -403,6 +403,25 @@ class SharedState(unittest.TestCase):
                     http.server_close()
                     worker.join()
 
+    def test_bookmark_location_boundaries(self):
+        types = {"t": "txt", "e": "epub", "p": "pdf"}
+
+        def same(book, a, b):
+            return server.same_bookmark_place(
+                {"book": book, "position": a}, {"book": book, "position": b}, types
+            )
+
+        text = {"index": 1, "sourceOffset": 100}
+        self.assertTrue(same("t", text, {**text, "sourceOffset": 119}))
+        self.assertFalse(same("t", text, {**text, "sourceOffset": 120}))
+        self.assertFalse(same("t", text, {**text, "resource": "note"}))
+        epub = {"index": 2, "anchor": {"sourceNode": 3, "charOffset": 40}}
+        self.assertFalse(same("e", epub, {**epub, "anchor": {"sourceNode": 4, "charOffset": 40}}))
+        self.assertFalse(same("e", epub, {**epub, "index": 3}))
+        pdf = {"index": 2, "pdfY": .2}
+        self.assertFalse(same("p", pdf, {**pdf, "index": 3}))
+        self.assertFalse(same("p", pdf, {**pdf, "pdfY": .3}))
+
     def test_stale_windows_cannot_overwrite_newer_positions_or_bookmarks(self):
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -448,6 +467,23 @@ class SharedState(unittest.TestCase):
                 self.assertEqual(
                     post({"prefs": {}}, "https://unrelated.example")[0], 403
                 )
+                server.save(
+                    Path(directory) / "library.json",
+                    {"books": [{"id": "text", "type": "txt"}, {"id": "pdf", "type": "pdf"}], "jobs": []},
+                )
+                first = {"id": "window-one", "book": "text", "position": {"index": 1, "sourceOffset": 120}}
+                second = {**first, "id": "window-two"}
+                post({"bookmarks": [], "bookmarkChanges": {"add": [first]}})
+                _, state = post({"bookmarkChanges": {"add": [second]}})
+                self.assertEqual([m["id"] for m in state["bookmarks"]], ["window-one"])
+                # Same PDF content point at two zoom levels is one location.
+                pdf = {"id": "pdf-one", "book": "pdf", "position": {"index": 2, "top": 100, "pdfY": .2}}
+                _, state = post({"bookmarkChanges": {"add": [pdf, {**pdf, "id": "pdf-two", "position": {**pdf["position"], "top": 200}}]}})
+                self.assertEqual(len(state["bookmarks"]), 2)
+                # Existing duplicates are removed together; distinct positions survive.
+                post({"bookmarks": [first, second, {**first, "id": "other-place", "position": {"index": 2, "sourceOffset": 200}}]})
+                _, state = post({"bookmarkChanges": {"remove": [first["id"]]}})
+                self.assertEqual([m["id"] for m in state["bookmarks"]], ["other-place"])
             finally:
                 connection.close()
                 http.shutdown()

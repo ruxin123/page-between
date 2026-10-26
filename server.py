@@ -5,6 +5,7 @@ import hashlib
 import hmac
 from collections import defaultdict
 import json
+import math
 import os
 import re
 import shutil
@@ -70,6 +71,41 @@ def library():
 
 def book_for(ident):
     return next((book for book in library()["books"] if book["id"] == ident), None)
+
+
+def same_bookmark_place(left, right, book_types):
+    if not left.get("book") or left.get("book") != right.get("book"):
+        return False
+    a, b = left.get("position"), right.get("position")
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    if a.get("resource", "") != b.get("resource", ""):
+        return False
+
+    def finite(value):
+        return type(value) in (int, float) and math.isfinite(value)
+
+    kind = book_types.get(left["book"])
+    if kind == "txt" and finite(a.get("sourceOffset")) and finite(b.get("sourceOffset")):
+        return abs(a["sourceOffset"] - b["sourceOffset"]) < 20
+    if type(a.get("index")) is not int or a.get("index") != b.get("index"):
+        return False
+    if kind == "pdf" and finite(a.get("pdfY")) and finite(b.get("pdfY")):
+        return abs(a["pdfY"] - b["pdfY"]) < 0.00001
+    aa, ba = a.get("anchor"), b.get("anchor")
+    if kind != "pdf" and isinstance(aa, dict) and isinstance(ba, dict):
+        if not finite(aa.get("charOffset", 0)) or not finite(ba.get("charOffset", 0)):
+            return False
+        return (
+            aa.get("sourceNode", aa.get("index"))
+            == ba.get("sourceNode", ba.get("index"))
+            and abs(aa.get("charOffset", 0) - ba.get("charOffset", 0)) < 20
+        )
+    return (
+        finite(a.get("top", 0))
+        and finite(b.get("top", 0))
+        and abs(a.get("top", 0) - b.get("top", 0)) < 80
+    )
 
 
 def update_book(ident, patch):
@@ -944,17 +980,29 @@ class Handler(SimpleHTTPRequestHandler):
                             state[field] = payload[field]
                     changes = payload.get("bookmarkChanges", {})
                     if changes:
+                        book_types = {
+                            book["id"]: book.get("type") for book in library()["books"]
+                        }
+                        removed = [
+                            mark for mark in state.get("bookmarks", [])
+                            if mark["id"] in changes.get("remove", [])
+                        ]
                         state["bookmarks"] = [
                             mark
                             for mark in state.get("bookmarks", [])
                             if mark["id"] not in changes.get("remove", [])
+                            and not any(
+                                same_bookmark_place(mark, old, book_types)
+                                for old in removed
+                            )
                         ]
-                        known = {mark["id"] for mark in state["bookmarks"]}
-                        state["bookmarks"].extend(
-                            mark
-                            for mark in changes.get("add", [])
-                            if mark.get("id") and mark["id"] not in known
-                        )
+                        for mark in changes.get("add", []):
+                            if mark.get("id") and not any(
+                                old["id"] == mark["id"]
+                                or same_bookmark_place(old, mark, book_types)
+                                for old in state["bookmarks"]
+                            ):
+                                state["bookmarks"].append(mark)
                     state["revision"] = state.get("revision", 0) + 1
                     state["writer"] = str(payload.get("writer", ""))[:80]
                     save(DATA / "state.json", state)

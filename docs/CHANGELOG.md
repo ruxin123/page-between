@@ -2,6 +2,19 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版与匿名演示版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.13 · 2026-10-26
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.13) · Build 237 · 前端 2.35 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.13)
+
+- PDF 连续阅读按实际可见范围绘制，修复短页同屏时后续页面一直空白。
+- 使用原页真实尺寸建立占位，修复混合大小 PDF 跳页漂移；短页和末页跳转保持目标页。
+- 书签保存增加忙态与服务器去重，防止连续点击或两窗口同时操作产生同位置重复书签，保留移除与撤销。
+- 导入时固定当前批次，关闭重开不会重复提交；失败后可只重试失败文件。
+- 书籍设置保存绑定原书，避免等待期间切书后误写另一书；保存失败恢复操作并显示原因。
+- 切书重新检索时立即清理旧结果，避免旧书来源误跳到当前书。
+
+本轮覆盖书库、多格式导入、阅读与目录、PDF、内容取用、AI、掌上小窗、排版、章节编辑、导出、数据和交付；范围与限制见[功能验收说明](FUNCTIONAL_ACCEPTANCE.md)。
+
 ## 0.5.12 · 2026-10-26
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.12) · Build 236 · 前端 2.34 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.12)

@@ -8,12 +8,12 @@
 
 ## 下载与安装
 
-当前版本 **0.5.11**，提供 Apple Silicon（arm64）安装包。
+当前版本 **0.5.12**，提供 Apple Silicon（arm64）安装包。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.11/page-between-0.5.11-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
-| [页间 · 演示版](https://github.com/ruxin123/page-between/releases/download/v0.5.11/page-between-demo-0.5.11-macos-arm64.zip) | 内置五本原创示例，快速体验阅读与学习功能 |
+| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.12/page-between-0.5.12-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
+| [页间 · 演示版](https://github.com/ruxin123/page-between/releases/download/v0.5.12/page-between-demo-0.5.12-macos-arm64.zip) | 内置五本原创示例，快速体验阅读与学习功能 |
 
 1. 下载 ZIP 并解压，将「页间.app」或「页间演示.app」拖入应用程序文件夹。
 2. 打开应用，在书库点击「导入书籍」，选择文件并设置是否启用文档解析。
@@ -34,7 +34,7 @@
 
 ### 保留 PDF 原貌，补足内容取用
 
-PDF 以原页为阅读主体，优先利用已有文字层与书签。扫描件可在本机 OCR，补充划词、目录与搜索；文字结果随书保存，并提前准备附近页面。已导入的 PDF 也能从「文档处理」中准备整本、暂停或继续。
+PDF 以原页为阅读主体，优先利用已有文字层与书签。原生文字选区按原书字体定位，以连续行色带显示并保留行间留白。扫描件可在本机 OCR，补充划词、目录与搜索；文字结果随书保存，并提前准备附近页面。已导入的 PDF 也能从「文档处理」中准备整本、暂停或继续。
 
 可选的 MinerU 云解析提供更完整的文字、公式、表格与图像结构，支持指定页段、补全未解析页和整本分批处理。公式、表格与图片按完整对象取用；提问选段显示排版后的公式与表格，复制仍保留原始文字、LaTeX 或表格数据。
 

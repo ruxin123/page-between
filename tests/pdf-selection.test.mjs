@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mappedFragment } from "../ui/pdf-selection.mjs";
+import { mappedFragment, mergeSelectionRects } from "../ui/pdf-selection.mjs";
 import { englishLineCells } from "../ui/ocr-layer.mjs";
 
 const line = {
@@ -60,3 +60,26 @@ assert.deepEqual(
   [2, 8],
 );
 console.log("PDF 选区保留原始字符边界，模糊结果回退，行内公式整体展开：通过。");
+
+const bands = [
+  { left: 10, top: 10, right: 20, bottom: 20, chars: 1 },
+  { left: 20, top: 12, right: 50, bottom: 20, chars: 6 },
+  { left: 50, top: 10, right: 90, bottom: 20, chars: 8 },
+  { left: 10, top: 23, right: 90, bottom: 33, chars: 14 },
+  { left: 200, top: 23, right: 280, bottom: 33, chars: 14 },
+];
+const originalBands = structuredClone(bands);
+assert.deepEqual(mergeSelectionRects(bands), [
+  { left: 10, top: 10, right: 90, bottom: 20, chars: 15 },
+  bands[3],
+  bands[4],
+]);
+assert.deepEqual(bands, originalBands);
+// Adjacent lines must not merge merely because their font bounds overlap slightly.
+assert.equal(
+  mergeSelectionRects([bands[0], { ...bands[0], top: 19, bottom: 29 }]).length,
+  2,
+);
+console.log(
+  "原生 PDF 高亮合并同一行的大小字形，保留行间空隙与分栏间距：通过。",
+);

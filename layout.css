@@ -1323,16 +1323,16 @@ kbd {
   display: block;
   max-width: none;
 }
-.pdf-paper.tinted {
+.pdf-paper.tinted canvas {
   filter: sepia(0.08) brightness(0.99);
 }
-body[data-theme="night"] .pdf-paper.tinted {
+body[data-theme="night"] .pdf-paper.tinted canvas {
   filter: invert(0.88) hue-rotate(180deg);
 }
-body[data-theme="sage"] .pdf-paper.tinted {
+body[data-theme="sage"] .pdf-paper.tinted canvas {
   filter: sepia(0.12) hue-rotate(45deg);
 }
-body[data-theme="blue"] .pdf-paper.tinted {
+body[data-theme="blue"] .pdf-paper.tinted canvas {
   filter: sepia(0.08) hue-rotate(170deg);
 }
 .textLayer,
@@ -1351,12 +1351,36 @@ body[data-theme="blue"] .pdf-paper.tinted {
   cursor: text;
   transform-origin: 0 0;
 }
+.textLayer:not([data-ocr-engine]) {
+  --total-scale-factor: var(--scale-factor, 1);
+  --text-scale-factor: calc(
+    var(--total-scale-factor) * var(--min-font-size, 1)
+  );
+  --min-font-size-inv: calc(1 / var(--min-font-size, 1));
+  text-size-adjust: none;
+  forced-color-adjust: none;
+}
+/* PDF.js 5.6 stores glyph sizing in CSS variables, including small capitals. */
+.textLayer:not([data-ocr-engine]) > :not(.markedContent),
+.textLayer:not([data-ocr-engine]) .markedContent span:not(.markedContent) {
+  font-size: calc(var(--text-scale-factor) * var(--font-height, 0px));
+  transform: rotate(var(--rotate, 0deg)) scaleX(var(--scale-x, 1))
+    scale(var(--min-font-size-inv));
+}
+.textLayer .markedContent {
+  display: contents;
+}
 .textLayer span::selection {
   background: var(--selection);
   color: transparent;
 }
+.textLayer br::selection {
+  background: transparent;
+}
 .textLayer[data-ocr-engine]::selection,
-.textLayer[data-ocr-engine] ::selection {
+.textLayer[data-ocr-engine] ::selection,
+.textLayer[data-pdf-native]::selection,
+.textLayer[data-pdf-native] ::selection {
   background: transparent;
   color: transparent;
 }
@@ -1370,6 +1394,17 @@ body[data-theme="blue"] .pdf-paper.tinted {
   position: absolute;
   background: var(--selection);
   border-radius: 2px;
+}
+.pdf-selection-highlights {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: clip;
+  pointer-events: none;
+  user-select: none;
+  fill: var(--selection);
+  stroke: none;
 }
 .textLayer .endOfContent {
   display: block;
@@ -2918,6 +2953,22 @@ body[data-native="true"] #palm-close {
   font:
     12px -apple-system,
     sans-serif;
+}
+.pdf-page-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 16px;
+  padding: 32px;
+  background: var(--paper);
+  color: var(--ink);
+  font:
+    14px / 1.6 -apple-system,
+    sans-serif;
+  text-align: center;
+  z-index: 4;
 }
 .pdf-page .textLayer {
   width: 100%;

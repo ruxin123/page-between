@@ -1,4 +1,144 @@
-// Keep the visible PDF and its selectable glyph geometry unchanged.
+// PDF font bounds describe the selection height; the browser still owns the range.
+export function prepareNativeHighlights(layer, divs, content, viewport) {
+  const items = content.items.filter((item) => typeof item.str === "string");
+  const geometry = new Map();
+  for (const [i, node] of divs.entries()) {
+    if (!node.isConnected || !items[i]) continue;
+    const item = items[i],
+      style = content.styles[item.fontName] || {};
+    const [a, b, c, d, e, f] = viewport.transform;
+    const [m, n, p, q, x, y] = item.transform;
+    const height = Math.hypot(a * p + c * q, b * p + d * q);
+    if (!height || !Number.isFinite(height)) continue;
+    const angle =
+      Math.atan2(b * m + d * n, a * m + c * n) +
+      (style.vertical ? Math.PI / 2 : 0);
+    const ascent = Number.isFinite(style.ascent) ? style.ascent : 0.8;
+    const descent = Number.isFinite(style.descent)
+      ? Math.abs(style.descent)
+      : 0.2;
+    geometry.set(node, {
+      x: a * x + c * y + e,
+      y: b * x + d * y + f,
+      height,
+      ascent: ascent + descent > 0 ? ascent : 0.8,
+      descent: ascent + descent > 0 ? descent : 0.2,
+      angle,
+    });
+  }
+  layer._selectionGeometry = geometry;
+  layer.dataset.pdfNative = "true";
+}
+
+export function mergeSelectionRects(rects) {
+  const result = [];
+  for (const rect of rects) {
+    const previous = result.at(-1);
+    if (previous) {
+      const unionHeight =
+        Math.max(previous.bottom, rect.bottom) -
+        Math.min(previous.top, rect.top);
+      const overlap =
+        Math.min(previous.bottom, rect.bottom) -
+        Math.max(previous.top, rect.top);
+      const contained =
+        unionHeight <=
+        Math.max(previous.bottom - previous.top, rect.bottom - rect.top) + 0.01;
+      const gap = Math.max(
+        rect.left - previous.right,
+        previous.left - rect.right,
+      );
+      const padding =
+        (previous.right - previous.left) / Math.max(1, previous.chars) +
+        (rect.right - rect.left) / Math.max(1, rect.chars);
+      if ((contained || overlap / unionHeight >= 0.8) && gap <= padding) {
+        previous.left = Math.min(previous.left, rect.left);
+        previous.right = Math.max(previous.right, rect.right);
+        previous.top = Math.min(previous.top, rect.top);
+        previous.bottom = Math.max(previous.bottom, rect.bottom);
+        previous.chars += rect.chars;
+        continue;
+      }
+    }
+    result.push({ ...rect });
+  }
+  return result;
+}
+
+export function paintNativeSelection(root, selection) {
+  const range =
+    selection?.rangeCount && !selection.isCollapsed
+      ? selection.getRangeAt(0)
+      : null;
+  for (const layer of root.querySelectorAll(".textLayer[data-pdf-native]")) {
+    let overlay = layer.parentElement.querySelector(
+      ".pdf-selection-highlights",
+    );
+    if (!overlay) {
+      overlay = layer.ownerDocument.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "svg",
+      );
+      overlay.classList.add("pdf-selection-highlights");
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.append(
+        layer.ownerDocument.createElementNS(overlay.namespaceURI, "path"),
+      );
+      layer.before(overlay);
+    }
+    const box = layer.getBoundingClientRect();
+    const sx = box.width / layer.clientWidth,
+      sy = box.height / layer.clientHeight;
+    const rects = [];
+    if (box.width && box.height && range?.intersectsNode(layer)) {
+      for (const node of layer.querySelectorAll("span")) {
+        if (node.firstChild?.nodeType !== 3 || !range.intersectsNode(node))
+          continue;
+        const selected = layer.ownerDocument.createRange();
+        selected.selectNodeContents(node);
+        if (node.contains(range.startContainer))
+          selected.setStart(range.startContainer, range.startOffset);
+        if (node.contains(range.endContainer))
+          selected.setEnd(range.endContainer, range.endOffset);
+        if (selected.collapsed) continue;
+        const bounds = selected.getBoundingClientRect();
+        if (!bounds.width || !bounds.height) continue;
+        const rect = {
+          left: (bounds.left - box.left) / sx,
+          right: (bounds.right - box.left) / sx,
+          top: (bounds.top - box.top) / sy,
+          bottom: (bounds.bottom - box.top) / sy,
+          chars: selected.toString().length,
+        };
+        const font = layer._selectionGeometry?.get(node);
+        if (font && Math.abs(Math.sin(font.angle)) < 0.001) {
+          const normal = Math.cos(font.angle);
+          const first = font.y - normal * font.height * font.ascent;
+          const last = font.y + normal * font.height * font.descent;
+          rect.top = Math.min(first, last);
+          rect.bottom = Math.max(first, last);
+        } else if (font && Math.abs(Math.cos(font.angle)) < 0.001) {
+          const normal = Math.sin(font.angle);
+          const first = font.x + normal * font.height * font.ascent;
+          const last = font.x - normal * font.height * font.descent;
+          rect.left = Math.min(first, last);
+          rect.right = Math.max(first, last);
+        }
+        rects.push(rect);
+      }
+    }
+    const bands = mergeSelectionRects(rects);
+    // One filled path paints overlapping runs once, without darker alpha seams.
+    overlay.firstElementChild.setAttribute(
+      "d",
+      bands
+        .map((r) => `M${r.left},${r.top}H${r.right}V${r.bottom}H${r.left}Z`)
+        .join(" "),
+    );
+  }
+}
+
+// Keep correction separate from the original selectable text.
 export async function alignTextLayer(layer, blocks, post, book, page) {
   if (
     !blocks?.some(

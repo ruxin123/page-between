@@ -2,6 +2,16 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版与匿名演示版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.12 · 2026-10-26
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.12) · Build 235 · 前端 2.33 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.12)
+
+- 修正原生文字 PDF 的字形缩放与选区定位，减少高亮溢出、行间重叠和小型大写字母局部加深。
+- 高亮按原书字体边界合并成连续行色带，分栏之间保留空白，继续使用原生拖选和原有复制内容。
+- 改善大型 PDF 的页面显示：逐页应用护眼效果，限制画布内存，释放离屏页的图像与解码资源。
+- 快速跳页跳过过时预取；绘制失败可单页重试，画布丢失后自动恢复并保留文字层与阅读位置。
+- 防止离屏页的旧 OCR 响应覆盖重新打开后的页面。
+
 ## 0.5.11 · 2026-10-26
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.11) · Build 234 · 前端 2.32 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.11)

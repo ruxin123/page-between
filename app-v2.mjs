@@ -30,7 +30,7 @@ import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
 import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.31";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.32";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -113,7 +113,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.31";
+document.body.dataset.readerBuild = "2.32";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -676,7 +676,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.31",
+        build: "2.32",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -2256,11 +2256,14 @@ async function renderCurrent(position) {
 }
 async function navigate(index, options = {}, record = true) {
   if (!current) return;
+  const book = current.id;
+  lastInput = Date.now();
   if (record && readerReady) history.push(snapshot());
   location = {
     ...options,
     index: clamp(index, 1, count(current)),
     top: options.top || 0,
+    updatedAt: lastInput,
   };
   if (
     current.type === "pdf" &&
@@ -2272,8 +2275,15 @@ async function navigate(index, options = {}, record = true) {
     ensurePdfPages();
     updateProgress();
     $("reader-back").disabled = !history.length;
-  } else await renderCurrent(location);
-  if (innerWidth < 760) $("reader-aside").hidden = true;
+  } else {
+    const rendering = renderCurrent(location),
+      revision = renderRevision;
+    await rendering;
+    if (current?.id !== book || renderRevision !== revision) return;
+  }
+  // Restoring a target suppresses scroll saves, so commit navigation explicitly.
+  if (readerReady) savePosition(true).catch((error) => toast(error.message));
+  if (innerWidth < 760) setTocOpen(false);
 }
 
 async function flip(direction) {
@@ -2373,11 +2383,17 @@ function goBack() {
   const previous = history.pop();
   if (previous) {
     savePosition(true);
-    current = books.find((book) => book.id === previous.book);
-    location = previous.position;
+    const book = books.find((book) => book.id === previous.book);
+    if (!book) return;
+    if (current?.id !== book.id) readerReady = false;
+    current = book;
     if (!palm) window.history.replaceState(null, "", "#/read/" + current.id);
-    renderCurrent(location);
+    navigate(previous.position.index, previous.position, false);
   }
+}
+function setTocOpen(open) {
+  $("reader-aside").hidden = !open;
+  $("toc-toggle").setAttribute("aria-expanded", String(open));
 }
 async function readBook(id) {
   const book = books.find((book) => book.id === id);
@@ -2387,7 +2403,8 @@ async function readBook(id) {
   location = initialLocation(book);
   history = [];
   $("toc-search").value = "";
-  $("reader-aside").hidden = true;
+  setTocOpen(!palm);
+  $("toc-tab").click();
   $("reader-settings").hidden = true;
   renderCurrent(location);
 }
@@ -2648,7 +2665,7 @@ function handleKeydown(event) {
       shelfFilter = "all";
       renderLibrary();
     }
-    $("reader-aside").hidden = true;
+    setTocOpen(false);
     $("reader-settings").hidden = true;
     $("question-panel").hidden = true;
     clearSelection();
@@ -2663,7 +2680,7 @@ function handleKeydown(event) {
   ) {
     event.preventDefault();
     if (route === "reader") {
-      $("reader-aside").hidden = false;
+      setTocOpen(true);
       $("toc-tab").click();
       $("toc-search").focus();
     } else if (route === "library") $("library-search").focus();
@@ -2907,13 +2924,9 @@ $("reader-home").onclick = () => {
 };
 $("reader-back").onclick = goBack;
 $("toc-toggle").onclick = () => {
-  $("reader-aside").hidden = !$("reader-aside").hidden;
-  $("toc-toggle").setAttribute(
-    "aria-expanded",
-    String(!$("reader-aside").hidden),
-  );
+  setTocOpen($("reader-aside").hidden);
 };
-$("toc-close").onclick = () => ($("reader-aside").hidden = true);
+$("toc-close").onclick = () => setTocOpen(false);
 $("toc-search").addEventListener("input", renderToc);
 $("toc-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-index]");
@@ -2972,9 +2985,9 @@ $("source-pdf-open").onclick = () => {
   history.push(snapshot());
   savePosition(true);
   current = source;
-  location = { index: page, pdfY: 0 };
+  readerReady = false;
   if (!palm) window.history.replaceState(null, "", "#/read/" + source.id);
-  renderCurrent(location);
+  navigate(page, { pdfY: 0 }, false);
 };
 $("focus-button").onclick = () =>
   setFocus(!$("reader").classList.contains("focused"));
@@ -3385,7 +3398,12 @@ async function poll(resume = false) {
     if (route === "library" && (preferencesChanged || positionsChanged))
       renderLibrary();
     if (marksChanged) renderBookmarks();
-    if (follow && current?.id === followingBook && route === "reader") {
+    if (
+      follow &&
+      current?.id === followingBook &&
+      route === "reader" &&
+      remote.updatedAt > (location?.updatedAt || 0)
+    ) {
       location = initialLocation(current);
       if (location.index !== Number($("page-label").dataset.chapter))
         renderCurrent(location);

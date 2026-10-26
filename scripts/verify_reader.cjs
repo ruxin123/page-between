@@ -321,6 +321,8 @@ async function shortcutPreferences(browser, failures) {
           base + (palm ? "/?mode=palm&book=" + book : "/#/read/" + book),
         );
         await ready(page);
+        assert.equal(await page.locator("#reader-aside").isVisible(), !palm);
+        if (!palm) await page.locator("#toc-close").click();
         const body = epub
           ? page.frameLocator("#epub-frame").locator("body")
           : page.locator("#reading-viewport");
@@ -471,6 +473,7 @@ async function shortcutPreferences(browser, failures) {
     pdf.on("pageerror", (error) => failures.push(error.message));
     await pdf.goto(base + "/#/read/demo-e");
     await ready(pdf);
+    await pdf.locator("#toc-close").click();
     await pdf.locator("#page-label").click();
     await pdf.locator("#page-jump-input").fill("1");
     await pdf.locator("#page-jump-input").press("Enter");

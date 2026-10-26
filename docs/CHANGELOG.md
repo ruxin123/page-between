@@ -2,6 +2,16 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版与匿名演示版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.11 · 2026-10-26
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.11) · Build 234 · 前端 2.32 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.11)
+
+- 修复点击章节目录后，被后台进度同步自动拉回原位置的问题。
+- 跳章、返回上一位置及查看原 PDF 时立即保存目标位置，重开书籍也能继续阅读。
+- 连续点击章节时保留最后一次选择，较慢的旧章节加载不会覆盖新目标。
+- 主阅读窗口打开书籍时默认展开章节导航，仍可手动收起；掌上小窗默认收起。
+- 目录按钮的展开状态与侧栏同步。
+
 ## 0.5.10 · 2026-10-26
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.10) · Build 233 · 前端 2.31 · [对应源码](https://github.com/ruxin123/page-between/commit/8e749e011d79125c0d429c1e49099f2efe8452e7)

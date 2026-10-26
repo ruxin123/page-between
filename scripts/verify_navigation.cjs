@@ -57,7 +57,14 @@ function fixture(compact = false) {
   );
 }
 async function ready(page) {
-  await page.locator("#ai-open:not([disabled])").waitFor({ state: "attached" });
+  await page.waitForFunction(
+    () =>
+      document.body.dataset.view === "reader" &&
+      document.querySelector("#reading-viewport")?.getAttribute("aria-busy") ===
+        "false" &&
+      !document.querySelector("#ai-open").disabled &&
+      document.querySelector("#reader-loading").hidden,
+  );
 }
 async function active(page, fragment) {
   try {
@@ -106,6 +113,192 @@ async function pageIndex(page) {
     .locator("body")
     .getAttribute("data-page");
 }
+async function chapterJumps(browser, failures) {
+  for (const mode of ["pages", "scroll"]) {
+    for (const book of ["demo-b", "demo-a", "demo-c"]) {
+      await api("/api/state", {
+        prefs: { textMode: mode, pdfMode: mode },
+        positions: {
+          [book]: {
+            index: 1,
+            page: 0,
+            top: 0,
+            anchor: null,
+            updatedAt: Date.now(),
+          },
+        },
+      });
+      const page = await browser.newPage({
+        viewport: { width: 1280, height: 900 },
+      });
+      page.on("pageerror", (error) => failures.push(error.message));
+      let release,
+        observed,
+        armed = false;
+      const held = new Promise((resolve) => {
+        release = resolve;
+      });
+      const polling = new Promise((resolve) => {
+        observed = resolve;
+      });
+      await page.route("**/api/state", async (route) => {
+        if (armed && route.request().method() === "GET") {
+          armed = false;
+          const response = await route.fetch();
+          observed();
+          await held;
+          await route.fulfill({ response });
+        } else await route.continue();
+      });
+      const at = async (index) => {
+        await ready(page);
+        await page.waitForFunction(
+          (index) =>
+            document.querySelector("#page-label").dataset.chapter ===
+            String(index),
+          index,
+        );
+      };
+      try {
+        await page.goto(base + "/#/read/" + book);
+        await at(1);
+        const initiallyOpen = await page.locator("#reader-aside").isVisible();
+        if (!initiallyOpen) await page.locator("#toc-toggle").click();
+        armed = true;
+        await polling;
+        await page.locator('#toc-list [data-index="3"]').first().click();
+        await at(3);
+        release();
+        // Wait past two synchronization polls, without a key press or manual flush.
+        await page.waitForTimeout(3900);
+        assert.equal(
+          await page.locator("#page-label").getAttribute("data-chapter"),
+          "3",
+          `${book}/${mode}: an older poll must not undo a chapter jump`,
+        );
+        assert.equal(
+          (await api("/api/state")).positions[book].index,
+          3,
+          "A chapter jump must persist without further reading input.",
+        );
+        assert.equal(
+          initiallyOpen,
+          true,
+          "The main reader opens with its TOC visible.",
+        );
+        await page.reload();
+        await at(3);
+        assert.equal(
+          await page.locator("#toc-toggle").getAttribute("aria-expanded"),
+          "true",
+        );
+        await page.locator('#toc-list [data-index="2"]').first().click();
+        await at(2);
+        await page.locator("#reader-back").click();
+        await at(3);
+        await page.waitForTimeout(2100);
+        assert.equal(
+          await page.locator("#page-label").getAttribute("data-chapter"),
+          "3",
+          "Returning to a previous location must also survive synchronization.",
+        );
+        assert.equal((await api("/api/state")).positions[book].index, 3);
+        if (book === "demo-a" && mode === "pages") {
+          const chapter = (await api("/api/library")).books.find(
+            (item) => item.id === book,
+          ).chapters[1].url;
+          let unblock, started;
+          const delayed = new Promise((resolve) => {
+            unblock = resolve;
+          });
+          const loading = new Promise((resolve) => {
+            started = resolve;
+          });
+          await page.route(base + chapter, async (route) => {
+            started();
+            await delayed;
+            await route.continue();
+          });
+          try {
+            await page.locator('#toc-list [data-index="2"]').first().click();
+            await loading;
+            await page.locator('#toc-list [data-index="3"]').first().click();
+            await at(3);
+            const completed = page.waitForResponse(
+              (response) => new URL(response.url()).pathname === chapter,
+            );
+            unblock();
+            await completed;
+            await page.waitForTimeout(200);
+            assert.equal(
+              await page.locator("#page-label").getAttribute("data-chapter"),
+              "3",
+              "A slower earlier chapter must not replace the last requested chapter.",
+            );
+            assert.equal((await api("/api/state")).positions[book].index, 3);
+          } finally {
+            unblock();
+          }
+        }
+        await page.locator("#toc-close").click();
+        assert.equal(
+          await page.locator("#toc-toggle").getAttribute("aria-expanded"),
+          "false",
+        );
+      } finally {
+        release();
+        await page.close();
+      }
+    }
+  }
+  console.log(
+    engine,
+    "TXT, EPUB and PDF chapter jumps survive delayed polls, reload and return in both reading modes",
+  );
+
+  const exported = await api("/api/export/epub", {
+    book: "demo-c",
+    pages: "1-2",
+  });
+  const data = await (await fetch(base + exported.download)).arrayBuffer();
+  const response = await fetch(
+    base + "/api/import?name=linked-navigation.epub&parse=0",
+    {
+      method: "POST",
+      body: data,
+    },
+  );
+  const { book } = await response.json();
+  assert.ok(response.ok && book.sourcePdfHash);
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+  });
+  page.on("pageerror", (error) => failures.push(error.message));
+  try {
+    await page.goto(base + "/#/read/" + book.id);
+    await ready(page);
+    await page.locator("#source-pdf-open").click();
+    await ready(page);
+    assert.equal(await page.locator("#pdf-paper").isVisible(), true);
+    await page.waitForTimeout(2100);
+    assert.equal(
+      await page.locator("#page-label").getAttribute("data-chapter"),
+      "1",
+    );
+    assert.equal((await api("/api/state")).positions["demo-c"].index, 1);
+    await page.locator("#reader-back").click();
+    await ready(page);
+    await page.waitForTimeout(2100);
+    assert.equal(await page.locator("#epub-frame").isVisible(), true);
+    assert.equal(new URL(page.url()).hash, "#/read/" + book.id);
+  } finally {
+    await page.close();
+  }
+  console.log(
+    engine,
+    "original-PDF jumps and cross-book return retain their destinations",
+  );
+}
 (async () => {
   const collection = await api("/api/library");
   assert.ok(
@@ -130,6 +323,7 @@ async function pageIndex(page) {
     failures = [];
   let marks = [];
   try {
+    await chapterJumps(browser, failures);
     await api("/api/state", {
       prefs: { textMode: "pages" },
       positions: {

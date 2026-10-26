@@ -8,12 +8,12 @@
 
 ## 下载与安装
 
-当前版本 **0.5.10**，提供 Apple Silicon（arm64）安装包。
+当前版本 **0.5.11**，提供 Apple Silicon（arm64）安装包。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.10/page-between-0.5.10-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
-| [页间 · 演示版](https://github.com/ruxin123/page-between/releases/download/v0.5.10/page-between-demo-0.5.10-macos-arm64.zip) | 内置五本原创示例，快速体验阅读与学习功能 |
+| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.11/page-between-0.5.11-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
+| [页间 · 演示版](https://github.com/ruxin123/page-between/releases/download/v0.5.11/page-between-demo-0.5.11-macos-arm64.zip) | 内置五本原创示例，快速体验阅读与学习功能 |
 
 1. 下载 ZIP 并解压，将「页间.app」或「页间演示.app」拖入应用程序文件夹。
 2. 打开应用，在书库点击「导入书籍」，选择文件并设置是否启用文档解析。
@@ -30,7 +30,7 @@
 - 独立书库与阅读界面，支持分类、常读、搜索和继续阅读。
 - 文字书默认分页，提供轻缓的翻页动画，也可切换连续滚动；PDF 默认连续阅读。
 - 中英文字体分别选择，调整字号、行距、版心宽度，切换清纸、雾松、暮蓝与夜墨主题。
-- 目录导航、书签、阅读进度、书内检索、跳转与返回；改变字号或窗口大小后尽量保持内容位置。
+- 主窗口默认展开章节目录，支持书签、阅读进度、书内检索、跳转与返回；改变字号或窗口大小后尽量保持内容位置。
 
 ### 保留 PDF 原貌，补足内容取用
 

@@ -38,7 +38,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.40";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.41";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
@@ -122,7 +122,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.40";
+document.body.dataset.readerBuild = "2.41";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -692,7 +692,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.40",
+        build: "2.41",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -2737,20 +2737,22 @@ function setTocOpen(open) {
   $("reader-aside").hidden = !open;
   $("toc-toggle").setAttribute("aria-expanded", String(open));
 }
-async function readBook(id) {
+async function readBook(id, sourcePosition) {
   const book = books.find((book) => book.id === id);
   if (!book) return;
   savePosition();
   current = book;
-  location = initialLocation(book);
+  location = sourcePosition
+    ? { ...sourcePosition, index: clamp(sourcePosition.index, 1, count(book)) }
+    : initialLocation(book);
   history = [];
   $("toc-search").value = "";
   setTocOpen(!palm);
   $("toc-tab").click();
   $("reader-settings").hidden = true;
-  renderCurrent(location);
+  return renderCurrent(location);
 }
-function showRoute() {
+function showRoute(sourcePosition) {
   const requested = window.location.hash.slice(2).split("/");
   if (!palm && ["shelf", "imports"].includes(requested[0])) {
     if (requested[0] === "shelf") shelfFilter = "pinned";
@@ -2789,7 +2791,10 @@ function showRoute() {
     const id = palm
       ? query.get("book") || current?.id || books[0]?.id
       : requested[1];
-    readBook(id || books[0]?.id);
+    return readBook(
+      id || books[0]?.id,
+      sourcePosition?.index ? sourcePosition : undefined,
+    );
   } else {
     document.title = (next === "settings" ? "设置" : "书库") + " · 页间";
     if (next === "library") renderLibrary();
@@ -3580,10 +3585,32 @@ const tutor = createTutor({
   post,
   toast,
   getContext: tutorContext,
+  openWindow:
+    window.webkit?.messageHandlers?.appNative || window.readerDetachedTutor
+      ? (request) =>
+          (
+            window.webkit.messageHandlers.appNative ||
+            window.webkit.messageHandlers.readerNative
+          ).postMessage({ action: "tutor", ...request })
+      : undefined,
   openSource: (book, position) => {
     if (current?.id === book) navigate(position.index, position);
   },
 });
+window.readerOpenTutorSource = async (book, position) => {
+  if (
+    !books.some((item) => item.id === book) ||
+    !Number.isInteger(position?.index)
+  )
+    return;
+  if (route === "reader" && current?.id === book)
+    return navigate(position.index, position);
+  await savePosition(true);
+  lastInput = Date.now();
+  window.history.replaceState(null, "", "#/read/" + book);
+  await showRoute({ ...position, updatedAt: lastInput });
+  if (readerReady) await savePosition(true);
+};
 $("ask-selection").onclick = () => {
   if (!currentSelection) return;
   const context = tutorContext(currentSelection);

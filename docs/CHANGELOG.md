@@ -2,6 +2,15 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.19 · 2026-10-28
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.19) · Build 243 · 前端 2.41 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.19)
+
+- macOS 书内答疑改为独立窗口，可拖出主阅读窗口、自由缩放，并记住窗口位置。
+- 主阅读与掌上阅读共用答疑窗口，保留选段、公式、原图和本书对话记录；关闭后重新打开同一本书的答疑可继续当前内容和草稿。
+- 点击出处可跨书返回原文并保存目标位置，避免跳转后被旧进度覆盖。
+- 网页预览保留页内答疑面板；GitHub 继续仅提供普通版安装包。
+
 ## 0.5.18 · 2026-10-27
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.18) · Build 242 · 前端 2.40 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.18)

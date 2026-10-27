@@ -28,6 +28,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     let standalone: Bool
     let session: String
     var showMainSettings: (() -> Void)?
+    var showTutor: (([String:Any]) -> Void)?
 
     init(address: URL, statusFile: URL, standalone: Bool = true, session: String = "") {
         self.address=address;self.statusFile=statusFile;self.standalone=standalone;self.session=session
@@ -71,6 +72,9 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         panel.setFrameAutosaveName("PageBetweenPalm" + (standalone ? "Standalone" : "App"))
         panel.setFrameUsingName("PageBetweenPalm" + (standalone ? "Standalone" : "App"))
         let configuration=WKWebViewConfiguration()
+        if showTutor != nil {
+            configuration.userContentController.addUserScript(WKUserScript(source:"window.readerDetachedTutor=true;",injectionTime:.atDocumentStart,forMainFrameOnly:true))
+        }
         configuration.userContentController.add(self,name:"readerNative")
         web=WKWebView(frame:panel.contentView!.bounds,configuration:configuration)
         web.autoresizingMask=[.width,.height]
@@ -181,6 +185,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
               message.frameInfo.securityOrigin.host == address.host,
               message.frameInfo.securityOrigin.port == address.port else { return }
         guard let body=message.body as? [String:Any],let action=body["action"] as? String else { return }
+        if action=="tutor" { showTutor?(body);return }
         if action=="close" { panel.performClose(nil) }
         if action=="settings" {
             if let showMainSettings=showMainSettings { showMainSettings() }

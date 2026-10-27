@@ -3322,6 +3322,22 @@ body[data-mode="palm"] .question-panel textarea {
 .source-table table {
   min-width: max-content;
 }
+body[data-mode="tutor"] > :not(#question-panel):not(#toasts):not(script) {
+  display: none !important;
+}
+body[data-mode="tutor"] .question-panel {
+  position: static;
+  width: 100%;
+  height: 100dvh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0 20px 16px;
+}
+body[data-mode="tutor"] .question-panel .aside-head {
+  cursor: default;
+}
 
 .cloud-dialog {
   width: min(520px, calc(100vw - 32px));

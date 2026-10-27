@@ -62,12 +62,22 @@ function enablePanelDragging(panel, handle) {
   new ResizeObserver(constrain).observe(panel);
 }
 
-export function createTutor({ api, post, toast, getContext, openSource }) {
+export function createTutor({
+  api,
+  post,
+  toast,
+  getContext,
+  openSource,
+  openWindow,
+  closeWindow,
+  detached = false,
+}) {
   const $ = (id) => document.getElementById(id);
-  enablePanelDragging(
-    $("question-panel"),
-    $("question-panel").querySelector(".aside-head"),
-  );
+  if (!detached)
+    enablePanelDragging(
+      $("question-panel"),
+      $("question-panel").querySelector(".aside-head"),
+    );
   let book,
     source,
     active,
@@ -228,6 +238,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
     }
   }
   function openContext(context) {
+    if (openWindow) return openWindow({ context, history: false });
     revision++;
     book = context.book;
     $("question-panel").dataset.book = book;
@@ -243,6 +254,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
   async function showHistory() {
     const context = getContext();
     if (!context) return;
+    if (openWindow) return openWindow({ context, history: true });
     book = context.book;
     $("question-panel").dataset.book = book;
     revision++;
@@ -406,7 +418,7 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
       jump.className = "secondary-button";
       jump.textContent = "前往原文";
       jump.onclick = () => {
-        $("question-panel").hidden = true;
+        if (!detached) $("question-panel").hidden = true;
         openSource(book, source.position);
       };
       preview.append(text, jump);
@@ -444,12 +456,13 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
   $("question-source").onclick = () => {
     const original = active?.source || source;
     if (!original) return;
-    $("question-panel").hidden = true;
+    if (!detached) $("question-panel").hidden = true;
     openSource(book, original.position);
   };
   $("question-close").onclick = () => {
     $("question-panel").hidden = true;
     clearTimeout(pollTimer);
+    closeWindow?.();
   };
   $("copy-question").onclick = async () => {
     const original = active?.source || source;
@@ -476,5 +489,11 @@ export function createTutor({ api, post, toast, getContext, openSource }) {
       toast("暂时无法复制，请手动选择需要的文字。", { kind: "warning" });
     }
   };
-  return { openContext, showHistory };
+  function resume() {
+    $("question-panel").hidden = false;
+    configuration();
+    if (historyMode) showHistory();
+    else showConversation();
+  }
+  return { openContext, showHistory, resume };
 }

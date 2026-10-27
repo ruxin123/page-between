@@ -13,6 +13,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var output: Pipe?
   var base: URL?
   var palm: PalmDelegate?
+  var tutorWindow: NSWindow?
+  var tutorWeb: WKWebView?
+  var tutorReady = false
+  var tutorBook: String?
+  var pendingTutor: [String: Any]?
   var quitting = false
   var restarting = false
   var pendingFiles: [URL] = []
@@ -89,6 +94,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   func startEngine() {
     ready = false
     base = nil
+    tutorWindow?.orderOut(nil)
+    tutorWeb?.configuration.userContentController.removeScriptMessageHandler(forName: "tutorNative")
+    tutorWeb?.loadHTMLString("", baseURL: nil)
+    tutorWindow = nil
+    tutorWeb = nil
+    tutorReady = false
+    tutorBook = nil
+    pendingTutor = nil
     if let palm = palm {
       palm.stopHotkeys()
       palm.panel?.orderOut(nil)
@@ -287,6 +300,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       message.frameInfo.securityOrigin.port == base?.port,
       let body = message.body as? [String: Any], let action = body["action"] as? String
     else { return }
+    if message.webView === tutorWeb {
+      if action == "ready" { tutorReady = true; deliverTutor() }
+      if action == "close" { tutorWindow?.performClose(nil) }
+      if action == "settings" { loadMain("/settings/ai") }
+      if action == "source", let book = body["book"] as? String,
+        validBookID(book), let position = body["position"] as? [String: Any],
+        let index = position["index"] as? Int, index > 0
+      {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        Task { @MainActor [weak self] in
+          guard let self = self else { return }
+          _ = try? await self.web.callAsyncJavaScript(
+            "await window.readerOpenTutorSource(book, position);",
+            arguments: ["book": book, "position": position], in: nil, contentWorld: .page)
+        }
+      }
+      return
+    }
+    if action == "tutor" { showTutor(body); return }
     if action == "ready" {
       ready = true
       writeRuntime()
@@ -320,9 +353,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
           address: url, statusFile: support.appendingPathComponent("Library/palm-window.json"),
           standalone: false, session: session)
         palm?.showMainSettings = { [weak self] in self?.loadMain("/settings/ai") }
+        palm?.showTutor = { [weak self] request in self?.showTutor(request) }
       }
       palm?.configureHotkeys(body["keys"] as? String ?? "arrows")
       palm?.show(url)
+    }
+  }
+
+  func validBookID(_ book: String) -> Bool {
+    book.range(of: "^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$", options: .regularExpression) != nil
+  }
+
+  func showTutor(_ request: [String: Any]) {
+    guard let base = base, let context = request["context"] as? [String: Any],
+      let book = context["book"] as? String, validBookID(book),
+      context["source"] is [String: Any], JSONSerialization.isValidJSONObject(context),
+      let bytes = try? JSONSerialization.data(withJSONObject: context), bytes.count <= 12 * 1024 * 1024
+    else { return }
+    if tutorWindow?.isVisible == false, tutorReady, tutorBook == book,
+      request["history"] as? Bool == true
+    {
+      tutorWindow?.makeKeyAndOrderFront(nil)
+      NSApp.activate(ignoringOtherApps: true)
+      return
+    }
+    tutorBook = book
+    pendingTutor = ["context": context, "history": request["history"] as? Bool ?? false]
+    if tutorWindow == nil {
+      let configuration = WKWebViewConfiguration()
+      configuration.websiteDataStore = web.configuration.websiteDataStore
+      configuration.userContentController.add(self, name: "tutorNative")
+      let view = WKWebView(frame: .zero, configuration: configuration)
+      view.navigationDelegate = self
+      view.uiDelegate = self
+      let panel = NSWindow(
+        contentRect: NSRect(x: window.frame.maxX - 80, y: window.frame.minY + 60, width: 500, height: 720),
+        styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+      panel.title = "书内答疑 · 页间"
+      panel.minSize = NSSize(width: 360, height: 480)
+      panel.isMovable = true
+      panel.isReleasedWhenClosed = false
+      panel.contentView = view
+      panel.setFrameAutosaveName(demo ? "PageBetweenDemoTutor" : "PageBetweenTutor")
+      let restored = panel.setFrameUsingName(demo ? "PageBetweenDemoTutor" : "PageBetweenTutor")
+      if !restored, let screen = window.screen?.visibleFrame {
+        let origin = NSPoint(x: max(screen.minX, min(panel.frame.minX, screen.maxX - panel.frame.width)),
+                             y: max(screen.minY, min(panel.frame.minY, screen.maxY - panel.frame.height)))
+        panel.setFrameOrigin(origin)
+      }
+      tutorWindow = panel
+      tutorWeb = view
+      tutorReady = false
+      var parts = URLComponents(url: base, resolvingAgainstBaseURL: false)!
+      parts.queryItems = [URLQueryItem(name: "mode", value: "tutor")]
+      view.load(self.request(parts.url!))
+    }
+    tutorWindow?.makeKeyAndOrderFront(nil)
+    NSApp.activate(ignoringOtherApps: true)
+    deliverTutor()
+  }
+
+  func deliverTutor() {
+    guard tutorReady, let request = pendingTutor, let view = tutorWeb else { return }
+    pendingTutor = nil
+    Task { @MainActor in
+      _ = try? await view.callAsyncJavaScript("window.readerTutorReceive(request);",
+        arguments: ["request": request], in: nil, contentWorld: .page)
     }
   }
 

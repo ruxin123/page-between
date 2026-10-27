@@ -2,6 +2,16 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版与匿名演示版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.14 · 2026-10-27
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.14) · Build 238 · 前端 2.36 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.14)
+
+- PDF 原有目录保留页内坐标，同一页的不同章节分别跳到对应标题。
+- 目录高亮与章节标题跟随页内阅读位置，避免同页时总选中最后一个小节。
+- 修复靠近页底的目录跳转被提前判作下一页，支持末页和分页模式中的页内定位。
+- 已导入且带原有书签的 PDF 自动更新目录位置，无需重新导入或云解析；原 PDF、阅读记录与服务配置保留。
+- 坐标按显示裁剪区与旋转方向换算，恢复备份时校验目录位置。
+
 ## 0.5.13 · 2026-10-26
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.13) · Build 237 · 前端 2.35 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.13)

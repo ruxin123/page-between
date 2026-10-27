@@ -31,8 +31,13 @@ import { createBookExport } from "/ui/export.mjs";
 import { createDataSettings } from "/ui/data.mjs";
 import { createChapterEditor } from "/ui/chapters.mjs";
 import { taskEntries } from "/ui/jobs.mjs";
-import { flatToc, fragmentTarget, epubTocAtAnchor } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.35";
+import {
+  flatToc,
+  fragmentTarget,
+  epubTocAtAnchor,
+  pdfTocAtPosition,
+} from "/ui/navigation.mjs";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.36";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -115,7 +120,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.35";
+document.body.dataset.readerBuild = "2.36";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -230,14 +235,21 @@ function chapterTitle(book = current, index = location?.index) {
   if (book.type !== "pdf")
     return book.chapters[clamp(index, 1, count(book)) - 1]?.title || book.title;
   return (
-    flatToc(book.toc || [])
-      .filter((item) => item.index && item.index <= index)
-      .sort((a, b) => a.index - b.index)
-      .at(-1)?.title || "原书页面"
+    (book === current && index === location?.index
+      ? activeTocItem()
+      : pdfTocAtPosition(book.toc || [], index)
+    )?.title || "原书页面"
   );
 }
 function activeTocItem() {
   if (!current || !location) return null;
+  if (current.type === "pdf") {
+    const y = readerReady
+      ? pdfLocalTop() /
+        Math.max(1, pdfPageElement(location.index)?.offsetHeight || 1)
+      : location.pdfY || 0;
+    return pdfTocAtPosition(current.toc || [], location.index, y);
+  }
   if (current.type !== "epub")
     return (
       flatToc(current.toc || [])
@@ -678,7 +690,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.35",
+        build: "2.36",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1557,6 +1569,10 @@ function scrollPdfTo(position) {
   const top = Number.isFinite(position.pdfY)
     ? position.pdfY * height
     : position.top || 0;
+  if (position.index === current.pages || prefs.pdfMode === "pages") {
+    const stack = $("pdf-paper");
+    stack.style.paddingBottom = `${Math.max(parseFloat(stack.style.paddingBottom) || 0, $("reading-viewport").clientHeight - (height - top))}px`;
+  }
   $("reading-viewport").scrollTop =
     pdfPageTop(position.index) + Math.min(top, Math.max(0, height - 20));
 }
@@ -1782,12 +1798,20 @@ function pdfPageAt(at) {
 function updatePdfScroll() {
   if (!pdfDocument || prefs.pdfMode !== "scroll") return;
   const view = $("reading-viewport");
-  const first = pdfPageAt(view.scrollTop);
+  // scrollTop rounds while PDF page geometry can remain fractional.
+  const first = pdfPageAt(view.scrollTop + 1);
   // The progress probe must fit inside short pages instead of skipping them.
   const probe = Math.min(
     160,
     view.clientHeight * 0.25,
     (pdfPageElement(first)?.offsetHeight || 1) * 0.25,
+    Math.max(
+      0,
+      pdfPageTop(first) +
+        (pdfPageElement(first)?.offsetHeight || 1) -
+        view.scrollTop -
+        1,
+    ),
   );
   const lo = pdfPageAt(view.scrollTop + probe);
   if (lo !== location.index) {
@@ -3220,10 +3244,15 @@ $("toc-close").onclick = () => setTocOpen(false);
 $("toc-search").addEventListener("input", renderToc);
 $("toc-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-index]");
-  if (button?.dataset.index)
+  if (button?.dataset.index) {
+    const item = flatToc(current.toc || [])[Number(button.dataset.tocEntry)];
     navigate(Number(button.dataset.index), {
       fragment: button.dataset.fragment,
+      ...(current.type === "pdf" && Number.isFinite(item?.pdfY)
+        ? { pdfY: item.pdfY }
+        : {}),
     });
+  }
 });
 ["toc", "bookmark"].forEach(
   (tab) =>

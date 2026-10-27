@@ -32,6 +32,7 @@ from book_import import (
     flatten_toc,
     url_for,
     path_for,
+    pdf_metadata,
 )
 from pdf_enhancement import build_contents, recognize, page_enrichment, apply_enrichment
 from pdf_selection import align_spans
@@ -116,6 +117,25 @@ def update_book(ident, patch):
         save(BOOK_ROOT / ident / "book.json", book)
         save(DATA / "library.json", data)
         return book
+
+
+def upgrade_pdf_outlines():
+    for book in library()["books"]:
+        if (
+            book.get("type") != "pdf"
+            or book.get("tocSource") != "pdf-outline"
+            or book.get("pdfOutlineVersion") == 1
+        ):
+            continue
+        try:
+            metadata = pdf_metadata(path_for(book["url"]))
+            if metadata["tocSource"] == "pdf-outline":
+                update_book(
+                    book["id"], {"toc": metadata["toc"], "pdfOutlineVersion": 1}
+                )
+        except Exception:
+            # A damaged file must not prevent the rest of the library from opening.
+            print("一本 PDF 的原有目录暂未升级，已有目录保留。", file=sys.stderr)
 
 
 PDF_PREPARATION = PDFPreparation(book_for)
@@ -1161,6 +1181,7 @@ def main():
             upgrade()
         except (OSError, ValueError):
             print("演示增强资料暂未更新，已有书库保留。", file=sys.stderr)
+    upgrade_pdf_outlines()
     server = ReaderServer(
         ("127.0.0.1", arguments.port), partial(Handler, directory=str(ROOT))
     )

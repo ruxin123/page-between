@@ -134,6 +134,13 @@ def validate_navigation(book):
             ):
                 raise ValueError("备份中的目录页序无效。")
             printed = node.get("printed")
+            pdf_y = node.get("pdfY")
+            if pdf_y is not None and (
+                type(pdf_y) not in {int, float}
+                or not math.isfinite(pdf_y)
+                or not 0 <= pdf_y <= 1
+            ):
+                raise ValueError("备份中的 PDF 目录位置无效。")
             if printed is not None and (
                 type(printed) not in {int, str} or len(str(printed)) > 128
             ):

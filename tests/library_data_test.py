@@ -85,6 +85,9 @@ class LibraryRecovery(unittest.TestCase):
         def toc_children(collection, state):
             collection["books"][0]["toc"][0]["children"] = {}
 
+        def toc_pdf_y(collection, state):
+            collection["books"][0]["toc"][0]["pdfY"] = "invalid"
+
         def chapter_title(collection, state):
             collection["books"][0]["chapters"][0]["title"] = {"bad": True}
 
@@ -105,7 +108,7 @@ class LibraryRecovery(unittest.TestCase):
                 {"book": self.book["id"], "kind": "mineru", "pages": "not a page list"}
             ]
 
-        for mutate in (toc_index, toc_children, chapter_title, bookmark, position, job):
+        for mutate in (toc_index, toc_children, toc_pdf_y, chapter_title, bookmark, position, job):
             with self.subTest(case=mutate.__name__):
                 with self.assertRaises(ValueError):
                     data.prepare_restore(self.altered_package(mutate))

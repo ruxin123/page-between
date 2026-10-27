@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import zipfile
 import os
+import math
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, unquote, urlsplit
@@ -738,6 +739,34 @@ def text_metadata(source, destination, enabled):
     }
 
 
+def pdf_destination_y(page, destination):
+    def number(value):
+        try:
+            value = float(value)
+            return value if math.isfinite(value) else None
+        except (TypeError, ValueError):
+            return None
+
+    media, crop = page.mediabox, page.cropbox
+    x0, y0 = max(media.left, crop.left), max(media.bottom, crop.bottom)
+    x1, y1 = min(media.right, crop.right), min(media.top, crop.top)
+    if x1 <= x0 or y1 <= y0:
+        x0, y0, x1, y1 = media
+    rotation = page.rotation % 360
+    value = number(destination.left if rotation in (90, 270) else destination.top)
+    if value is None:
+        return 0.0
+    if rotation == 90:
+        ratio = (value - float(x0)) / float(x1 - x0)
+    elif rotation == 180:
+        ratio = (value - float(y0)) / float(y1 - y0)
+    elif rotation == 270:
+        ratio = (float(x1) - value) / float(x1 - x0)
+    else:
+        ratio = (float(y1) - value) / float(y1 - y0)
+    return max(0.0, min(1.0, ratio))
+
+
 def pdf_metadata(source):
     from pdf_enhancement import tree_from_entries
 
@@ -759,6 +788,7 @@ def pdf_metadata(source):
                             "index": number + 1,
                             "printed": "",
                             "level": level,
+                            "pdfY": pdf_destination_y(reader.pages[number], item),
                         }
                     )
 
@@ -780,6 +810,7 @@ def pdf_metadata(source):
         "url": url_for(source),
         "toc": tree_from_entries(toc),
         "tocSource": "pdf-outline" if toc else "pending",
+        "pdfOutlineVersion": 1,
         "pageOffset": None,
         "language": "zh" if re.search(r"[\u4e00-\u9fff]", source.stem) else "en",
     }

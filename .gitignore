@@ -50,6 +50,7 @@
 !/tests/adapters_test.py
 !/tests/pipeline_test.py
 !/tests/pdf_preparation_test.py
+!/tests/pdf_outline_test.py
 !/tests/demo_test.py
 !/tests/page-turn.test.mjs
 !/tests/library.test.mjs

@@ -2,6 +2,20 @@ export function flatToc(items) {
   return items.flatMap((item) => [item, ...flatToc(item.children || [])]);
 }
 
+export function pdfTocAtPosition(items, index, y = 0) {
+  return (
+    flatToc(items)
+      .filter(
+        (item) =>
+          item.index &&
+          (item.index < index ||
+            (item.index === index && (item.pdfY || 0) <= y + 0.002)),
+      )
+      .sort((a, b) => a.index - b.index || (a.pdfY || 0) - (b.pdfY || 0))
+      .at(-1) || null
+  );
+}
+
 export function fragmentTarget(doc, fragment) {
   if (!doc || !fragment) return null;
   return (

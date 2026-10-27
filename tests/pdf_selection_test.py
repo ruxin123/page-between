@@ -85,6 +85,24 @@ class Selection(unittest.TestCase):
         self.assertEqual(mapping[4], [4, 6])
         self.assertEqual(mapping[-1], mapping[-2])
 
+    def test_tex_command_length_does_not_reject_correct_prose_alignment(self):
+        raw = "Observe that @ ~ @ since @ C @ X @ is a relation on an empty set."
+        target = (
+            r"Observe that $\varnothing \sim \varnothing$ since "
+            r"$\varnothing \subset \varnothing \times \varnothing$ "
+            "is a relation on an empty set."
+        )
+        mapping = character_map(raw, target)
+        self.assertIsNotNone(mapping)
+        start = raw.index("@")
+        interval = mapping[start : raw.index(" since")]
+        bounds = [item for item in interval if item]
+        self.assertEqual(
+            target[min(x[0] for x in bounds) : max(x[1] for x in bounds)],
+            r"$\varnothing \sim \varnothing$",
+        )
+        self.assertIsNone(character_map("Unrelated running page header", target))
+
     def test_blocks_do_not_mix_neighboring_columns_and_validate_spans(self):
         spans = [
             {"text": "A functlon", "bbox": [0.1, 0.1, 0.4, 0.2]},

@@ -166,8 +166,8 @@ c.save();sys.stdout.buffer.write(b.getvalue())
       ),
     );
     assert(
-      buffers.length <= 3 && buffers.reduce((a, b) => a + b, 0) <= 24_000_000,
-      "Old page bitmaps must be released after rapid scrolling.",
+      buffers.length <= 8 && buffers.reduce((a, b) => a + b, 0) <= 24_000_000,
+      "Recent page bitmaps must respect the bounded cache after rapid scrolling.",
     );
     const lose = async (kind) => {
       const before = await page.evaluate((kind) => {
@@ -214,6 +214,114 @@ c.save();sys.stdout.buffer.write(b.getvalue())
     await ready(29);
     await page.waitForTimeout(200);
     await ready(29);
+    // At a normal reading scale, recent pages can stay cached within 24 MP.
+    await page.close();
+    await api("/api/state", { prefs: { pdfZoom: 100 } });
+    const cachedPage = await browser.newPage({
+      viewport: { width: 1280, height: 900 },
+      deviceScaleFactor: 1,
+    });
+    cachedPage.on("pageerror", (e) => failures.push(e.message));
+    await cachedPage.goto(base + "/#/read/" + book.id);
+    await cachedPage.waitForFunction(
+      () =>
+        document.querySelector(".pdf-page canvas") &&
+        !document.querySelector("#ai-open").disabled,
+    );
+    const jumpCached = async (index) => {
+      await cachedPage.evaluate((index) => {
+        document.querySelector("#reading-viewport").scrollTop =
+          document.querySelector(`.pdf-page[data-page="${index}"]`).offsetTop;
+      }, index);
+      await cachedPage.waitForFunction(
+        (index) =>
+          document.querySelector(`.pdf-page[data-page="${index}"]`)?.dataset
+            .rendered === "ready",
+        index,
+      );
+    };
+    await jumpCached(29);
+    await cachedPage.evaluate(() => {
+      window.cachedCanvas = document.querySelector(
+        '.pdf-page[data-page="29"] canvas',
+      );
+      const proxy = document.querySelector(
+        '.pdf-page[data-page="29"]',
+      )._pageProxy;
+      const proto = Object.getPrototypeOf(proxy),
+        getText = proto.getTextContent,
+        render = proto.render;
+      proto.getTextContent = function (...args) {
+        if (this.pageNumber === 50)
+          return new Promise((resolve) => {
+            window.resumePdfText = () => resolve(getText.apply(this, args));
+          });
+        return getText.apply(this, args);
+      };
+      proto.render = function (...args) {
+        const task = render.apply(this, args);
+        if (this.pageNumber !== 70 || window.delayedPdfPaint) return task;
+        window.delayedPdfPaint = true;
+        let cancel;
+        return {
+          promise: new Promise((resolve, reject) => {
+            cancel = reject;
+            task.promise.catch(reject);
+            window.resumeOldPdfPaint = () => task.promise.then(resolve, reject);
+          }),
+          cancel() {
+            window.obsoletePdfPaintCancelled = true;
+            task.cancel();
+            const error = new Error("Cancelled obsolete prefetch");
+            error.name = "RenderingCancelledException";
+            cancel(error);
+          },
+        };
+      };
+    });
+    await jumpCached(32);
+    await jumpCached(29);
+    assert(
+      await cachedPage.evaluate(
+        () =>
+          document.querySelector('.pdf-page[data-page="29"] canvas') ===
+          window.cachedCanvas,
+      ),
+      "A recent page should reuse its finished bitmap.",
+    );
+    await jumpCached(50);
+    await cachedPage.waitForFunction(
+      () => typeof window.resumePdfText === "function",
+    );
+    await jumpCached(51);
+    assert(
+      await cachedPage.evaluate(
+        () => !document.querySelector('.pdf-page[data-page="50"]')._textReady,
+      ),
+      "A slow text layer must not block the following page image.",
+    );
+    await cachedPage.evaluate(() => window.resumePdfText());
+    await cachedPage.waitForFunction(
+      () => document.querySelector('.pdf-page[data-page="50"]')._textReady,
+    );
+    await cachedPage.evaluate(() => {
+      document.querySelector("#reading-viewport").scrollTop =
+        document.querySelector('.pdf-page[data-page="70"]').offsetTop;
+    });
+    await cachedPage.waitForFunction(() => window.delayedPdfPaint);
+    await jumpCached(100);
+    assert(
+      await cachedPage.evaluate(() => window.obsoletePdfPaintCancelled),
+      "An obsolete paint must yield to the new reading position.",
+    );
+    await jumpCached(70);
+    assert(
+      await cachedPage.evaluate(
+        () =>
+          document.querySelector('.pdf-page[data-page="70"] canvas')?.width > 0,
+      ),
+      "Cancelled pages must remain retryable when revisited.",
+    );
     assert.deepEqual(failures, []);
     console.log(
       JSON.stringify({
@@ -227,6 +335,9 @@ c.save();sys.stdout.buffer.write(b.getvalue())
         selectionLayerRetained: true,
         resize: true,
         syntheticContextLoss: true,
+        recentBitmapReused: true,
+        slowTextDoesNotBlockImage: true,
+        obsoletePaintCancelledAndRevisited: true,
       }),
     );
   } finally {

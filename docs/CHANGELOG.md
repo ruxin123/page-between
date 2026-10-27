@@ -2,6 +2,17 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版与匿名演示版安装包，以及 `SHA256SUMS.txt`。
 
+
+## 0.5.16 · 2026-10-27
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.16) · Build 240 · 前端 2.38 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.16)
+
+- 修复扫描页含长 LaTeX 命令的段落校正失败，避免本地 OCR 的错误符号进入复制与提问选段；仍保留原始公式源码。
+- PDF 页面图像绘制与文字层提取分开，文字层较慢时后续页仍可显示。
+- 保留近期页面图像，并按 24 MP / 8 页上限淘汰非当前页，减少来回翻动时重复绘制。
+- 快速跳转优先处理新阅读位置，取消过期绘制；返回被取消的页面可正常重试。
+- 页面等待提示区分 PDF 原页绘制与 OCR 划词准备。
+
 ## 0.5.15 · 2026-10-27
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.15) · Build 239 · 前端 2.37 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.15)

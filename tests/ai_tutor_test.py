@@ -227,7 +227,10 @@ class Tutor(unittest.TestCase):
     def test_source_preview_renders_objects_without_changing_original_text(self):
         equation = r"\frac{x^2}{1+x}"
         table = "x\tf(x)\n0\t0\n1\t1"
-        quote = "**原文**\n\n" + equation + "\n\n" + table
+        quote = (
+            "**原文**\n\n" + equation + "\n\n" + table
+            + "\n\n" + r"Observe $\varnothing \sim \varnothing$ on an empty set."
+        )
         payload = {"quote": quote, "position": {"index": 1}}
         before = json.dumps(payload, ensure_ascii=False)
         book = {**self.book, "type": "pdf", "pages": 1}
@@ -243,6 +246,7 @@ class Tutor(unittest.TestCase):
         if tutor.shutil.which("pandoc"):
             self.assertTrue(result.xpath("//strong"))
             self.assertTrue(result.xpath("//math//mfrac"))
+            self.assertTrue(result.xpath('//annotation[contains(text(), "varnothing")]'))
             self.assertEqual(len(result.xpath("//table//tr")), 3)
 
     def test_source_preview_bounds_and_untrusted_markup(self):

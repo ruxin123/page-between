@@ -37,7 +37,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.37";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.38";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -120,7 +120,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.37";
+document.body.dataset.readerBuild = "2.38";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -690,7 +690,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.37",
+        build: "2.38",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1530,6 +1530,8 @@ function refreshPdfEnhancements() {
 let pdfDocument,
   pdfRevision = 0,
   pdfWidth = 0,
+  pdfUse = 0,
+  pdfDirection = 1,
   pdfRenderQueue = Promise.resolve();
 const pdfTasks = new Map();
 const pdfQueued = new Set();
@@ -1545,6 +1547,7 @@ function releasePdfPage(root) {
   delete root._viewport;
   delete root._readerBlocks;
   delete root._textReady;
+  delete root._lastUsed;
   delete root.dataset.rendered;
   delete root.dataset.ocr;
   root.setAttribute("aria-hidden", "true");
@@ -1648,34 +1651,17 @@ async function paintPdfPage(index, revision) {
     root.append(text, objects);
     // Selection metadata is independent of the successfully drawn page image.
     root.dataset.rendered = "ready";
-    const content = await page.getTextContent();
-    if (!active() || root.querySelector(".textLayer") !== text) return;
-    if (content.items.some((item) => item.str?.trim())) {
-      text.style.setProperty("--scale-factor", viewport.scale);
-      text.style.setProperty(
-        "--total-scale-factor",
-        viewport.scale * (viewport.userUnit || 1),
-      );
-      const layer = new pdfjs.TextLayer({
-        textContentSource: content,
-        container: text,
-        viewport,
-      });
-      await layer.render();
-      if (!active() || root.querySelector(".textLayer") !== text) return;
-      prepareNativeHighlights(text, layer.textDivs, content, viewport);
-      root.dataset.ocr = "native";
-    }
-    root._textReady = true;
-    refreshPdfObjects(current, root, revision).catch(() => {});
-    if (index === location.index && !root.dataset.ocr)
-      prepareOcr(current, index, viewport, revision, root);
+    // Text extraction/alignment must not hold up the next page's bitmap.
+    preparePdfText(page, text, root, viewport, index, revision);
   } catch (error) {
-    if (!active() || error.name === "RenderingCancelledException") return;
-    // A text-layer failure must not hide an already rendered PDF page.
-    if (root.dataset.rendered === "ready") {
-      root._textReady = true;
-      toast("页面已显示，文字层暂时无法准备：" + error.message);
+    if (!active()) return;
+    if (error.name === "RenderingCancelledException") {
+      if (root.querySelector("canvas")) root.dataset.rendered = "lost";
+      else {
+        delete root.dataset.rendered;
+        root._pageProxy?.cleanup();
+        delete root._pageProxy;
+      }
       return;
     }
     root.dataset.rendered = "error";
@@ -1700,9 +1686,44 @@ async function paintPdfPage(index, revision) {
     if (active()) root.setAttribute("aria-busy", "false");
   }
 }
+async function preparePdfText(page, text, root, viewport, index, revision) {
+  const active = () =>
+    revision === renderRevision &&
+    root.isConnected &&
+    root._viewport === viewport &&
+    root.querySelector(".textLayer") === text;
+  try {
+    const content = await page.getTextContent();
+    if (!active()) return;
+    if (content.items.some((item) => item.str?.trim())) {
+      text.style.setProperty("--scale-factor", viewport.scale);
+      text.style.setProperty(
+        "--total-scale-factor",
+        viewport.scale * (viewport.userUnit || 1),
+      );
+      const layer = new pdfjs.TextLayer({
+        textContentSource: content,
+        container: text,
+        viewport,
+      });
+      await layer.render();
+      if (!active()) return;
+      prepareNativeHighlights(text, layer.textDivs, content, viewport);
+      root.dataset.ocr = "native";
+    }
+    root._textReady = true;
+    refreshPdfObjects(current, root, revision).catch(() => {});
+    if (index === location.index && !root.dataset.ocr)
+      prepareOcr(current, index, viewport, revision, root);
+  } catch (error) {
+    if (!active()) return;
+    root._textReady = true;
+    toast("页面已显示，文字层暂时无法准备：" + error.message);
+  }
+}
 function wantedPdfPages() {
   const index = location.index;
-  const wanted = new Set([index, index - 1, index + 1]);
+  const wanted = new Set([index, index + pdfDirection, index - pdfDirection]);
   if (prefs.pdfMode === "scroll") {
     const view = $("reading-viewport"),
       end = view.scrollTop + view.clientHeight;
@@ -1726,9 +1747,12 @@ function ensurePdfPages() {
   const revision = renderRevision,
     index = location.index;
   const wanted = wantedPdfPages();
+  // A fast jump takes priority over an obsolete, already running prefetch.
+  for (const [page, task] of pdfTasks) if (!wanted.has(page)) task.cancel();
   for (const page of wanted)
     if (page >= 1 && page <= current.pages) {
       const root = pdfPageElement(page);
+      if (root) root._lastUsed = ++pdfUse;
       const canvas = root?.querySelector("canvas");
       if (
         root?.dataset.rendered === "ready" &&
@@ -1775,14 +1799,27 @@ function ensurePdfPages() {
   }
   showPdfOcrStatus(active);
   warmPdfPages();
-  for (const element of $("pdf-paper").children) {
+  // Retain recent page images instead of throwing them away on every turn.
+  // Limit retained backing stores to 24 MP / 8 pages (visible pages win).
+  const cached = [...$("pdf-paper").children].filter((root) =>
+    ["ready", "lost"].includes(root.dataset.rendered),
+  );
+  const area = (root) => {
+    const canvas = root.querySelector("canvas");
+    return (canvas?.width || 0) * (canvas?.height || 0);
+  };
+  let pixels = cached.reduce((sum, root) => sum + area(root), 0),
+    count = cached.length;
+  for (const element of cached.sort((a, b) => a._lastUsed - b._lastUsed)) {
+    if (pixels <= 24_000_000 && count <= 8) break;
     if (
-      !wanted.has(Number(element.dataset.page)) &&
-      ["ready", "lost"].includes(element.dataset.rendered) &&
-      !getSelection()?.containsNode(element, true)
-    ) {
-      releasePdfPage(element);
-    }
+      wanted.has(Number(element.dataset.page)) ||
+      getSelection()?.containsNode(element, true)
+    )
+      continue;
+    pixels -= area(element);
+    count--;
+    releasePdfPage(element);
   }
 }
 function pdfPageAt(at) {
@@ -1815,6 +1852,7 @@ function updatePdfScroll() {
   );
   const lo = pdfPageAt(view.scrollTop + probe);
   if (lo !== location.index) {
+    pdfDirection = lo > location.index ? 1 : -1;
     location.index = lo;
     $("ocr-status").hidden = true;
   }
@@ -1826,6 +1864,7 @@ async function renderPdf(position, revision) {
   pdfTasks.clear();
   pdfQueued.clear();
   pdfRenderQueue = Promise.resolve();
+  pdfDirection = 1;
   pdfDocument = null;
   if (!pdfs.has(book.id))
     pdfs.set(

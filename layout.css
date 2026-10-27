@@ -2933,7 +2933,7 @@ body[data-native="true"] #palm-close {
   margin-bottom: 24px;
 }
 .pdf-page:empty:after {
-  content: "正在准备页面…";
+  content: "正在绘制 PDF 原页…";
   display: block;
   position: absolute;
   inset: 0;

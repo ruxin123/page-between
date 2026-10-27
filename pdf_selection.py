@@ -12,8 +12,17 @@ def utf16(value):
 
 def normalized(value, *, canonical=False):
     text, offsets, position = [], [], 0
-    for char in value:
+    # Compare rendered content, not the spelling of TeX commands. An inline
+    # formula is already an indivisible selection unit; keep its exact source
+    # interval while giving it one comparison token, even when OCR read it as @.
+    tokens = re.findall(r"\$[^$]+\$|[\s\S]", value) if canonical else value
+    for char in tokens:
         end = position + utf16(char)
+        if canonical and char.startswith("$") and len(char) > 1:
+            text.append("\ufffc")
+            offsets.append((position, end))
+            position = end
+            continue
         normalized_char = unicodedata.normalize("NFKC", char).casefold()
         normalized_char = normalized_char.translate(str.maketrans("‘’“”", "''\"\""))
         for part in normalized_char:

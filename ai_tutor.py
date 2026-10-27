@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from functools import lru_cache
+from itertools import groupby
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
@@ -23,6 +24,7 @@ import service_settings
 import book_index
 import book_images
 from pdf_enhancement import page_enrichment
+from pdf_selection import standalone_math
 
 LOCK = threading.RLock()
 ACTIVE = set()
@@ -240,17 +242,11 @@ def source_preview(book, payload):
         blocks, key=lambda item: len(item.get("text", "")), reverse=True
     ):
         text = block.get("text", "")
-        if not text or block.get("type") not in {"equation", "table"}:
+        formula = standalone_math(text)
+        if not text or (block.get("type") not in {"equation", "table"} and formula is None):
             continue
-        if block["type"] == "equation":
-            stripped = text.strip()
-            formatted = (
-                text
-                if (stripped.startswith("$") and stripped.endswith("$"))
-                or (stripped.startswith(r"\[") and stripped.endswith(r"\]"))
-                or (stripped.startswith(r"\(") and stripped.endswith(r"\)"))
-                else "$$\n" + text + "\n$$"
-            )
+        if block["type"] == "equation" or formula is not None:
+            formatted = "$$\n" + (formula if formula is not None else text) + "\n$$"
         elif "\t" in text:
             rows = [line.split("\t") for line in text.splitlines()]
             columns = max(map(len, rows))
@@ -354,6 +350,23 @@ def _answer_html(text, pandoc, source):
         if node.tag not in allowed and node.tag not in {"html", "body"}:
             node.tag = "mrow" if any(parent.tag == "math" for parent in node.iterancestors()) else "span"
     body = root.find("body")
+    if source:
+        def displayed_formula(node):
+            return (
+                node.tag == "p" and len(node) == 1
+                and node[0].tag == "math" and node[0].get("display") == "block"
+                and not (node.text or "").strip()
+                and not (node[0].tail or "").strip()
+            )
+
+        # A consecutive formula group shares one left edge instead of centering each row.
+        for parent in list(body.iter()):
+            for formula, paragraphs in groupby(list(parent), displayed_formula):
+                paragraphs = list(paragraphs)
+                if formula and len(paragraphs) > 1:
+                    group = etree.Element("div", {"class": "source-equations"})
+                    parent.insert(parent.index(paragraphs[0]), group)
+                    group.extend(paragraphs)
     return "".join(
         etree.tostring(child, encoding="unicode", method="html") for child in body
     )

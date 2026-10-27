@@ -3294,6 +3294,22 @@ body[data-mode="palm"] .question-panel textarea {
 #ai-quote > :last-child {
   margin-bottom: 0;
 }
+.source-equations {
+  display: grid;
+  grid-template-columns: max-content;
+  width: fit-content;
+  max-width: 100%;
+  margin: 16px auto;
+  overflow-x: auto;
+}
+.source-equations > p {
+  margin: 8px 0;
+}
+.ai-answer .source-equations math[display="block"] {
+  display: inline-block;
+  margin: 0;
+  text-align: left;
+}
 
 .cloud-dialog {
   width: min(520px, calc(100vw - 32px));

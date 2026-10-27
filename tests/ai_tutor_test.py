@@ -270,6 +270,24 @@ class Tutor(unittest.TestCase):
             result.xpath("//script|//img|//*[@src or @href or @onclick or @style]")
         )
 
+    def test_formula_only_text_uses_the_same_layout_as_neighboring_equations(self):
+        if not tutor.shutil.which("pandoc"):
+            self.skipTest("Pandoc required")
+        texts = [r"D_1=\{x\in D\mid x\text{ has a predecessor}\};",
+                 r"$D_2=\{x\in D\mid x\text{ has no predecessor}\}$;",
+                 r"D_3=\{x\in D\mid x\text{ has infinite ancestry}\}."]
+        payload = {"quote": "\n\n".join(texts), "position": {"index": 1}}
+        before = json.dumps(payload)
+        blocks = [{"type": kind, "text": text} for kind, text in
+                  zip(["equation", "text", "equation"], texts)]
+        with patch.object(tutor, "page_enrichment", return_value=blocks):
+            result = html.fromstring(tutor.source_preview(
+                {**self.book, "type": "pdf", "pages": 1}, payload))
+        self.assertEqual(len(result.xpath('//*[@class="source-equations"]/p/math[@display="block"]')), 3)
+        self.assertEqual(len(result.xpath('//math//msub')), 3)
+        self.assertFalse(result.xpath('//p[not(math)]'))
+        self.assertEqual(json.dumps(payload), before)
+
     def test_math_styles_and_spaced_array_columns_render_without_rewriting_code(self):
         if not tutor.shutil.which("pandoc"):
             self.skipTest("Pandoc is required for math rendering")

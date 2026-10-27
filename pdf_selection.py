@@ -10,6 +10,20 @@ def utf16(value):
     return len(value.encode("utf-16-le")) // 2
 
 
+def standalone_math(value):
+    """Return a complete delimited formula, including trailing punctuation."""
+    match = re.fullmatch(
+        r"\s*(?:\$\$(?P<display>[\s\S]+?)\$\$|\$(?P<inline>[^$]+)\$|"
+        r"\\\[(?P<bracket>[\s\S]+?)\\\]|\\\((?P<paren>[\s\S]+?)\\\))"
+        r"\s*(?P<punct>[,;:.!?，；：。！？]*)\s*",
+        value,
+    )
+    if not match:
+        return None
+    return next(match[name] for name in ("display", "inline", "bracket", "paren")
+                if match[name] is not None) + match["punct"]
+
+
 def normalized(value, *, canonical=False):
     text, offsets, position = [], [], 0
     # Compare rendered content, not the spelling of TeX commands. An inline
@@ -73,7 +87,10 @@ def align_spans(spans, blocks):
     groups = {}
     orders = {id(block): order for order, block in enumerate(blocks)}
     for block in blocks:
-        if block.get("type") in {"equation", "table"} and block.get("text"):
+        if block.get("text") and (
+            block.get("type") in {"equation", "table"}
+            or (block.get("type") == "text" and standalone_math(block["text"]) is not None)
+        ):
             groups[block.get("id") or str(block["bbox"])] = {
                 "text": block["text"],
                 "spans": [],

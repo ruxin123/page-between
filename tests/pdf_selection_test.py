@@ -3,10 +3,24 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pdf_selection import align_spans, character_map, utf16
+from pdf_selection import align_spans, character_map, standalone_math, utf16
 
 
 class Selection(unittest.TestCase):
+    def test_math_only_text_blocks_are_whole_objects(self):
+        text = r"$D_1 = \{x \in D \mid x \text{ has a predecessor}\}$;"
+        groups = align_spans(
+            [{"text": "D,={xeD | xhasa predecessor};", "bbox": [0.2, 0.2, 0.8, 0.24]}],
+            [{"id": "line", "type": "text", "text": text, "bbox": [0.1, 0.18, 0.9, 0.25]}],
+        )
+        self.assertTrue(groups[0]["whole"])
+        self.assertEqual(groups[0]["text"], text)
+        self.assertEqual(groups[0]["spans"], [{"index": 0}])
+        self.assertEqual(standalone_math(r"\[x^2\];"), "x^2;")
+        self.assertEqual(standalone_math("$$x^2$$"), "x^2")
+        self.assertIsNone(standalone_math("For $x$ and $y$, consider this."))
+        self.assertIsNone(standalone_math("$x$ and $y$"))
+
     def test_formula_and_table_are_whole_objects_even_when_ocr_text_does_not_match(
         self,
     ):

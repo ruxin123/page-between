@@ -8,18 +8,17 @@
 
 ## 下载与安装
 
-当前版本 **0.5.16**，提供 Apple Silicon（arm64）安装包。
+当前版本 **0.5.17**，提供 Apple Silicon（arm64）安装包。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.16/page-between-0.5.16-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
-| [页间 · 演示版](https://github.com/ruxin123/page-between/releases/download/v0.5.16/page-between-demo-0.5.16-macos-arm64.zip) | 内置五本原创示例，快速体验阅读与学习功能 |
+| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.17/page-between-0.5.17-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
 
-1. 下载 ZIP 并解压，将「页间.app」或「页间演示.app」拖入应用程序文件夹。
+1. 下载 ZIP 并解压，将「页间.app」拖入应用程序文件夹。
 2. 打开应用，在书库点击「导入书籍」，选择文件并设置是否启用文档解析。
 3. 点击封面进入阅读；需要 AI 或云解析时，再到「设置」中配置服务。
 
-安装包包含运行组件，无需另外安装 Python、Node.js 或开发工具。普通版与演示版可以并存，书库、阅读记录与服务设置彼此独立。升级时退出应用，用新版替换旧 App，已有数据继续保留；建议升级前在设置中备份书库。
+安装包包含运行组件，无需另外安装 Python、Node.js 或开发工具。升级时退出应用，用新版替换旧 App，已有数据继续保留；建议升级前在设置中备份书库。
 
 当前安装包为开发预览版，采用 ad-hoc 签名，尚未经过 Apple 公证。使用平台为 Apple Silicon、macOS 27.0.1，其他系统版本的兼容性尚未确定。
 
@@ -107,7 +106,6 @@ API Key 与 Token 由 macOS 钥匙串保存。连接本机模型时可使用回�
 图书与阅读积累保存在本机，应用不会自动扫描 Apple 图书或其他私人书库。
 
 - 普通版：`~/Library/Application Support/Page Between/Personal/`
-- 演示版：`~/Library/Application Support/Page Between/Review Demo/`
 - 临时缓存：`~/Library/Caches/Page Between/`
 
 可在「设置 → 书库与数据」中备份、恢复和清理缓存。安装包及本仓库不包含个人书籍、阅读记录或凭据；页面截图使用原创演示资料。
@@ -124,20 +122,20 @@ xcode-select --install
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python server.py --demo
+python server.py
 ```
 
-打开 [127.0.0.1:8779](http://127.0.0.1:8779/) 体验原创示例。使用 `python server.py` 启动个人书库，地址为 [127.0.0.1:8778](http://127.0.0.1:8778/)。两种模式的数据分别位于 `demo-data/` 与 `data/`，均不纳入版本控制；本地服务仅监听回环地址。
+打开 [127.0.0.1:8778](http://127.0.0.1:8778/)。开发书库位于 `data/`，不纳入版本控制；本地服务仅监听回环地址。
 
 在 macOS 上构建独立 App：
 
 ```sh
 python -m pip install -r requirements-build.txt
 python scripts/build_app.py
-# 演示版：python scripts/build_app.py --demo
+python scripts/package_release.py
 ```
 
-输出目录为 `~/Library/Caches/Page Between/build/`。历史安装包、对应源码标签与逐版说明统一保存在 [GitHub Releases](https://github.com/ruxin123/page-between/releases)，日常使用直接下载安装包即可。
+App 输出目录为 `~/Library/Caches/Page Between/build/`。发布脚本仅打包普通版，并生成安装包、校验值和版本清单。演示模式仅供内部截图与开发验证，不对外提供安装包。历史安装包、对应源码标签与逐版说明统一保存在 [GitHub Releases](https://github.com/ruxin123/page-between/releases)，日常使用直接下载安装包即可。
 
 ## 更多资料
 

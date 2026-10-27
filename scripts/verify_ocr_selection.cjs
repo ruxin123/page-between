@@ -246,13 +246,21 @@ const normalize = (text) => text.replace(/\s+/g, " ").trim();
             ),
           );
           const bands = await page
-            .locator(".ocr-selection-highlights > div")
-            .evaluateAll((nodes) =>
-              nodes.map((node) => {
-                const rect = node.getBoundingClientRect();
-                return { left: rect.left, right: rect.right };
-              }),
-            );
+            .locator(".ocr-selection-highlights")
+            .evaluate((svg) => {
+              const box = svg.getBoundingClientRect(),
+                scale = box.width / svg.clientWidth;
+              return [
+                ...svg.firstElementChild
+                  .getAttribute("d")
+                  .matchAll(
+                    /M([\d.e+-]+),([\d.e+-]+)H([\d.e+-]+)V([\d.e+-]+)H[\d.e+-]+Z/g,
+                  ),
+              ].map((m) => ({
+                left: box.left + Number(m[1]) * scale,
+                right: box.left + Number(m[3]) * scale,
+              }));
+            });
           assert.equal(
             bands.length,
             Math.abs(last - first) + 1,
@@ -277,8 +285,8 @@ const normalize = (text) => text.replace(/\s+/g, " ").trim();
     await page.mouse.click(10, 10);
     await page.evaluate(() => new Promise(requestAnimationFrame));
     assert.equal(
-      await page.locator(".ocr-selection-highlights > div").count(),
-      0,
+      await page.locator(".ocr-selection-highlights path").getAttribute("d"),
+      "",
       "Clearing selection also clears the continuous bands",
     );
     assert.equal(

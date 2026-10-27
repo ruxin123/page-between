@@ -2,6 +2,15 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版与匿名演示版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.15 · 2026-10-27
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.15) · Build 239 · 前端 2.37 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.15)
+
+- 统一原生 PDF 文字层与 PDF.js 测量时的语言环境，修复 macOS 默认字体不同造成的行尾高亮溢出。
+- 根据 PDF 原始字宽校准透明文字行，保留分栏间隔、旋转、原生拖选与复制内容。
+- 扫描页的逐行高亮改为单个 SVG 路径一次绘制，行框相交时颜色不再叠加变深。
+- 新增原始字宽边界与叠色像素检查，覆盖四种主题和两种像素密度。
+
 ## 0.5.14 · 2026-10-27
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.14) · Build 238 · 前端 2.36 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.14)

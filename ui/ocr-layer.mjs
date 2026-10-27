@@ -159,9 +159,15 @@ export function paintOcrSelection(root, selection) {
     const page = layer.parentElement;
     let overlay = page.querySelector(".ocr-selection-highlights");
     if (!overlay) {
-      overlay = layer.ownerDocument.createElement("div");
-      overlay.className = "ocr-selection-highlights";
+      overlay = layer.ownerDocument.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "svg",
+      );
+      overlay.classList.add("ocr-selection-highlights");
       overlay.setAttribute("aria-hidden", "true");
+      overlay.append(
+        layer.ownerDocument.createElementNS(overlay.namespaceURI, "path"),
+      );
       layer.before(overlay);
     }
     const bands = new Map();
@@ -190,17 +196,19 @@ export function paintOcrSelection(root, selection) {
     const box = page.getBoundingClientRect(),
       scaleX = box.width / page.clientWidth,
       scaleY = box.height / page.clientHeight;
-    const elements = [...bands.values()].map((band) => {
-      const mark = layer.ownerDocument.createElement("div");
-      Object.assign(mark.style, {
-        left: `${(band.left - box.left) / scaleX}px`,
-        top: `${(band.top - box.top) / scaleY}px`,
-        width: `${(band.right - band.left) / scaleX}px`,
-        height: `${(band.bottom - band.top) / scaleY}px`,
-      });
-      return mark;
-    });
-    overlay.replaceChildren(...elements);
+    // One fill composites all lines once, even when OCR boxes overlap.
+    overlay.firstElementChild.setAttribute(
+      "d",
+      [...bands.values()]
+        .map((band) => {
+          const left = (band.left - box.left) / scaleX,
+            right = (band.right - box.left) / scaleX,
+            top = (band.top - box.top) / scaleY,
+            bottom = (band.bottom - box.top) / scaleY;
+          return `M${left},${top}H${right}V${bottom}H${left}Z`;
+        })
+        .join(" "),
+    );
   }
 }
 

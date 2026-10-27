@@ -1384,17 +1384,7 @@ body[data-theme="blue"] .pdf-paper.tinted canvas {
   background: transparent;
   color: transparent;
 }
-.ocr-selection-highlights {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  user-select: none;
-}
-.ocr-selection-highlights > div {
-  position: absolute;
-  background: var(--selection);
-  border-radius: 2px;
-}
+.ocr-selection-highlights,
 .pdf-selection-highlights {
   position: absolute;
   inset: 0;

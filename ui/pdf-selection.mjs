@@ -1,7 +1,13 @@
 // PDF font bounds describe the selection height; the browser still owns the range.
 export function prepareNativeHighlights(layer, divs, content, viewport) {
+  // Match PDF.js's measurement canvas; inheriting the app language changes fallback fonts.
+  layer.lang = content.lang || "";
   const items = content.items.filter((item) => typeof item.str === "string");
   const geometry = new Map();
+  const box = layer.getBoundingClientRect();
+  const sx = box.width / layer.clientWidth,
+    sy = box.height / layer.clientHeight;
+  const widths = [];
   for (const [i, node] of divs.entries()) {
     if (!node.isConnected || !items[i]) continue;
     const item = items[i],
@@ -17,6 +23,25 @@ export function prepareNativeHighlights(layer, divs, content, viewport) {
     const descent = Number.isFinite(style.descent)
       ? Math.abs(style.descent)
       : 0.2;
+    const bounds = node.getBoundingClientRect();
+    const actual =
+      Math.abs(Math.sin(angle)) < 0.001
+        ? bounds.width / sx
+        : Math.abs(Math.cos(angle)) < 0.001
+          ? bounds.height / sy
+          : 0;
+    const expected =
+      (style.vertical ? item.height : item.width) * Math.hypot(a, b);
+    // PDF.js uses unscaled synthetic spaces to bridge gaps, including column gutters.
+    if (
+      item.str.trim() &&
+      actual > 0 &&
+      expected > 0 &&
+      Number.isFinite(expected)
+    ) {
+      const scale = parseFloat(node.style.getPropertyValue("--scale-x")) || 1;
+      widths.push([node, (scale * expected) / actual]);
+    }
     geometry.set(node, {
       x: a * x + c * y + e,
       y: b * x + d * y + f,
@@ -26,6 +51,9 @@ export function prepareNativeHighlights(layer, divs, content, viewport) {
       angle,
     });
   }
+  // Read first, then apply PDF advances without repeated layout during measurement.
+  for (const [node, scale] of widths)
+    node.style.setProperty("--scale-x", scale);
   layer._selectionGeometry = geometry;
   layer.dataset.pdfNative = "true";
 }

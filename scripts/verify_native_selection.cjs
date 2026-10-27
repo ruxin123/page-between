@@ -34,6 +34,9 @@ x=48;c.drawString(x,546.8,'We introduce A');x+=stringWidth('We introduce A','Tim
 c.setFont('Times-Roman',9.6);c.drawString(x,546.8,'LIGNMENT');x+=stringWidth('LIGNMENT','Times-Roman',9.6)
 c.setFont('Times-Roman',12);c.drawString(x,546.8,' for careful reading.')
 c.drawString(48,533.6,'The following line keeps its own breathing space.')
+c.setFont('Helvetica',9.96)
+c.drawString(48,505,'A long sans-serif line must end at its PDF advance, with no extra highlight.')
+c.setFont('Times-Roman',12)
 c.drawString(48,480,'Left column remains separate.')
 c.drawString(330,480,'Right column remains separate.')
 c.saveState();c.translate(80,120);c.rotate(90);c.drawString(0,0,'Rotated selection remains readable.');c.restoreState()
@@ -73,15 +76,29 @@ c.save();import sys;sys.stdout.buffer.write(b.getvalue())
             document.querySelector(".textLayer[data-pdf-native]"),
         );
         await page.locator("#toc-close").click();
-        const initial = await page.evaluate(() => {
+        const initial = await page.evaluate(async () => {
           const root = document.querySelector('.pdf-page[data-page="1"]'),
             layer = root.querySelector(".textLayer");
           const spans = [...layer.querySelectorAll("span")];
           const first = spans.find((s) => s.textContent.startsWith("A quiet"));
+          const content = await root._pageProxy.getTextContent();
+          const widths = ["A quiet", "A long sans-serif"].map((prefix) => {
+            const node = spans.find((s) => s.textContent.startsWith(prefix));
+            const item = content.items.find(
+              (item) => item.str === node.textContent,
+            );
+            return {
+              actual: node.getBoundingClientRect().width,
+              expected: item.width * root._viewport.scale,
+            };
+          });
           return {
             font: parseFloat(getComputedStyle(first).fontSize),
             expected: 12 * root._viewport.scale,
             transform: getComputedStyle(first).transform,
+            widths,
+            language: layer.lang,
+            pdfLanguage: content.lang || "",
           };
         });
         assert(
@@ -89,6 +106,13 @@ c.save();import sys;sys.stdout.buffer.write(b.getvalue())
           "PDF glyph sizing must consume the PDF.js scale, not inherit the UI font.",
         );
         assert.notEqual(initial.transform, "none");
+        assert.equal(initial.language, initial.pdfLanguage);
+        for (const { actual, expected } of initial.widths)
+          assert(
+            Math.abs(actual - expected) < 0.5,
+            "Native selection must end at the PDF advance, across language-dependent fallback fonts: " +
+              JSON.stringify(initial.widths),
+          );
         const select = async (kind) => {
           const raw = await page.evaluate(async (kind) => {
             const layer = document.querySelector(".textLayer[data-pdf-native]"),

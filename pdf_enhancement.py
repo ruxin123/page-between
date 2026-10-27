@@ -11,6 +11,7 @@ import shutil
 import hashlib
 import math
 import xml.etree.ElementTree as ET
+from lxml import etree
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -58,12 +59,110 @@ def source_digest(book):
     )
 
 
+@lru_cache(maxsize=64)
+def needs_display_geometry(path, size, modified, changed):
+    try:
+        with open_pdf(path) as document, PDF_LOCK:
+            for index in range(len(document)):
+                page = document[index]
+                try:
+                    if page.get_rotation() or any(
+                        abs(a - b) > 0.000001
+                        for a, b in zip(page.get_cropbox(), page.get_mediabox())
+                    ):
+                        return True
+                finally:
+                    page.close()
+    except (OSError, ValueError, RuntimeError):
+        return True
+    return False
+
+
+def recognition_revision(book, source):
+    if book.get("language", "en").startswith("zh"):
+        stat = source.stat()
+        if needs_display_geometry(str(source), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns):
+            return "character-boxes-v5-crop"
+    return "character-boxes-v4"
+
+
+def split_ocr_columns(data):
+    if data.get("engine") != "tesseract-eng" or data.get("flows"):
+        return data
+    lines = data.get("lines", [])
+    widths = [(segment["bbox"][2] - segment["bbox"][0]) / max(1, len(segment["text"].strip()))
+              for line in lines for segment in line.get("segments", [])
+              if segment.get("text", "").strip() and segment["bbox"][2] > segment["bbox"][0]]
+    if not widths:
+        return data
+    threshold = max(.025, statistics.median(widths) * 5)
+    def line_threshold(line):
+        sizes = [(s["bbox"][2] - s["bbox"][0]) / max(1, len(s["text"].strip()))
+                 for s in line.get("segments", []) if s.get("text", "").strip() and s["bbox"][2] > s["bbox"][0]]
+        return max(threshold, statistics.median(sizes) * 5) if sizes else threshold
+    gaps = []
+    for index, line in enumerate(lines):
+        segments = line.get("segments", [])
+        for cut in range(1, len(segments)):
+            left, right = segments[cut - 1]["bbox"][2], segments[cut]["bbox"][0]
+            if right - left >= line_threshold(line):
+                before = "".join(s["text"] for s in segments[:cut]).strip()
+                after = "".join(s["text"] for s in segments[cut:]).strip()
+                if len(before) >= 10 and len(after) >= 10:
+                    gaps.append((left, right, index))
+    if not gaps:
+        return data
+    edges = sorted({value for a, b, _ in gaps for value in (a, b)})
+    gutter = max(((a + b) / 2 for a, b in zip(edges, edges[1:])),
+                 key=lambda x: len({i for a, b, i in gaps if a <= x <= b}))
+    if len({i for a, b, i in gaps if a <= gutter <= b}) < 3:
+        return data
+    shared = [(a, b) for a, b, _ in gaps if a <= gutter <= b]
+    gutter = (max(a for a, _ in shared) + min(b for _, b in shared)) / 2
+    fragments = []
+    for line in lines:
+        segments = line.get("segments", [])
+        cuts = [0] + [i for i in range(1, len(segments))
+                      if segments[i - 1]["bbox"][2] <= gutter <= segments[i]["bbox"][0]
+                      and segments[i]["bbox"][0] - segments[i - 1]["bbox"][2] >= line_threshold(line)] + [len(segments)]
+        if len(cuts) == 2:
+            fragments.append(line)
+            continue
+        for start, end in zip(cuts, cuts[1:]):
+            cells = [dict(segment) for segment in segments[start:end]]
+            cells[-1]["text"] = cells[-1]["text"].rstrip()
+            fragments.append({**line, "text": "".join(s["text"] for s in cells).strip(),
+                              "segments": cells,
+                              "bbox": [min(s["bbox"][0] for s in cells), line["bbox"][1],
+                                       max(s["bbox"][2] for s in cells), line["bbox"][3]]})
+    spanning = sorted((line for line in fragments if line["bbox"][0] < gutter < line["bbox"][2]), key=lambda line: line["bbox"][1])
+    remaining = [line for line in fragments if line not in spanning]
+    ordered, flows = [], []
+    def append_flow(group, left, right):
+        if not group:
+            return
+        group.sort(key=lambda line: (line["bbox"][1], line["bbox"][0]))
+        flows.append({"bbox": [left, min(line["bbox"][1] for line in group), right,
+                                max(line["bbox"][3] for line in group)],
+                      "start": len(ordered), "end": len(ordered) + len(group)})
+        ordered.extend(group)
+    for span in [*spanning, None]:
+        boundary = span["bbox"][1] if span else math.inf
+        section = [line for line in remaining if line["bbox"][1] < boundary]
+        remaining = [line for line in remaining if line["bbox"][1] >= boundary]
+        append_flow([line for line in section if line["bbox"][2] <= gutter], 0, gutter)
+        append_flow([line for line in section if line["bbox"][0] >= gutter], gutter, 1)
+        if span:
+            append_flow([span], 0, 1)
+    return {**data, "lines": ordered, "flows": flows}
+
+
 def selection_directory(book):
     source = source_path(book)
     identity = {
         "source": source_digest(book),
         "language": book.get("language", "en"),
-        "recognition": "character-boxes-v4",
+        "recognition": recognition_revision(book, source),
     }
     fingerprint = hashlib.sha256(
         json.dumps(identity, sort_keys=True).encode()
@@ -100,7 +199,7 @@ def saved_selection(book, page):
             and data.get("page") == page
             and isinstance(data.get("lines"), list)
         ):
-            return data
+            return split_ocr_columns(data)
     except (OSError, ValueError, AttributeError):
         pass
     english = not book.get("language", "en").startswith("zh")
@@ -112,8 +211,10 @@ def saved_selection(book, page):
             and data.get("page") == page
             and isinstance(data.get("lines"), list)
             and data.get("engine") == ("tesseract-eng" if english else "apple-vision")
+            and (english or recognition_revision(book, source_path(book)) == "character-boxes-v4"
+                 or data.get("coordinateSpace") == "crop-rotated-v1")
         ):
-            return save_selection(book, page, data)
+            return save_selection(book, page, split_ocr_columns(data))
     except (OSError, ValueError, AttributeError):
         pass
     return None
@@ -157,6 +258,19 @@ def prepared_pages(book):
     return sorted(result)
 
 
+def table_text(value):
+    try:
+        root = etree.fromstring(value.encode(), etree.HTMLParser(encoding="utf-8", no_network=True))
+        etree.strip_elements(root, "script", "style", "iframe", "object", with_tail=False)
+        text = "\n".join(
+            "\t".join("".join(cell.itertext()).strip() for cell in row.xpath("./td|./th"))
+            for row in root.xpath(".//tr")
+        )
+        return text if text.strip() else ""
+    except (etree.Error, AttributeError):
+        return ""
+
+
 def enrichment_data(book):
     if not book.get("parseEnabled") or not book.get("enrichmentUrl"):
         return {}
@@ -166,13 +280,23 @@ def enrichment_data(book):
         else path_for(book["enrichmentUrl"])
     )
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
+        for entry in data.values():
+            for block in entry.get("blocks", []):
+                if block.get("type") == "table":
+                    if block.get("tableHtml"):
+                        block["text"] = table_text(block["tableHtml"])
+                    elif not block.get("text", "").strip():
+                        block["text"] = ""
+        return data
     except (OSError, ValueError):
         return {}
 
 
-def page_enrichment(book, page):
-    return enrichment_data(book).get(str(page), {}).get("blocks", [])
+def page_enrichment(book, page, end_page=None):
+    data = enrichment_data(book)
+    return [block for number in range(page, (end_page or page) + 1)
+            for block in data.get(str(number), {}).get("blocks", [])]
 
 
 def apply_enrichment(data, book, page, mode):
@@ -294,7 +418,12 @@ def recognize_page(book, page, mode, english):
         with open_pdf(source_path(book)) as document, PDF_LOCK:
             original = document[page - 1]
             try:
-                bitmap = original.render(scale=1900 / original.get_width())
+                width, height = original.get_width(), original.get_height()
+                bitmap = original.render(scale=min(
+                    1900 / width,
+                    math.sqrt(8_000_000 / (width * height)),
+                    8192 / max(width, height),
+                ))
                 try:
                     image = bitmap.to_pil().copy()
                 finally:
@@ -343,7 +472,7 @@ def recognize_page(book, page, mode, english):
         if result.returncode:
             raise ValueError("本页文字识别失败，可重试或继续阅读原页。")
         data = json.loads(result.stdout)
-    return data
+    return split_ocr_columns(data)
 
 
 def joined_rows(lines):

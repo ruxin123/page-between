@@ -74,6 +74,11 @@ def layout():
 
 
 class MinerU(unittest.TestCase):
+    def test_utf8_table_text_keeps_symbols_and_empty_image_tables(self):
+        self.assertEqual(mineru.table_text('<table><tr><td></td><td>σ</td><td>τ</td></tr><tr><td>映射</td><td>u ↦</td><td><eq>x^2</eq></td></tr></table>'),
+                         '\tσ\tτ\n映射\tu ↦\tx^2')
+        self.assertEqual(mineru.table_text('<table><tr><td><img src="x.jpg"/></td><td></td></tr></table>'), '')
+
     def test_page_ranges_geometry_and_untrusted_resource_addresses(self):
         self.assertEqual(
             mineru.table_text(

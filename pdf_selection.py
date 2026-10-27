@@ -5,6 +5,13 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
+MATH_PATTERN = (
+    r"(?<!\\)(?:\$\$(?:(?!\$\$)[\s\S])+?\$\$|\$(?!\$)(?:\\[\s\S]|[^$\\])+\$(?!\$)|"
+    r"\\\[(?:(?!\\\])[\s\S])+?\\\]|\\\((?:(?!\\\))[\s\S])+?\\\))"
+)
+MATH = re.compile(MATH_PATTERN)
+TOKENS = re.compile("(?P<math>" + MATH_PATTERN + r")|[\s\S]")
+
 
 def utf16(value):
     return len(value.encode("utf-16-le")) // 2
@@ -13,15 +20,14 @@ def utf16(value):
 def standalone_math(value):
     """Return a complete delimited formula, including trailing punctuation."""
     match = re.fullmatch(
-        r"\s*(?:\$\$(?P<display>[\s\S]+?)\$\$|\$(?P<inline>[^$]+)\$|"
-        r"\\\[(?P<bracket>[\s\S]+?)\\\]|\\\((?P<paren>[\s\S]+?)\\\))"
-        r"\s*(?P<punct>[,;:.!?，；：。！？]*)\s*",
+        r"\s*(?P<formula>" + MATH_PATTERN + r")\s*(?P<punct>[,;:.!?，；：。！？]*)\s*",
         value,
     )
     if not match:
         return None
-    return next(match[name] for name in ("display", "inline", "bracket", "paren")
-                if match[name] is not None) + match["punct"]
+    formula = match["formula"]
+    delimiter = 2 if formula.startswith(("$$", r"\[", r"\(")) else 1
+    return formula[delimiter:-delimiter] + match["punct"]
 
 
 def normalized(value, *, canonical=False):
@@ -29,10 +35,10 @@ def normalized(value, *, canonical=False):
     # Compare rendered content, not the spelling of TeX commands. An inline
     # formula is already an indivisible selection unit; keep its exact source
     # interval while giving it one comparison token, even when OCR read it as @.
-    tokens = re.findall(r"\$[^$]+\$|[\s\S]", value) if canonical else value
-    for char in tokens:
+    tokens = ((match.group(), match.group("math") is not None) for match in TOKENS.finditer(value)) if canonical else ((char, False) for char in value)
+    for char, formula in tokens:
         end = position + utf16(char)
-        if canonical and char.startswith("$") and len(char) > 1:
+        if formula:
             text.append("\ufffc")
             offsets.append((position, end))
             position = end
@@ -40,7 +46,7 @@ def normalized(value, *, canonical=False):
         normalized_char = unicodedata.normalize("NFKC", char).casefold()
         normalized_char = normalized_char.translate(str.maketrans("‘’“”", "''\"\""))
         for part in normalized_char:
-            if not part.isspace() and not (canonical and part == "$"):
+            if not part.isspace():
                 text.append(part)
                 offsets.append((position, end))
         position = end
@@ -167,7 +173,7 @@ def align_spans(spans, blocks):
                 "spans": mapped,
                 "math": [
                     [utf16(canonical[: m.start()]), utf16(canonical[: m.end()])]
-                    for m in re.finditer(r"\$[^$]+\$", canonical)
+                    for m in MATH.finditer(canonical)
                 ],
             }
         )

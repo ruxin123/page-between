@@ -78,75 +78,95 @@ export function renderOcrLayer(root, data, viewport, language) {
     family = language?.startsWith("zh")
       ? "Songti SC, serif"
       : "Times New Roman, serif";
-  let previousBottom = 0;
-  for (const [index, line] of data.lines.entries()) {
-    const cells = english
-      ? englishLineCells(line)
-      : line.segments?.length
-        ? line.segments
-        : [{ text: line.text, bbox: line.bbox }];
-    const row = english ? root.ownerDocument.createElement("div") : root;
-    let previousRight = 0;
-    if (english) {
-      // Normal flow lets native drag selection find the next line across the scan's blank gaps.
-      Object.assign(row.style, {
-        position: "relative",
-        left: "0",
-        marginTop: `${(line.bbox[1] - previousBottom) * viewport.height}px`,
-        width: "100%",
-        height: `${(line.bbox[3] - line.bbox[1]) * viewport.height}px`,
-        whiteSpace: "pre",
-        fontSize: "0",
-        lineHeight: "0",
+  const flows =
+    english && data.flows?.length
+      ? data.flows
+      : [{ bbox: [0, 0, 1, 1], start: 0, end: data.lines.length }];
+  for (const flow of flows) {
+    let parent = root,
+      previousBottom = flow.bbox[1];
+    if (english && data.flows?.length) {
+      parent = root.ownerDocument.createElement("div");
+      parent.className = "ocr-flow";
+      Object.assign(parent.style, {
+        position: "absolute",
+        left: `${flow.bbox[0] * viewport.width}px`,
+        top: `${flow.bbox[1] * viewport.height}px`,
+        width: `${(flow.bbox[2] - flow.bbox[0]) * viewport.width}px`,
+        height: `${(flow.bbox[3] - flow.bbox[1]) * viewport.height}px`,
       });
-      root.append(row);
-      previousBottom = line.bbox[3];
+      root.append(parent);
     }
-    for (const cell of cells) {
-      if (!validBox(cell.bbox)) continue;
-      const [x0, y0, x1, y1] = cell.bbox,
-        span = root.ownerDocument.createElement("span"),
-        height = (y1 - y0) * viewport.height;
-      span.textContent = cell.text;
-      span.dataset.ocrLine = index;
-      measure.font = `${height}px ${family}`;
-      const width = Math.max(
-        english ? 0.01 : 1,
-        measure.measureText(english ? cell.text : cell.text.trimEnd()).width,
-      );
-      Object.assign(span.style, {
-        left: `${x0 * viewport.width}px`,
-        top: `${y0 * viewport.height}px`,
-        fontSize: `${height}px`,
-        height: `${height}px`,
-        width: `${width}px`,
-        fontFamily: family,
-        transform: `scaleX(${((x1 - x0) * viewport.width) / width})`,
-      });
+    for (let index = flow.start; index < flow.end; index++) {
+      const line = data.lines[index];
+      const cells = english
+        ? englishLineCells(line)
+        : line.segments?.length
+          ? line.segments
+          : [{ text: line.text, bbox: line.bbox }];
+      const row = english ? root.ownerDocument.createElement("div") : root;
+      let previousRight = flow.bbox[0];
       if (english) {
-        const cellBox = root.ownerDocument.createElement("div");
-        Object.assign(cellBox.style, {
-          display: "inline-block",
-          verticalAlign: "top",
-          overflow: "clip",
-          width: `${(x1 - x0) * viewport.width}px`,
-          height: `${height}px`,
-          marginLeft: `${(x0 - previousRight) * viewport.width}px`,
-        });
-        Object.assign(span.style, {
+        // Normal flow lets native drag selection find the next line across the scan's blank gaps.
+        Object.assign(row.style, {
           position: "relative",
-          display: "inline-block",
           left: "0",
-          top: "0",
-          lineHeight: "1",
+          marginTop: `${(line.bbox[1] - previousBottom) * viewport.height}px`,
+          width: "100%",
+          height: `${(line.bbox[3] - line.bbox[1]) * viewport.height}px`,
+          whiteSpace: "pre",
+          fontSize: "0",
+          lineHeight: "0",
         });
-        cellBox.append(span);
-        row.append(cellBox);
-        previousRight = x1;
-      } else root.append(span);
+        parent.append(row);
+        previousBottom = line.bbox[3];
+      }
+      for (const cell of cells) {
+        if (!validBox(cell.bbox)) continue;
+        const [x0, y0, x1, y1] = cell.bbox,
+          span = root.ownerDocument.createElement("span"),
+          height = (y1 - y0) * viewport.height;
+        span.textContent = cell.text;
+        span.dataset.ocrLine = index;
+        measure.font = `${height}px ${family}`;
+        const width = Math.max(
+          english ? 0.01 : 1,
+          measure.measureText(english ? cell.text : cell.text.trimEnd()).width,
+        );
+        Object.assign(span.style, {
+          left: `${x0 * viewport.width}px`,
+          top: `${y0 * viewport.height}px`,
+          fontSize: `${height}px`,
+          height: `${height}px`,
+          width: `${width}px`,
+          fontFamily: family,
+          transform: `scaleX(${((x1 - x0) * viewport.width) / width})`,
+        });
+        if (english) {
+          const cellBox = root.ownerDocument.createElement("div");
+          Object.assign(cellBox.style, {
+            display: "inline-block",
+            verticalAlign: "top",
+            overflow: "clip",
+            width: `${(x1 - x0) * viewport.width}px`,
+            height: `${height}px`,
+            marginLeft: `${(x0 - previousRight) * viewport.width}px`,
+          });
+          Object.assign(span.style, {
+            position: "relative",
+            display: "inline-block",
+            left: "0",
+            top: "0",
+            lineHeight: "1",
+          });
+          cellBox.append(span);
+          row.append(cellBox);
+          previousRight = x1;
+        } else root.append(span);
+      }
+      if (english) row.append(root.ownerDocument.createTextNode("\n"));
+      else root.append(root.ownerDocument.createElement("br"));
     }
-    if (english) row.append(root.ownerDocument.createTextNode("\n"));
-    else root.append(root.ownerDocument.createElement("br"));
   }
 }
 

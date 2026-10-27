@@ -25,6 +25,19 @@ PIXEL = base64.b64decode(
 
 
 class Adapters(unittest.TestCase):
+    def test_html_encoding_roundtrips_utf8_and_declared_legacy_text(self):
+        for encoding, meta in [("utf-8", ""), ("gb18030", '<meta charset="gb18030"/>')]:
+            source = book_import.BOOK_ROOT / (encoding + '.html')
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(('<html lang="en"><head>' + meta + '<title>原创 σ</title></head><body><h1>第一章</h1><p>映射 τ 与集合。</p></body></html>').encode(encoding))
+            metadata = book_import.html_metadata(source)
+            self.assertEqual(metadata['title'], '原创 σ')
+            self.assertEqual(metadata['toc'][0]['title'], '第一章')
+            self.assertEqual(metadata['language'], 'en')
+            restored = book_import.load_html(source)
+            self.assertIn('映射 τ 与集合。', ''.join(restored.getroot().itertext()))
+            if meta:
+                self.assertEqual(restored.xpath('string(//meta/@charset)'), 'utf-8')
     def test_embedded_data_images_are_real_resources_in_html_and_markdown_imports(self):
         samples = {
             "png": ("image/png;base64," + base64.b64encode(PIXEL).decode(), PIXEL),

@@ -7,6 +7,9 @@ from pdf_selection import align_spans, character_map, standalone_math, utf16
 
 
 class Selection(unittest.TestCase):
+    def test_unclosed_escape_run_is_not_a_complete_formula(self):
+        self.assertIsNone(standalone_math("$" + "\\" * 4000))
+
     def test_math_only_text_blocks_are_whole_objects(self):
         text = r"$D_1 = \{x \in D \mid x \text{ has a predecessor}\}$;"
         groups = align_spans(
@@ -20,6 +23,9 @@ class Selection(unittest.TestCase):
         self.assertEqual(standalone_math("$$x^2$$"), "x^2")
         self.assertIsNone(standalone_math("For $x$ and $y$, consider this."))
         self.assertIsNone(standalone_math("$x$ and $y$"))
+        self.assertIsNone(standalone_math("$$x$$\n\nordinary text\n\n$$y$$"))
+        self.assertIsNone(standalone_math(r"\[x\] prose \[y\]"))
+        self.assertEqual(standalone_math(r"$\text{cost \$10}$"), r"\text{cost \$10}")
 
     def test_formula_and_table_are_whole_objects_even_when_ocr_text_does_not_match(
         self,
@@ -98,6 +104,18 @@ class Selection(unittest.TestCase):
         self.assertEqual(len(mapping), utf16("A deﬁnition 😀"))
         self.assertEqual(mapping[4], [4, 6])
         self.assertEqual(mapping[-1], mapping[-2])
+
+    def test_currency_and_all_formula_delimiters_keep_source_boundaries(self):
+        value = "Cost $10, unchanged."
+        mapping = character_map(value, value)
+        dollar = value.index("$")
+        self.assertEqual(mapping[dollar], [dollar, dollar + 1])
+        for formula in [r"$\text{cost \$10}$", r"\(x^2\)", r"\[x^2\]", "$$x^2$$"]:
+            target = "Observe " + formula + " in the original statement."
+            mapping = character_map("Observe x in the original statement.", target)
+            self.assertIsNotNone(mapping)
+            start, end = mapping[8]
+            self.assertEqual(target[start:end], formula)
 
     def test_tex_command_length_does_not_reject_correct_prose_alignment(self):
         raw = "Observe that @ ~ @ since @ C @ X @ is a relation on an empty set."

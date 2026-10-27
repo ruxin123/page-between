@@ -3310,6 +3310,18 @@ body[data-mode="palm"] .question-panel textarea {
   margin: 0;
   text-align: left;
 }
+.math-unavailable {
+  color: var(--secondary);
+  font-size: 0.95em;
+}
+.source-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 16px 0;
+}
+.source-table table {
+  min-width: max-content;
+}
 
 .cloud-dialog {
   width: min(520px, calc(100vw - 32px));

@@ -82,7 +82,7 @@ def fingerprint(book):
     return hashlib.sha256(
         json.dumps(
             [
-                8,
+                9,
                 book.get("sourceHash"),
                 book.get("enhancementRevision"),
                 book.get("enrichmentUrl"),

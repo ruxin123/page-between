@@ -293,6 +293,32 @@ class Export(unittest.TestCase):
             )
             self.assertIn('alt="LaTeX:', text)
 
+    def test_pdf_table_keeps_unicode_math_and_image_only_cells(self):
+        original = self.root / "table-source.pdf"
+        make_pdf(original)
+        book = book_import.import_book(original, enabled=True)
+        table = '<table><tr><th>字母</th><th>值</th></tr><tr><td rowspan="2">σ</td><td><eq>\\frac{1}{2}</eq></td></tr><tr><td>τ</td></tr></table>'
+        blocks = [
+            {"type": "table", "text": "old corrupted text", "tableHtml": table, "bbox": [0.1, 0.1, 0.8, 0.35]},
+            {"type": "table", "text": "\t", "tableHtml": '<table><tr><td><img src="https://example.invalid/x.png"/></td></tr></table>', "bbox": [0.1, 0.1, 0.8, 0.35]},
+            {"type": "table", "text": "", "bbox": [0.1, 0.1, 0.8, 0.35]},
+            {"type": "equation", "text": r"\unknownsourcecommand{x}", "bbox": [0.1, 0.1, 0.8, 0.35]},
+        ]
+        target = self.root / "books" / book["id"] / "enhancement.json"
+        save(target, {"1": {"blocks": blocks}})
+        book["enrichmentUrl"] = book_import.url_for(target)
+        before = target.read_bytes()
+        result = epub_export.build(book, [1])
+        self.assertEqual(result["fallbackObjects"], 3)
+        with zipfile.ZipFile(self.output(result)) as archive:
+            chapters = [etree.fromstring(archive.read(name)) for name in archive.namelist() if name.endswith(".xhtml")]
+            content = "\n".join("".join(root.itertext()) for root in chapters)
+            self.assertIn("σ", content)
+            self.assertIn("τ", content)
+            self.assertTrue(any(root.xpath('//*[local-name()="table"]//*[local-name()="mfrac"]') for root in chapters))
+            self.assertEqual(sum(len(root.xpath('//*[local-name()="img" and @alt="原书表格"]')) for root in chapters), 2)
+        self.assertEqual(target.read_bytes(), before)
+
     def test_unparsed_scan_preserves_page_image_and_tables_cannot_execute_html(self):
         native, scan = self.root / "native.pdf", self.root / "scan.pdf"
         make_pdf(native)

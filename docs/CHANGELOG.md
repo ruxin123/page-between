@@ -2,6 +2,17 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.18 · 2026-10-27
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.18) · Build 242 · 前端 2.40 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.18)
+
+- 修复后台 / 被遮挡窗口的 PDF 绘制停滞，减少等待页面一直空白的情况。
+- 修复跨页滚动拖选起点跳变；提问预览包含所选两页的公式、表格与页码范围。
+- 修复英文扫描双栏被合成一行的顺序与命中区域；中文裁剪、旋转扫描件使用正确显示坐标。
+- 增强数学预览兼容性，无法排版的源公式明确提示回看原文；过长选段不再静默截断提问内容。
+- 修复表格中文、希腊字母乱码和单元格公式显示，EPUB 导出保留图片表格与无法转换的公式原图。
+- 修复 HTML 文档编码读取；继续仅提供普通版安装包。
+
 ## 0.5.17 · 2026-10-27
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.17) · Build 241 · 前端 2.39 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.17)

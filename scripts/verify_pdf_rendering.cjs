@@ -264,6 +264,9 @@ c.save();sys.stdout.buffer.write(b.getvalue())
         window.delayedPdfPaint = true;
         let cancel;
         return {
+          _internalRenderTask: task._internalRenderTask,
+          set onContinue(value) { task.onContinue = value; },
+          get onContinue() { return task.onContinue; },
           promise: new Promise((resolve, reject) => {
             cancel = reject;
             task.promise.catch(reject);

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import shutil
 import tempfile
@@ -34,6 +35,37 @@ def result(book, page):
 
 
 class SelectionPreparation(unittest.TestCase):
+    def test_merged_ocr_columns_keep_headers_order_and_original_data(self):
+        def segments(text, x, y, advance=.004):
+            cells = []
+            for char in text:
+                if char.isspace():
+                    if cells:
+                        cells[-1]["text"] += char
+                else:
+                    cells.append({"text": char, "bbox": [x, y, x + advance, y + .02]})
+                x += advance
+            return cells
+        left = ["Left paragraph one is original.", "Left paragraph two is original.", "Left paragraph three is original."]
+        right = ["Right paragraph one is original.", "Right paragraph two is original.", "Right paragraph three is original."]
+        lines = [{"text": "A spanning page heading", "bbox": [.08, .02, .9, .05],
+                  "segments": segments("A spanning page heading", .08, .02, .03)}]
+        for i, (a, b) in enumerate(zip(left, right)):
+            y = .2 + .1 * i
+            cells = segments(a + " ", .1, y) + segments(b, .62, y)
+            lines.append({"text": a + " " + b, "segments": cells, "bbox": [.1, y, .9, y + .02]})
+        data = {"engine": "tesseract-eng", "lines": lines}
+        before = json.dumps(data)
+        result = pdf.split_ocr_columns(data)
+        self.assertEqual([line["text"] for line in result["lines"]], ["A spanning page heading", *left, *right])
+        self.assertEqual(len(result["flows"]), 3)
+        self.assertEqual(json.dumps(data), before)
+        self.assertIs(pdf.split_ocr_columns(result), result)
+        for i, line in enumerate(lines[1:]):
+            line["segments"] = segments(left[i] + " ", .1, .2 + .1 * i) + segments(str(i + 20), .85, .2 + .1 * i)
+            line["text"] = left[i] + " " + str(i + 20)
+        self.assertIs(pdf.split_ocr_columns(data), data, "Contents page numbers must stay with their titles.")
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
@@ -121,6 +153,38 @@ class SelectionPreparation(unittest.TestCase):
         timestamp = book_import.path_for(self.book["url"]).stat().st_mtime - 10
         os.utime(old, (timestamp, timestamp))
         self.assertIsNone(pdf.saved_selection(self.book, 3))
+
+    def test_crop_coordinate_fix_keeps_safe_caches_and_rejects_old_vision_geometry(self):
+        from pypdf import PdfReader, PdfWriter
+
+        self.book["language"] = "zh"
+        source = book_import.path_for(self.book["url"])
+        def old_fingerprint():
+            identity = {"source": pdf.source_digest(self.book), "language": self.book["language"],
+                        "recognition": "character-boxes-v4"}
+            return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
+
+        self.assertEqual(pdf.selection_directory(self.book).name, old_fingerprint())
+        reader = PdfReader(source)
+        page = reader.pages[0]
+        page.cropbox.lower_left = (20, 20)
+        page.cropbox.upper_right = (float(page.mediabox.width) - 20, float(page.mediabox.height) - 20)
+        writer = PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+        replacement = source.with_suffix(".cropped.pdf")
+        writer.write(replacement)
+        replacement.replace(source)
+        self.assertNotEqual(pdf.selection_directory(self.book).name, old_fingerprint())
+        save(pdf.CACHE / self.book["id"] / "1-full.json", result(self.book, 1))
+        self.assertIsNone(pdf.saved_selection(self.book, 1))
+        self.assertEqual(pdf.prepared_pages(self.book), [])
+        fresh = {**result(self.book, 1), "coordinateSpace": "crop-rotated-v1"}
+        with patch.object(pdf, "recognize_page", return_value=fresh):
+            self.assertEqual(pdf.recognize(self.book, 1)["coordinateSpace"], "crop-rotated-v1")
+        self.assertEqual(pdf.prepared_pages(self.book), [1])
+        self.book["language"] = "en"
+        self.assertEqual(pdf.selection_directory(self.book).name, old_fingerprint())
 
     def test_whole_book_pause_preserves_inflight_page_and_reading_pages_take_priority(
         self,

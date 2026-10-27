@@ -352,6 +352,9 @@ def flatten_toc(items):
 def position_label(book, position):
     index = position["index"]
     if book["type"] == "pdf":
+        end = position.get("endIndex")
+        if type(end) is int and index < end <= book.get("pages", 0):
+            return f"PDF 第 {index}–{end} 页"
         return f"PDF 第 {index} 页"
     if book["type"] == "epub":
         if position.get("resource"):
@@ -382,8 +385,24 @@ def decode_text(data):
     raise ValueError("文字编码无法识别，请保存为 UTF-8 后重试。")
 
 
+def load_html(source):
+    data = source.read_bytes()
+    declared = re.search(br"<meta\b[^>]*charset\s*=|<\?xml\b[^>]*encoding\s*=", data[:8192], re.I)
+    if declared:
+        parser = etree.HTMLParser(no_network=True)
+    else:
+        data = decode_text(data).encode("utf-8")
+        parser = etree.HTMLParser(encoding="utf-8", no_network=True)
+    document = etree.ElementTree(etree.fromstring(data, parser))
+    for meta in document.xpath("//meta[@charset]"):
+        meta.set("charset", "utf-8")
+    for meta in document.xpath('//meta[translate(@http-equiv,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="content-type"]'):
+        meta.set("content", "text/html; charset=utf-8")
+    return document
+
+
 def html_metadata(source):
-    document = etree.parse(str(source), etree.HTMLParser(no_network=True))
+    document = load_html(source)
     title = document.xpath("string(//title)").strip() or source.stem
     toc = []
     for index, element in enumerate(document.xpath("//h1|//h2|//h3")):
@@ -404,7 +423,7 @@ def html_metadata(source):
         "type": "epub",
         "title": title,
         "author": "本地导入",
-        "language": "zh",
+        "language": document.xpath("string(//html/@lang)") or ("zh" if re.search(r"[\u4e00-\u9fff]", "".join(document.getroot().itertext())) else "en"),
         "layout": "reflowable",
         "chapters": [
             {

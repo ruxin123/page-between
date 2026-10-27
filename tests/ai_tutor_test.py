@@ -14,6 +14,13 @@ from lxml import html
 
 
 class Tutor(unittest.TestCase):
+    def test_long_selection_is_rejected_without_cutting_a_formula(self):
+        source = {**self.payload["source"], "quote": "x" * 5990 + r" $\frac{a+b}{c+d}$"}
+        before = json.dumps(source)
+        with self.assertRaisesRegex(tutor.TutorError, "超过 6000"):
+            tutor.source_for(self.book, source)
+        self.assertEqual(json.dumps(source), before)
+
     def test_shared_epub_source_uses_its_toc_section_instead_of_the_spine_label(self):
         book = {
             **self.book,
@@ -287,6 +294,66 @@ class Tutor(unittest.TestCase):
         self.assertEqual(len(result.xpath('//math//msub')), 3)
         self.assertFalse(result.xpath('//p[not(math)]'))
         self.assertEqual(json.dumps(payload), before)
+
+    def test_circled_operators_vertical_arrows_and_broken_source_math(self):
+        if not tutor.shutil.which("pandoc"):
+            self.skipTest("Pandoc required")
+        quote = (
+            r"$x\textcircled{\times}y$ and $x\textcircled{+}y$"
+            + "\n\n" + r"$$\begin{array}{c}D\to E\\h\Bigg\downarrow\\F\end{array}$$"
+        )
+        original = quote
+        result = html.fromstring(tutor.answer_html(quote, source=True))
+        self.assertEqual(len(result.xpath('//math')), 3)
+        self.assertTrue(result.xpath('//mo[text()="⊗"]'))
+        self.assertTrue(result.xpath('//mo[text()="⊕"]'))
+        self.assertTrue(result.xpath('//mo[text()="↓"]'))
+        self.assertEqual(quote, original)
+        broken = r"Before $\overline{x$ after."
+        result = html.fromstring(tutor.answer_html(broken, source=True))
+        self.assertTrue(result.xpath('//*[@class="math-unavailable"]'))
+        self.assertIn("Before", result.text_content())
+        self.assertIn("after.", result.text_content())
+        self.assertNotIn(r"\overline", result.text_content())
+        answer = html.fromstring(tutor.answer_html(broken))
+        self.assertTrue(answer.xpath('//code[@class="math-unavailable"]'))
+
+    def test_table_symbols_math_merged_cells_and_safe_images(self):
+        if not tutor.shutil.which("pandoc"):
+            self.skipTest("Pandoc required")
+        markup = '<table onclick="bad()"><tr><th>字母</th><th>值</th></tr><tr><td rowspan="2">σ</td><td><eq>\\frac{x}{y}</eq></td></tr><tr><td>τ<img src="https://example.invalid/x.png"/><script>bad()</script></td></tr></table>'
+        block = {"type": "table", "text": "字母\t值\nσ\t\\frac{x}{y}\nτ", "tableHtml": markup}
+        payload = {"quote": block["text"], "position": {"index": 1}}
+        before = json.dumps(payload)
+        with patch.object(tutor, "page_enrichment", return_value=[block]):
+            result = html.fromstring(tutor.source_preview({**self.book, "type": "pdf", "pages": 1}, payload))
+        self.assertTrue(result.xpath('//td[@rowspan="2" and text()="σ"]'))
+        self.assertTrue(result.xpath('//math//mfrac'))
+        self.assertIn("τ", result.text_content())
+        self.assertFalse(result.xpath('//script|//img|//*[@src or @href or @onclick]'))
+        self.assertNotIn("bad()", result.text_content())
+        self.assertEqual(json.dumps(payload), before)
+        block = {"type": "table", "text": "name\tvalue\nabsolute\t$|x|$"}
+        with patch.object(tutor, "page_enrichment", return_value=[block]):
+            result = html.fromstring(tutor.source_preview({**self.book, "type": "pdf", "pages": 1}, {"quote": block["text"], "position": {"index": 1}}))
+        self.assertEqual(result.xpath('//math//mo/text()'), ['|', '|'])
+
+    def test_cross_page_preview_keeps_both_formula_sources_and_range(self):
+        book = {**self.book, "type": "pdf", "pages": 3}
+        quote = "first\n\nx^2\n\nsecond\n\ny^2"
+        position = {"index": 1, "endIndex": 2}
+        payload = {"quote": quote, "position": position}
+        with patch.object(tutor, "page_enrichment", return_value=[
+            {"type": "equation", "text": "x^2"}, {"type": "equation", "text": "y^2"}
+        ]) as blocks:
+            result = html.fromstring(tutor.source_preview(book, payload))
+        blocks.assert_called_once_with(book, 1, 2)
+        self.assertEqual(len(result.xpath('//math//msup')), 2)
+        self.assertEqual(tutor.source_for(book, payload)["citation"], "《自编示例》 · PDF 第 1–2 页")
+        self.assertEqual(payload["quote"], quote)
+        for end in [0, 4, True, "2"]:
+            with self.assertRaises(tutor.TutorError):
+                tutor.source_for(book, {"quote": quote, "position": {"index": 1, "endIndex": end}})
 
     def test_math_styles_and_spaced_array_columns_render_without_rewriting_code(self):
         if not tutor.shutil.which("pandoc"):

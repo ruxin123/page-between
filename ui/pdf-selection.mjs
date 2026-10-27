@@ -320,6 +320,23 @@ export function canonicalPosition(range, root) {
   return { blockOrder: -1 };
 }
 
+export function pdfSelectionPages(range, root) {
+  const pages = [],
+    constants = root.ownerDocument.defaultView.Range;
+  for (const layer of root.querySelectorAll(".pdf-page .textLayer")) {
+    if (!range.intersectsNode(layer)) continue;
+    const bounds = root.ownerDocument.createRange(),
+      part = range.cloneRange();
+    bounds.selectNodeContents(layer);
+    if (part.compareBoundaryPoints(constants.START_TO_START, bounds) < 0)
+      part.setStart(layer, 0);
+    if (part.compareBoundaryPoints(constants.END_TO_END, bounds) > 0)
+      part.setEnd(layer, layer.childNodes.length);
+    if (part.toString().trim()) pages.push(layer.closest(".pdf-page"));
+  }
+  return pages;
+}
+
 export function canonicalSelection(range, root) {
   const pieces = [];
   const emittedObjects = new Set();

@@ -22,6 +22,7 @@ import {
 import {
   alignTextLayer,
   canonicalSelection,
+  pdfSelectionPages,
   canonicalPosition,
   prepareNativeHighlights,
   paintNativeSelection,
@@ -37,7 +38,8 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.39";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.40";
+import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -120,7 +122,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.39";
+document.body.dataset.readerBuild = "2.40";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -690,7 +692,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.39",
+        build: "2.40",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1026,6 +1028,8 @@ function clearSelection() {
 }
 function watchSelection(doc) {
   let dragging = false,
+    pdfDragAnchor = null,
+    preservePdfAnchor = false,
     highlightFrame,
     timer;
   const schedule = (event) => {
@@ -1048,17 +1052,53 @@ function watchSelection(doc) {
     )
       return;
     dragging = true;
+    pdfDragAnchor = null;
+    preservePdfAnchor = !event.shiftKey;
     if (!event.target.closest?.(".pdf-object")) dismissSelection();
+  });
+  doc.addEventListener("mousedown", (event) => {
+    if (event.detail > 1) preservePdfAnchor = false;
   });
   doc.addEventListener("pointerup", (event) => {
     dragging = false;
+    pdfDragAnchor = null;
     schedule(event);
   });
   doc.addEventListener("pointercancel", () => {
     dragging = false;
+    pdfDragAnchor = null;
   });
   doc.addEventListener("selectionchange", () => {
     const selection = doc.getSelection();
+    if (
+      dragging &&
+      preservePdfAnchor &&
+      doc === document &&
+      current?.type === "pdf"
+    ) {
+      if (
+        !pdfDragAnchor &&
+        selection?.anchorNode?.parentElement?.closest(".textLayer")
+      )
+        pdfDragAnchor = {
+          node: selection.anchorNode,
+          offset: selection.anchorOffset,
+        };
+      else if (
+        pdfDragAnchor?.node.isConnected &&
+        selection?.focusNode &&
+        (selection.anchorNode !== pdfDragAnchor.node ||
+          selection.anchorOffset !== pdfDragAnchor.offset)
+      ) {
+        // WebKit can re-anchor at the next absolute page while dragging through a scroll.
+        selection.setBaseAndExtent(
+          pdfDragAnchor.node,
+          pdfDragAnchor.offset,
+          selection.focusNode,
+          selection.focusOffset,
+        );
+      }
+    }
     if (doc === document && !highlightFrame)
       highlightFrame = requestAnimationFrame(() => {
         highlightFrame = null;
@@ -1079,7 +1119,10 @@ function selectionDetails(position) {
   const actual = { ...position };
   let label =
     current.type === "pdf"
-      ? "PDF 第 " + actual.index + " 页"
+      ? "PDF 第 " +
+        actual.index +
+        (actual.endIndex > actual.index ? "–" + actual.endIndex : "") +
+        " 页"
       : current.chapters[actual.index - 1]?.title || current.title;
   if (current.type === "epub") {
     if (actual.resource) label = "原书附加内容";
@@ -1155,13 +1198,18 @@ function captureSelection(doc = document) {
       ? canonicalSelection(range, root)
       : selection.toString().trim();
   if (!text) return;
+  const selectedPages =
+    current.type === "pdf" ? pdfSelectionPages(range, root) : [];
   const pdfPage =
+    selectedPages[0]?.dataset.page ||
     range.startContainer.parentElement?.closest(".pdf-page")?.dataset.page;
   const position = {
     ...makePosition(),
     index: Number(pdfPage) || location.index,
   };
   if (pdfPage) {
+    const endPage = Number(selectedPages.at(-1)?.dataset.page);
+    if (endPage > position.index) position.endIndex = endPage;
     const page = pdfPageElement(Number(pdfPage));
     Object.assign(position, canonicalPosition(range, page));
     const rectangle = page.getBoundingClientRect(),
@@ -1616,7 +1664,7 @@ async function paintPdfPage(index, revision) {
     canvas.style.height = `${viewport.height}px`;
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("页面画布暂时不可用。");
-    task = page.render({
+    task = renderPdfBitmap(page, {
       canvasContext: context,
       viewport,
       transform: density === 1 ? null : [density, 0, 0, density, 0, 0],
@@ -3426,6 +3474,12 @@ $("search-selection").onclick = () => {
 };
 function tutorContext(selection = null) {
   if (!current || !readerReady) return null;
+  if (selection?.text?.length > 6000) {
+    toast("选段超过 6000 字符，请缩小范围；复制仍保留完整内容。", {
+      kind: "warning",
+    });
+    return null;
+  }
   const details = selectionDetails(selection?.position || makePosition());
   const position = details.position;
   let units = [],

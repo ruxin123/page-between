@@ -29,7 +29,7 @@ from pdf_selection import standalone_math
 LOCK = threading.RLock()
 ACTIVE = set()
 CANCELLATIONS = {}
-HTML_VERSION = 2
+HTML_VERSION = 3
 SYSTEM = """你是本书的阅读辅导助手。优先用提供的原文、附近内容与本次对话回答。
 引用选段时标注 [1]，引用附近内容时标注 [2]；不得捏造未提供的本书定理、页码或章节。
 若提供了 [3] 起的本书此前资料，优先用其中定义、定理和已建立的结论解释，并按对应编号引用。
@@ -152,6 +152,8 @@ def source_for(book, source, *, resource_root=None):
         or not (source.get("quote", "").strip() or source.get("image"))
     ):
         raise TutorError("请先选择原文或打开当前页提问。")
+    if len(source.get("quote", "")) > 6000:
+        raise TutorError("选段超过 6000 字符，请缩小范围；原文不会被截断。")
     position = source.get("position", {})
     if not isinstance(position, dict):
         raise TutorError("原文位置无效。")
@@ -169,12 +171,18 @@ def source_for(book, source, *, resource_root=None):
     )
     if type(index) is not int or not 1 <= index <= count:
         raise TutorError("原文页码或章节位置无效。")
+    if "endIndex" in position and (
+        book["type"] != "pdf" or type(position["endIndex"]) is not int
+        or not index <= position["endIndex"] <= count
+    ):
+        raise TutorError("原文页码范围无效。")
     position = {
         key: value
         for key, value in position.items()
         if key
         in {
             "index",
+            "endIndex",
             "page",
             "top",
             "pdfY",
@@ -205,7 +213,7 @@ def source_for(book, source, *, resource_root=None):
     if not isinstance(context, str):
         raise TutorError("附近内容无效。")
     result = {
-        "quote": source.get("quote", "").strip()[:6000] or "[完整图像]",
+        "quote": source.get("quote", "").strip() or "[完整图像]",
         "context": context[:18000],
         "position": position,
         "citation": f"《{book['title']}》 · {label}",
@@ -233,11 +241,12 @@ def source_preview(book, payload):
         raise TutorError("选段内容无效或过长。")
     source = source_for(book, {"quote": quote, "position": payload.get("position")})
     blocks = (
-        page_enrichment(book, source["position"]["index"])
+        page_enrichment(book, source["position"]["index"], source["position"].get("endIndex"))
         if book["type"] == "pdf"
         else []
     )
     markdown = quote
+    tables = {}
     for block in sorted(
         blocks, key=lambda item: len(item.get("text", "")), reverse=True
     ):
@@ -247,20 +256,19 @@ def source_preview(book, payload):
             continue
         if block["type"] == "equation" or formula is not None:
             formatted = "$$\n" + (formula if formula is not None else text) + "\n$$"
-        elif "\t" in text:
+        elif block["type"] == "table":
             rows = [line.split("\t") for line in text.splitlines()]
             columns = max(map(len, rows))
-            lines = [
-                "| "
-                + " | ".join(
-                    cell.replace("|", r"\|")
-                    for cell in row + [""] * (columns - len(row))
-                )
-                + " |"
+            markup = block.get("tableHtml") or "<table>" + "".join(
+                "<tr>" + "".join("<td>" + html.escape(cell) + "</td>"
+                                for cell in row + [""] * (columns - len(row))) + "</tr>"
                 for row in rows
-            ]
-            lines.insert(1, "| " + " | ".join(["---"] * columns) + " |")
-            formatted = "\n".join(lines)
+            ) + "</table>"
+            table = source_table_html(markup)
+            if not table:
+                continue
+            formatted = "PBTABLE" + uuid.uuid4().hex
+            tables[formatted] = table
         else:
             continue
         # Whole objects have paragraph boundaries in copied selections; never rewrite prose substrings.
@@ -274,7 +282,39 @@ def source_preview(book, payload):
             lambda match: match[1] + formatted,
             markdown,
         )
-    return answer_html(markdown, source=True)
+    rendered = answer_html(markdown, source=True)
+    if tables:
+        root = etree.fromstring(("<div>" + rendered + "</div>").encode(), etree.HTMLParser(encoding="utf-8", no_network=True))
+        for paragraph in root.xpath("//p"):
+            if len(paragraph) or paragraph.text not in tables:
+                continue
+            table = etree.fromstring(tables[paragraph.text].encode(), etree.HTMLParser(encoding="utf-8", no_network=True)).xpath("//table")[0]
+            wrapper = etree.Element("div", {"class": "source-table"})
+            wrapper.append(table)
+            wrapper.tail = paragraph.tail
+            paragraph.getparent().replace(paragraph, wrapper)
+        rendered = "".join(etree.tostring(node, encoding="unicode", method="html") for node in root.find("body"))
+    return rendered
+
+
+def source_table_html(value):
+    pandoc = shutil.which("pandoc")
+    if not pandoc or not isinstance(value, str) or len(value) > 500000:
+        return ""
+    try:
+        root = etree.fromstring(value.encode(), etree.HTMLParser(encoding="utf-8", no_network=True))
+        etree.strip_elements(root, "script", "style", "iframe", "object", with_tail=False)
+        tables = root.xpath("//table")
+        if not tables:
+            return ""
+        for node in tables[0].xpath(".//eq|.//img"):
+            text = "$" + "".join(node.itertext()) + "$" if node.tag == "eq" else "〔图片请查看原图〕"
+            tail = node.tail
+            node.clear()
+            node.tag, node.text, node.tail = "span", text, tail
+        return _answer_html(etree.tostring(tables[0], encoding="unicode", method="html"), pandoc, True, "html+tex_math_dollars")
+    except (OSError, subprocess.SubprocessError, etree.Error):
+        return ""
 
 
 def answer_html(text, *, source=False):
@@ -288,12 +328,12 @@ def answer_html(text, *, source=False):
 
 
 @lru_cache(maxsize=64)
-def _answer_html(text, pandoc, source):
+def _answer_html(text, pandoc, source, reader_format=None):
     result = subprocess.run(
         [
             pandoc,
             "-f",
-            "markdown-raw_html-raw_attribute+tex_math_dollars+tex_math_single_backslash" + ("-fancy_lists" if source else ""),
+            reader_format or "markdown-raw_html-raw_attribute+tex_math_dollars+tex_math_single_backslash" + ("-fancy_lists" if source else ""),
             "-t",
             "html5",
             "--mathml",
@@ -310,8 +350,12 @@ def _answer_html(text, pandoc, source):
         etree.HTMLParser(encoding="utf-8", no_network=True),
     )
     allowed = set(
-        "div p br em strong code pre ul ol li blockquote h1 h2 h3 h4 hr table thead tbody tr th td span a math mrow mi mn mo mfrac msup msub msubsup msqrt mroot munder mover munderover mtable mtr mtd mtext mspace mstyle mpadded mphantom menclose mmultiscripts mprescripts none merror ms semantics annotation".split()
+        "div p br em strong sub sup code pre ul ol li blockquote h1 h2 h3 h4 hr table thead tbody tfoot tr th td span a math mrow mi mn mo mfrac msup msub msubsup msqrt mroot munder mover munderover mtable mtr mtd mtext mspace mstyle mpadded mphantom menclose mmultiscripts mprescripts none merror ms semantics annotation".split()
     )
+    failed_math = [
+        node for node in root.iter("span")
+        if "math" in node.get("class", "").split()
+    ]
     for node in list(root.iter()):
         if not isinstance(node.tag, str):
             node.getparent().remove(node)
@@ -347,9 +391,20 @@ def _answer_html(text, pandoc, source):
                 "value",
             }:
                 del node.attrib[name]
+            elif name in {"rowspan", "colspan"} and not re.fullmatch(r"[1-9]\d?", node.get(name)):
+                del node.attrib[name]
         if node.tag not in allowed and node.tag not in {"html", "body"}:
             node.tag = "mrow" if any(parent.tag == "math" for parent in node.iterancestors()) else "span"
     body = root.find("body")
+    for node in failed_math:
+        if source:
+            tail = node.tail
+            node.clear()
+            node.tail = tail
+            node.text = "〔公式暂无法显示，请查看原文〕"
+        else:
+            node.tag = "code"
+        node.set("class", "math-unavailable")
     if source:
         def displayed_formula(node):
             return (

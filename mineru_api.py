@@ -15,11 +15,10 @@ from urllib.parse import quote, urlsplit
 from urllib.request import Request, build_opener
 
 from pypdf import PdfReader, PdfWriter
-from lxml import etree
 from ai_tutor import NoRedirect
 from book_import import BOOK_ROOT, ROOT, extract_zip, path_for, url_for
 from storage import load, save
-from pdf_enhancement import enrichment_data, source_digest
+from pdf_enhancement import enrichment_data, source_digest, table_text
 import service_settings
 
 
@@ -251,19 +250,6 @@ def table_html(block):
         if value:
             return value
     return ""
-
-
-def table_text(value):
-    try:
-        root = etree.fromstring(value.encode(), etree.HTMLParser(no_network=True))
-        return "\n".join(
-            "\t".join(
-                "".join(cell.itertext()).strip() for cell in row.xpath("./td|./th")
-            )
-            for row in root.xpath(".//tr")
-        )
-    except (etree.Error, AttributeError):
-        return ""
 
 
 def normalized_pages(document, originals):

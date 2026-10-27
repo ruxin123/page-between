@@ -17,7 +17,7 @@ from urllib.parse import unquote, urlsplit
 from lxml import etree
 from pypdf import PdfReader
 
-from book_import import BOOK_ROOT, CONVERT, convert_document, flatten_toc, path_for
+from book_import import BOOK_ROOT, CONVERT, ROOT, convert_document, flatten_toc, path_for, load_html
 from book_index import REFERENCE, references
 from paths import CACHE
 from pdf_enhancement import enrichment_data, PDF_LOCK, open_pdf
@@ -223,7 +223,7 @@ def filename(title, extension):
 def table_html(value):
     if not value.strip():
         return ""
-    root = etree.fromstring(value.encode(), etree.HTMLParser(no_network=True))
+    root = etree.fromstring(value.encode(), etree.HTMLParser(encoding="utf-8", no_network=True))
     tables = root.xpath("//table")
     if not tables:
         return ""
@@ -254,6 +254,10 @@ def table_html(value):
             if node.getparent() is not None:
                 node.getparent().remove(node)
             continue
+        if node.tag == "eq":
+            text, tail = "".join(node.itertext()), node.tail
+            node.clear()
+            node.tag, node.text, node.tail = "span", "$" + text + "$", tail
         if node.tag not in allowed:
             node.tag = "span"
         for name in list(node.attrib):
@@ -429,7 +433,7 @@ def build(book, pages=None):
                                 document, page, [0, 0, 1, 1], work / f"page-{page}.png"
                             )
                             fragments.append(
-                                f'<figure><img src="page-{page}.png" alt="原书第 {page} 页，尚无可重排文字"/></figure>'
+                                f'<div class="original-object"><p><img src="page-{page}.png" alt="原书第 {page} 页，尚无可重排文字"/></p></div>'
                             )
                             fallback.append(page)
                         continue
@@ -446,6 +450,12 @@ def build(book, pages=None):
                                 f'<div id="{anchor}" class="equation">$${html.escape(text)}$$</div>'
                             )
                         elif block["type"] == "table":
+                            if not text.strip() or re.search(r"<img\b", block.get("tableHtml") or "", re.I):
+                                name = anchor + "-original.png"
+                                image_for(document, page, block["bbox"], work / name)
+                                fragments.append(f'<div id="{anchor}" class="original-object"><p><img src="{name}" alt="原书表格"/></p></div>')
+                                fallback_objects += 1
+                                continue
                             table = table_html(block.get("tableHtml") or "")
                             if not table:
                                 table = (
@@ -466,7 +476,7 @@ def build(book, pages=None):
                             name = anchor + ".png"
                             image_for(document, page, block["bbox"], work / name)
                             fragments.append(
-                                f'<figure id="{anchor}"><img src="{name}" alt="原书插图"/><figcaption>{html.escape(text)}</figcaption></figure>'
+                                f'<div id="{anchor}" class="original-object"><p><img src="{name}" alt="原书插图"/></p><p>{html.escape(text)}</p></div>'
                             )
                         else:
                             tag = "h2" if block.get("headingLevel") else "p"
@@ -487,7 +497,7 @@ def build(book, pages=None):
             # HTML-backed imports have already passed the local-resource checks.
             for chapter in book.get("chapters", []):
                 source = path_for(chapter["url"])
-                root = etree.parse(str(source), etree.HTMLParser(no_network=True))
+                root = load_html(source)
                 for node in root.xpath("//script|//style|//iframe|//object|//link"):
                     node.getparent().remove(node)
                 for node in root.xpath("//*[@src or @href]"):
@@ -520,7 +530,7 @@ def build(book, pages=None):
         source = work / "book.html"
         css = work / "reader.css"
         css.write_text(
-            "body{font-family:serif;line-height:1.7;}h1,h2{break-after:avoid;}p{orphans:2;widows:2;}img{max-width:100%;height:auto;}figure,table{break-inside:avoid;}table{border-collapse:collapse;}td,th{border:1px solid #888;padding:.4em;}.equation{max-width:100%;overflow-x:auto;break-inside:avoid;}math[display=block]{display:block;overflow-wrap:anywhere;}.source-page{font-size:.75em;color:#666;}"
+            "body{font-family:serif;line-height:1.7;}h1,h2{break-after:avoid;}p{orphans:2;widows:2;}img{max-width:100%;height:auto;}figure,table,.original-object{break-inside:avoid;}table{border-collapse:collapse;}td,th{border:1px solid #888;padding:.4em;}.equation{max-width:100%;overflow-x:auto;break-inside:avoid;}math[display=block]{display:block;overflow-wrap:anywhere;}.source-page{font-size:.75em;color:#666;}"
         )
 
         def convert():
@@ -541,6 +551,7 @@ def build(book, pages=None):
                     else "--from=html",
                     "--to=epub3",
                     "--mathml",
+                    "--lua-filter=" + str(ROOT / "normalize-math.lua"),
                     "--toc",
                     "--epub-chapter-level=1",
                     "--metadata=title:" + book["title"],
@@ -573,7 +584,7 @@ def build(book, pages=None):
                         fragments[block["fragment"]] = (
                             f'<div id="{anchor}" class="original-object"><p><img src="{name}" alt="{html.escape(alternative, quote=True)}"/></p></div>'
                         )
-                fallback_objects = len(failures)
+                fallback_objects += len(failures)
                 convert()
         except (OSError, subprocess.SubprocessError):
             raise ValueError(

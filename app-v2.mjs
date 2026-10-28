@@ -39,7 +39,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.46";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.47";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
 
@@ -127,7 +127,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.46";
+document.body.dataset.readerBuild = "2.47";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -767,7 +767,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.46",
+        build: "2.47",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),

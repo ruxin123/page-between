@@ -22,6 +22,7 @@ from book_index import REFERENCE, references
 from paths import CACHE
 from pdf_enhancement import enrichment_data, PDF_LOCK, open_pdf
 from storage import load
+from cache_policy import prune_exports
 
 
 def complete_package(path, *, converted=False):
@@ -366,6 +367,7 @@ def failed_math(path, blocks):
 
 
 def build(book, pages=None):
+    prune_exports(CACHE)
     directory = CACHE / "exports"
     directory.mkdir(parents=True, exist_ok=True)
     ident = uuid.uuid4().hex

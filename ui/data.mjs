@@ -17,6 +17,11 @@ export function createDataSettings({ api, post, toast }) {
       $("data-books").textContent = `${data.books} 本`;
       $("data-size").textContent = bytes(data.libraryBytes);
       $("data-cache-size").textContent = bytes(data.cacheBytes);
+      $("data-cache-details").textContent =
+        (data.cacheCategories || [])
+          .filter((item) => item.bytes > 0)
+          .map((item) => `${item.label} ${bytes(item.bytes)}`)
+          .join(" · ") || "没有可清理的缓存。";
       $("data-reveal").hidden = !bridge;
       $("data-restore-review").hidden = !data.pendingRestore;
       $("data-restore-summary").textContent = data.pendingRestore

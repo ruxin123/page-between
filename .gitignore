@@ -17,6 +17,7 @@
 !/server.py
 !/google_translation.py
 !/translation.py
+!/cache_policy.py
 !/ai_tutor.py
 !/service_settings.py
 !/mineru_api.py
@@ -63,6 +64,7 @@
 !/tests/jobs.test.mjs
 !/tests/feedback.test.mjs
 !/tests/translation_test.py
+!/tests/cache_policy_test.py
 !/tests/ai_tutor_test.py
 !/tests/settings_test.py
 !/tests/storage_test.py

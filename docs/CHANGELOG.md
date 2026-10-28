@@ -2,6 +2,15 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.25 · 2026-10-29
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.25) · Build 249 · 前端 2.47 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.25)
+
+- 划词翻译不再自动保存或复用结果；仅主动收藏时写入书库，清除旧自动记录并保留已有收藏。
+- 导出保存成功后清除临时副本，未保存导出按时效、数量与体积限制清理。
+- MinerU 完成后清除原始 ZIP、重复布局及拆页文件，保留正式解析结果与未完成任务。
+- 数据设置显示缓存分类，书源关闭时清除网页资源缓存并保留登录；成功构建后清除打包中间目录。
+
 ## 0.5.24 · 2026-10-28
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.24) · Build 248 · 前端 2.46 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.24)

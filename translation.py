@@ -1,7 +1,6 @@
-"""Selection translation using the reader's model; history stays with each book."""
+"""Selection translation using the reader's model; only explicit favorites are persisted."""
 
 import copy
-import hashlib
 import html
 import json
 import re
@@ -65,28 +64,64 @@ def public(item, *, rendered=False):
 
 def history(book):
     with LOCK:
-        return [public(item) for item in records(book)["items"]]
+        return [public(item) for item in records(book)["items"] if item.get("favorite") is True]
 
 
 def lookup(book, ident):
     with LOCK:
-        item = next((row for row in records(book)["items"] if row["id"] == ident), None)
+        item = next((row for row in records(book)["items"] if row["id"] == ident and row.get("favorite") is True), None)
         if not item:
             raise ValueError("找不到这条翻译。")
         return public(item, rendered=True)
 
 
 def favorite(book, ident, value):
-    if type(value) is not bool:
+    if type(value) is not bool or not isinstance(ident, str) or not re.fullmatch(r"[0-9a-f]{32}", ident):
         raise ValueError("收藏状态无效。")
     with LOCK:
         data = records(book)
-        item = next((item for item in data["items"] if item["id"] == ident), None)
-        if not item:
-            raise ValueError("找不到这条翻译。")
+        items = [row for row in data["items"] if row.get("favorite") is True]
+        item = next((row for row in items if row["id"] == ident), None)
+        if item is None:
+            item = next((job["result"] for job in JOBS.values() if job["book"] == book["id"] and job.get("result", {}).get("id") == ident), None)
+        if item is None:
+            raise ValueError("找不到这条翻译，请重新翻译后收藏。")
+        item = {key: copy.deepcopy(val) for key, val in item.items() if key not in {"html", "explanationHtml", "cacheKey", "storageWarning", "translationWarning"}}
+        items = [row for row in items if row["id"] != ident]
+        if value and len(items) >= 100:
+            raise ValueError("收藏已达 100 条，请先移除部分收藏。")
         item["favorite"] = value
-        save(history_path(book), data)
+        if value:
+            items.insert(0, item)
+        path = history_path(book)
+        if items:
+            save(path, {"items": items})
+        else:
+            path.unlink(missing_ok=True)
+        for job in JOBS.values():
+            if job["book"] == book["id"] and job.get("result", {}).get("id") == ident:
+                job["result"]["favorite"] = value
         return public(item)
+
+
+def purge_automatic_history(root=None):
+    """Remove old automatic results while preserving deliberately saved favorites."""
+    root = root or BOOK_ROOT
+    for path in root.glob("*/translations.json"):
+        if path.is_symlink() or path.parent.is_symlink():
+            continue
+        try:
+            book = {"id": path.parent.name}
+            data = records(book, root)
+            items = [{key: val for key, val in item.items() if key != "cacheKey"}
+                     for item in data["items"] if item.get("favorite") is True]
+            if not items:
+                path.unlink()
+            elif data != {"items": items}:
+                save(path, {"items": items})
+        except (OSError, ValueError):
+            # An unreadable user favorite is not disposable cache.
+            continue
 
 
 def prepare(book, payload):
@@ -264,10 +299,6 @@ def start(book, payload):
         raise ValueError("重译选项无效。")
     prepared = prepare(book, payload)
     config = configuration(payload.get("provider"))
-    cache_parts = [prepared, config["provider"], config["url"], config["model"]]
-    if config["provider"] == "google":
-        cache_parts.append(GOOGLE_TEXT_VERSION)
-    key = hashlib.sha256(json.dumps(cache_parts, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     with LOCK:
         # Keep completed jobs briefly for polling, and bound concurrent provider requests.
         now = time.time()
@@ -276,23 +307,19 @@ def start(book, payload):
                 del JOBS[ident]
         if sum(job.get("working", False) for job in JOBS.values()) >= 4:
             raise ValueError("已有翻译正在处理，请先停止或等待完成。")
-        cached = None if force else next((item for item in records(book)["items"] if item.get("cacheKey") == key), None)
         if len(JOBS) >= 128:
             finished = next((ident for ident, job in JOBS.items() if not job.get("working")), None)
             if finished:
                 del JOBS[finished]
         ident = uuid.uuid4().hex
-        job = {"id": ident, "book": book["id"], "status": "ready" if cached else "running", "createdAt": now,
-               "working": not bool(cached), "control": {"event": threading.Event()}}
-        if cached:
-            job["result"] = public(cached, rendered=True)
+        job = {"id": ident, "book": book["id"], "status": "running", "createdAt": now,
+               "working": True, "control": {"event": threading.Event()}}
         JOBS[ident] = job
-    if not cached:
-        threading.Thread(target=run, args=(book, prepared, config, key, job, force), daemon=True).start()
+    threading.Thread(target=run, args=(book, prepared, config, job), daemon=True).start()
     return task(book, ident)
 
 
-def run(book, prepared, config, key, job, force=False):
+def run(book, prepared, config, job):
     try:
         original = prepared["text"]
         if config["provider"] == "google":
@@ -310,41 +337,18 @@ def run(book, prepared, config, key, job, force=False):
             raw = ai_tutor.complete(config, [{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}],
                                     max_tokens=6000, on_delta=lambda _: None, control=job["control"])
         decoded = decode(raw, formulas)
-        item = {**prepared, **decoded, "id": uuid.uuid4().hex, "createdAt": time.time(), "favorite": False, "cacheKey": key, "model": config["model"], "provider": config["provider"]}
+        item = {**prepared, **decoded, "id": uuid.uuid4().hex, "createdAt": time.time(), "favorite": False, "model": config["model"], "provider": config["provider"]}
         if config["provider"] == "google":
             item["textVersion"] = GOOGLE_TEXT_VERSION
         result = public(item, rendered=True)
         with LOCK:
             if job["status"] != "running":
                 return
-            data = records(book)
-            # Concurrent identical requests share a record and retain a user's favorite.
-            old = next((row for row in data["items"] if row.get("cacheKey") == key), None)
-            if old and not force:
-                item = old
-                result = public(item, rendered=True)
-            else:
-                if old:
-                    item.update(id=old["id"], favorite=old["favorite"])
-                    result.update(id=old["id"], favorite=old["favorite"])
-                    data["items"].remove(old)
-                if len(data["items"]) == 100:
-                    removable = next((row for row in reversed(data["items"]) if not row.get("favorite")), None)
-                    if removable:
-                        data["items"].remove(removable)
-                    else:
-                        result["storageWarning"] = "收藏已达 100 条，本次译文未保存；请取消部分收藏后重试。"
-                if len(data["items"]) < 100:
-                    data["items"].insert(0, item)
-                    try:
-                        save(history_path(book), data)
-                    except OSError:
-                        result["storageWarning"] = "译文已生成，但本机记录保存失败，请检查磁盘空间。"
             job.update(status="ready", result=result)
     except (ValueError, OSError) as error:
         with LOCK:
             if job["status"] == "running":
-                job.update(status="error", error=str(error) if isinstance(error, ValueError) else "暂时无法读取本机翻译记录，请检查存储。")
+                job.update(status="error", error=str(error) if isinstance(error, ValueError) else "翻译未完成，请重试。")
     finally:
         with LOCK:
             job["working"] = False

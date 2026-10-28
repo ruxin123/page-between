@@ -20,6 +20,7 @@ from storage import load, save
 from epub_export import filename
 from pdf_enhancement import enrichment_data, prepared_pages
 from book_import import SUPPORTED, text_chapter_index
+from cache_policy import prune_exports, prune_mineru_result, clear_incomplete_exports
 
 RECORDS = {"library.json", "state.json", "ai-conversations.json"}
 MAX_ARCHIVE = 2 * 1024**3
@@ -343,6 +344,7 @@ def cloud_cache_folders():
 
 
 def backup(snapshot):
+    prune_exports(CACHE)
     snapshot = copy.deepcopy(snapshot)
     directory = CACHE / "exports"
     directory.mkdir(parents=True, exist_ok=True)
@@ -793,7 +795,21 @@ def apply_cache_cleanup():
         marker.unlink()
 
 
+def prune_disposable_cache():
+    from translation import purge_automatic_history
+
+    purge_automatic_history()
+    prune_exports(CACHE)
+    clear_incomplete_exports(CACHE)
+    for folder in cloud_cache_folders():
+        try:
+            prune_mineru_result(folder)
+        except (OSError, ValueError):
+            continue
+
+
 def information():
+    prune_exports(CACHE)
     def size(root):
         return (
             sum(
@@ -806,12 +822,19 @@ def information():
         )
 
     cloud_bytes = sum(size(path) for path in cloud_cache_folders())
+    categories = [
+        {"label": "全文索引", "bytes": size(CACHE / "book-index-v2")},
+        {"label": "待保存的导出", "bytes": size(CACHE / "exports")},
+        {"label": "旧版文字准备副本", "bytes": size(CACHE / "ocr-v3") + size(CACHE / "ocr-v4")},
+        {"label": "云解析中间文件", "bytes": cloud_bytes},
+    ]
     pending = load(record_path("pending-restore"), None)
     last = load(record_path("restore-info"), {})
     return {
         "books": len(load(DATA / "library.json", {"books": []})["books"]),
         "libraryBytes": max(0, size(DATA) - cloud_bytes),
         "cacheBytes": size(CACHE) + cloud_bytes,
+        "cacheCategories": categories,
         "pendingRestore": bool(pending),
         "restoreApproved": bool(pending and pending.get("approved")),
         "restoreBooks": len(

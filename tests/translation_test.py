@@ -47,29 +47,30 @@ class Translation(unittest.TestCase):
             time.sleep(.01)
         self.fail("translation did not finish")
 
-    def test_math_copy_history_cache_and_favorite(self):
+    def test_translation_is_not_cached_or_written_until_explicit_favorite(self):
         original = json.dumps(self.payload)
         with patch.object(t.ai_tutor, "complete", side_effect=self.provider) as provider:
-            job = self.wait(t.start(self.book, self.payload)["id"])
-            self.assertEqual(job["status"], "ready", job)
-            result = job["result"]
-            self.assertIn("$f:A\\to B$", result["translation"])
+            result = self.wait(t.start(self.book, self.payload)["id"])["result"]
             self.assertIn("<math", result["html"])
-            self.assertNotIn("PBMZ", result["translation"])
-            t.favorite(self.book, result["id"], True)
-            cached = t.start(self.book, self.payload)
-            self.assertEqual(cached["status"], "ready")
-            self.assertTrue(cached["result"]["favorite"])
-            self.assertEqual(provider.call_count, 1)
-            forced = self.wait(t.start(self.book, {**self.payload, "force": True})["id"])
+            self.assertIn("$f:A\\to B$", result["translation"])
+            self.assertFalse(t.history_path(self.book).exists())
+            self.assertEqual(t.history(self.book), [])
+            second = self.wait(t.start(self.book, self.payload)["id"])["result"]
             self.assertEqual(provider.call_count, 2)
-            self.assertTrue(forced["result"]["favorite"])
-            self.assertEqual(forced["result"]["id"], result["id"])
+            self.assertNotEqual(result["id"], second["id"])
+            t.favorite(self.book, result["id"], True)
+            stored = load(t.history_path(self.book), {})["items"][0]
+            self.assertNotIn("html", stored)
+            self.assertNotIn("cacheKey", stored)
+            third = self.wait(t.start(self.book, self.payload)["id"])["result"]
+            self.assertEqual(provider.call_count, 3)
+            self.assertFalse(third["favorite"])
         self.assertEqual(len(t.history(self.book)), 1)
         self.assertEqual(t.lookup(self.book, result["id"])["translation"], result["translation"])
         self.assertEqual(json.dumps(self.payload), original)
         t.validate_history(self.book, self.root)
-        self.assertNotIn("cacheKey", t.history(self.book)[0])
+        t.favorite(self.book, result["id"], False)
+        self.assertFalse(t.history_path(self.book).exists())
 
     def test_google_http_preserves_markdown_formula_code_and_sends_no_context(self):
         received = []
@@ -128,25 +129,17 @@ class Translation(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "公式"):
                 t.restore_google_math(original, bad)
 
-    def test_old_google_cache_is_not_reused_and_history_can_still_be_read(self):
-        import hashlib
-        config = {"provider": "google", "url": "test", "model": "Google 翻译"}
-        calls = []
-        def google(text, *args):
-            calls.append(text)
-            return {"translation": text, "detectedLanguage": "en", "explanation": ""}
-        with patch.object(t, "configuration", return_value=config), patch.object(t.google_translation, "translate", side_effect=google):
-            first = self.wait(t.start(self.book, self.payload)["id"])["result"]
-            data = load(t.history_path(self.book), {})
-            prepared = t.prepare(self.book, self.payload)
-            data["items"][0]["cacheKey"] = hashlib.sha256(json.dumps([prepared, "google", "test", "Google 翻译"], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-            data["items"][0].pop("textVersion")
-            save(t.history_path(self.book), data)
-            self.assertIn("translationWarning", t.lookup(self.book, first["id"]))
-            next_job = self.wait(t.start(self.book, self.payload)["id"])
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(next_job["status"], "ready")
-        self.assertNotIn("translationWarning", next_job["result"])
+    def test_old_automatic_history_is_removed_but_favorites_survive(self):
+        with patch.object(t.ai_tutor, "complete", side_effect=self.provider):
+            item = self.wait(t.start(self.book, self.payload)["id"])["result"]
+        automatic = {**item, "cacheKey": "old-key"}
+        favorite = {**item, "id": "f"*32, "favorite": True, "cacheKey": "old-favorite"}
+        save(t.history_path(self.book), {"items": [automatic, favorite]})
+        t.purge_automatic_history()
+        self.assertEqual([row["id"] for row in t.history(self.book)], [favorite["id"]])
+        self.assertNotIn("cacheKey", load(t.history_path(self.book), {})["items"][0])
+        t.favorite(self.book, favorite["id"], False)
+        self.assertFalse(t.history_path(self.book).exists())
 
     def test_google_never_splits_a_latex_expression_to_fit_a_chunk(self):
         formula = "$" + "x+" * 2200 + "x$"
@@ -227,25 +220,22 @@ class Translation(unittest.TestCase):
                 t.decode(raw, {})
         self.assertEqual(t.decode('```json\n{"translation":"结果"}\n```', {})["translation"], "结果")
 
-    def test_storage_error_still_returns_result_and_no_html_in_record(self):
+    def test_disk_failure_does_not_affect_translation_but_favorite_reports_error(self):
         with patch.object(t.ai_tutor, "complete", side_effect=self.provider), patch.object(t, "save", side_effect=OSError("disk")):
-            job = self.wait(t.start(self.book, self.payload)["id"])
-        self.assertEqual(job["status"], "ready")
-        self.assertIn("storageWarning", job["result"])
+            result = self.wait(t.start(self.book, self.payload)["id"])["result"]
+            self.assertNotIn("storageWarning", result)
+            with self.assertRaises(OSError):
+                t.favorite(self.book, result["id"], True)
         self.assertEqual(t.history(self.book), [])
 
-    def test_safe_render_and_capacity_preserves_favorites(self):
+    def test_safe_render_and_favorite_limit(self):
         with patch.object(t.ai_tutor, "complete", side_effect=self.provider):
-            job = self.wait(t.start(self.book, self.payload)["id"])
-        item = load(t.history_path(self.book), {})["items"][0]
-        self.assertNotIn("html", item)
-        rows = [{**item, "id": f"{i:032x}", "cacheKey": str(i), "favorite": i != 0} for i in range(100)]
+            item = self.wait(t.start(self.book, self.payload)["id"])["result"]
+        rows = [{**item, "id": f"{i:032x}", "favorite": True} for i in range(100)]
         save(t.history_path(self.book), {"items": rows})
-        with patch.object(t.ai_tutor, "complete", side_effect=self.provider):
-            result = self.wait(t.start(self.book, {**self.payload, "text": "new word"})["id"])
+        with self.assertRaisesRegex(ValueError, "100"):
+            t.favorite(self.book, item["id"], True)
         self.assertEqual(len(t.history(self.book)), 100)
-        self.assertEqual(sum(row["favorite"] for row in t.history(self.book)), 99)
-        self.assertNotIn(rows[0]["id"], [row["id"] for row in t.history(self.book)])
         malicious = t.public({**item, "translation": '<script>alert(1)</script> [bad](javascript:alert(1))'}, rendered=True)
         self.assertNotIn("<script>", malicious["html"])
         self.assertNotIn('href="javascript:', malicious["html"])

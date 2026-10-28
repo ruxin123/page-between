@@ -42,6 +42,7 @@ from paths import DATA, RUNTIME, DEMO, APP_MODE, DATA_PREFIX, CACHE
 from storage import load, save
 import ai_tutor
 import translation
+from cache_policy import discard_export, prune_exports
 import service_settings
 import mineru_api
 import book_index
@@ -595,6 +596,7 @@ class Handler(SimpleHTTPRequestHandler):
                 )
                 return self.json(state)
             if route.path.startswith("/api/downloads/"):
+                prune_exports(CACHE)
                 name = route.path.removeprefix("/api/downloads/")
                 if not re.fullmatch(r"[0-9a-f]{32}\.(?:epub|pbbackup)", name):
                     raise ValueError("导出文件地址无效。")
@@ -784,6 +786,7 @@ class Handler(SimpleHTTPRequestHandler):
                         "ai-conversations.json": ai_tutor.records(),
                     }
                 result = library_data.backup(snapshot)
+                prune_exports(CACHE)
                 return self.json(
                     {**result, "download": "/api/downloads/" + result["id"]}
                 )
@@ -799,6 +802,9 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.json(library_data.prepare_previous())
             if route.path == "/api/data/clear-cache":
                 return self.json(library_data.queue_cache_cleanup())
+            if route.path == "/api/data/discard-export":
+                discard_export(CACHE, payload.get("id"))
+                return self.json({"discarded": True})
             if route.path == "/api/export/epub":
                 book = book_for(payload.get("book"))
                 if not book:
@@ -809,6 +815,7 @@ class Handler(SimpleHTTPRequestHandler):
                     else None
                 )
                 result = epub_export.build(book, pages)
+                prune_exports(CACHE)
                 return self.json(
                     {**result, "download": "/api/downloads/" + result["id"]}
                 )
@@ -1204,6 +1211,7 @@ def main():
             ) from None
     library_data.apply_pending_restore()
     library_data.apply_cache_cleanup()
+    library_data.prune_disposable_cache()
     build_native()
     if not (DATA / "library.json").exists():
         if DEMO:

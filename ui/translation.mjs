@@ -293,9 +293,7 @@ export function createTranslation({
         "/api/translation/history?book=" + encodeURIComponent(book),
       );
       if (version !== historyRevision || panel.hidden) return;
-      const items = data.items.filter(
-        (row) => !$("translation-only-favorites").checked || row.favorite,
-      );
+      const items = data.items;
       $("translation-history-items").innerHTML = items.length
         ? items
             .map(
@@ -303,7 +301,7 @@ export function createTranslation({
                 `<button class="translation-history-item" data-translation="${index}"><span>${item.favorite ? "★ " : ""}${escapeHTML(item.text)}</span><small>${escapeHTML(item.translation)}</small></button>`,
             )
             .join("")
-        : '<p class="setting-note">暂无翻译记录</p>';
+        : '<p class="setting-note">尚未收藏译文</p>';
       $("translation-history-items")
         .querySelectorAll("[data-translation]")
         .forEach(
@@ -377,7 +375,6 @@ export function createTranslation({
     message("已停止翻译。");
   };
   $("translation-recent").onclick = showHistory;
-  $("translation-only-favorites").onchange = showHistory;
   $("translation-back").onclick = showContent;
   $("translation-from").onchange = $("translation-to").onchange = () => {
     if (context?.source) translate();

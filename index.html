@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.46" />
+    <link rel="stylesheet" href="/layout.css?v=2.47" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -266,6 +266,7 @@
               </button>
               <hr />
               <h2>清理缓存</h2>
+              <p id="data-cache-details" class="setting-note"></p>
               <p class="setting-note">仅清理临时文件，书籍与记录保留。</p>
               <div class="service-actions">
                 <button id="data-clear-cache" class="secondary-button">
@@ -308,8 +309,8 @@
           <button
             id="translation-history-open"
             class="icon-button"
-            title="本书翻译记录"
-            aria-label="本书翻译记录"
+            title="本书翻译收藏"
+            aria-label="本书翻译收藏"
           >
             <i data-icon="translate"></i>
           </button>
@@ -602,7 +603,7 @@
               >
                 收藏 <kbd>⌘S</kbd>
               </button>
-              <button id="translation-recent">翻译记录</button>
+              <button id="translation-recent">翻译收藏</button>
               <button id="translation-source" hidden>返回原文</button>
               <button id="translation-ask">提问 <kbd>⌘⇧A</kbd></button>
               <a id="translation-settings-menu" href="#/settings/translation"
@@ -747,13 +748,7 @@
         </section>
         <section id="translation-history" hidden>
           <div class="translation-history-head">
-            <button id="translation-back">返回</button
-            ><label
-              ><input
-                type="checkbox"
-                id="translation-only-favorites"
-              />收藏</label
-            >
+            <button id="translation-back">返回</button><span>翻译收藏</span>
           </div>
           <div id="translation-history-items"></div>
         </section>
@@ -1183,6 +1178,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.46"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.47"></script>
   </body>
 </html>

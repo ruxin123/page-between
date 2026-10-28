@@ -536,7 +536,12 @@ def verify(app, epubcheck=None, samples=()):
             request("/api/translation/favorite", json.dumps({"book": book["id"], "id": translation_result["id"], "favorite": True}).encode(), content_type="application/json")
             before = len(received)
             cached = json.loads(request("/api/translation/start", json.dumps(translation_payload).encode(), content_type="application/json")[2])
-            assert cached["status"] == "ready" and cached["result"]["favorite"] and len(received) == before
+            for _ in range(200):
+                if cached["status"] != "running":
+                    break
+                time.sleep(.1)
+                cached = json.loads(request("/api/translation/task?book=" + book["id"] + "&id=" + cached["id"])[2])
+            assert cached["status"] == "ready" and not cached["result"]["favorite"] and len(received) == before + 1
             request("/api/translation/history?book=" + book["id"], authenticated=False, expected_status=401)
             bad = {**translation_payload, "targetLanguage": "unknown"}
             request("/api/translation/start", json.dumps(bad).encode(), content_type="application/json", expected_status=400)
@@ -675,7 +680,7 @@ def verify(app, epubcheck=None, samples=()):
                 "originalPageMapping": True,
                 "verifiedBackupRestore": True,
                 "selectionTranslation": True,
-                "translationFormulaAndCache": True,
+                "translationFormulaWithoutAutomaticCache": True,
                 "translationFavoriteBackupRestore": True,
                 "signature": "ad-hoc verified",
                 "formatSamples": sample_results,

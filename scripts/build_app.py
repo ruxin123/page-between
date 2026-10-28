@@ -178,8 +178,8 @@ def build(demo=False):
         "CFBundleExecutable": "page-between",
         "CFBundlePackageType": "APPL",
         "CFBundleIconFile": "App.icns",
-        "CFBundleShortVersionString": "0.5.24",
-        "CFBundleVersion": "248",
+        "CFBundleShortVersionString": "0.5.25",
+        "CFBundleVersion": "249",
         "NSHighResolutionCapable": True,
         "PageBetweenDemo": demo,
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
@@ -233,6 +233,10 @@ def build(demo=False):
     )
     run(["codesign", "--force", "--deep", "--sign", "-", destination])
     run(["codesign", "--verify", "--deep", "--strict", destination])
+    for name in ("dist", "work", "spec", "resources", "native", "App.iconset"):
+        shutil.rmtree(BUILD / name, ignore_errors=True)
+    for name in ("draw-icon", "icon.png"):
+        (BUILD / name).unlink(missing_ok=True)
     print(
         json.dumps(
             {"app": str(destination), "architecture": platform.machine(), "demo": demo},

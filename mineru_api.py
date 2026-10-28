@@ -20,6 +20,7 @@ from book_import import BOOK_ROOT, ROOT, extract_zip, path_for, url_for
 from storage import load, save
 from pdf_enhancement import enrichment_data, source_digest, table_text
 import service_settings
+from cache_policy import prune_mineru_result
 
 
 class MinerUError(ValueError):
@@ -617,4 +618,8 @@ def run(book, pages, phase, cancel, *, fresh=False, publish=None, retry=False):
             reader.close()
     state["state"] = "done"
     checkpoint()
+    try:
+        prune_mineru_result(folder)
+    except (OSError, ValueError):
+        pass
     return result_patch(book, canonical_pages(book))

@@ -60,6 +60,11 @@ final class BookSourceWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, 
       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
     )
     super.init()
+    for directory in (try? FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
+      if UUID(uuidString: directory.lastPathComponent) != nil {
+        try? FileManager.default.removeItem(at: directory)
+      }
+    }
     window.title = "找书 · 页间"
     window.minSize = NSSize(width: 780, height: 520)
     window.isReleasedWhenClosed = false
@@ -446,6 +451,7 @@ final class BookSourceWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, 
     pending.removeAll()
     web.stopLoading()
     window.orderOut(nil)
+    clearResourceCache()
   }
   func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
     guard jobs[ObjectIdentifier(download)] != nil else { return }
@@ -454,6 +460,13 @@ final class BookSourceWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, 
   }
   func windowShouldClose(_ sender: NSWindow) -> Bool {
     window.orderOut(nil)
+    clearResourceCache()
     return false
+  }
+
+  private func clearResourceCache() {
+    web.configuration.websiteDataStore.removeData(
+      ofTypes: [WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache], modifiedSince: .distantPast
+    ) {}
   }
 }

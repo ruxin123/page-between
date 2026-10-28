@@ -516,6 +516,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     } else {
       try FileManager.default.moveItem(at: staged, to: destination)
     }
+    var cleanup = self.request(base.appendingPathComponent("api/data/discard-export"))
+    cleanup.timeoutInterval = 5
+    cleanup.httpMethod = "POST"
+    cleanup.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    cleanup.httpBody = try? JSONSerialization.data(withJSONObject: ["id": url.lastPathComponent])
+    _ = try? await URLSession.shared.data(for: cleanup)
   }
 
   func stopEngine(_ process: Process?) {

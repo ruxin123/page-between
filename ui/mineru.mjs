@@ -48,20 +48,20 @@ export function createDocumentParsing({
     text(
       "local-preparation-status",
       local.status === "ready"
-        ? "全部页面已准备，识别到的文字可直接选中。"
+        ? "已全部准备。"
         : local.status === "paused"
-          ? "整本准备已暂停，已完成页保留。"
+          ? "已暂停。"
           : local.status === "error"
             ? local.failedPages.length
               ? `${local.failedPages.length} 页未成功，已完成页保留。${local.error}`
               : local.error
             : local.activePage
-              ? `正在提前准备第 ${local.activePage} 页，可继续阅读。`
+              ? `正在准备第 ${local.activePage} 页。`
               : local.status === "running"
-                ? "整本准备中，可继续阅读。"
+                ? "准备中…"
                 : local.completed
-                  ? "已准备的文字随书保存在本机，阅读时继续提前准备。"
-                  : "尚未提前准备，打开扫描页后会优先准备当前页。",
+                  ? "已保存识别结果。"
+                  : "尚未准备。",
     );
     text(
       "local-prepare-all",
@@ -89,7 +89,7 @@ export function createDocumentParsing({
           : cloud.status === "error"
             ? cloud.phase
             : cloud.completed === cloud.total
-              ? "全部页面已增强，已有结果保留在本机。"
+              ? "已全部解析。"
               : `还有 ${cloud.total - cloud.completed} 页未通过 MinerU 增强，可补全或选择页段。`,
     );
     const running = cloud.status === "running";
@@ -157,9 +157,7 @@ export function createDocumentParsing({
       configured = settings.services.mineru.ready;
       text(
         "cloud-status",
-        configured
-          ? "使用已配置的 MinerU 服务，默认复用已有结果与未完成任务。"
-          : "本地划词可直接准备；使用 MinerU 前请先配置服务。",
+        configured ? "使用当前 MinerU 配置。" : "请先配置 MinerU。",
       );
       render();
     } catch (error) {
@@ -195,7 +193,7 @@ export function createDocumentParsing({
       toast(
         action === "pause"
           ? "整本划词准备已暂停，已完成页保留。"
-          : "整本划词准备已在本机后台开始。",
+          : "已开始准备。",
         { kind: "success" },
       );
     } catch (error) {

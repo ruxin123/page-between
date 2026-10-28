@@ -42,7 +42,7 @@ export function createBookExport({ post, getBook, toast }) {
       ? "已解析页使用可重排文字、公式和表格；尚无文字的页保留原图。导入导出后的 EPUB 时，如果原 PDF 仍在书库，可一键查看原页。"
       : book.format === "EPUB"
         ? "保留原书目录、插图与样式，导出完整 EPUB 副本。"
-        : "将正文和章节索引整理为 EPUB，原文件保留。";
+        : "按章节生成 EPUB。";
     $("export-status").textContent = "";
     $("export-dialog").showModal();
   }
@@ -72,8 +72,8 @@ export function createBookExport({ post, getBook, toast }) {
         : result.fallbackObjects
           ? `EPUB 已准备，其中 ${result.fallbackObjects} 个复杂区块保留原图。`
           : result.compatibilityUpdated
-            ? "EPUB 已准备，已保留正文与目录并补齐兼容信息，可以保存。"
-            : "EPUB 已准备，可以保存。";
+            ? "已准备，可保存。"
+            : "已准备，可保存。";
     } catch (error) {
       $("export-status").textContent = error.message;
     } finally {

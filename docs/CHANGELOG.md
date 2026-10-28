@@ -2,6 +2,16 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.22 · 2026-10-28
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.22) · Build 246 · 前端 2.44 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.22)
+
+- 翻译浮窗改为原文与译文两张卡片，两侧字号、字体及行距一致，取消短词额外放大。
+- 记录、收藏、返回原文、提问与设置收进「更多」；成功时不再常驻显示模型和保存说明。
+- 选段支持 ⌘C 复制、⌘⇧A 提问、⌘⇧T 翻译，⌘⇧C 复制原图；覆盖 EPUB iframe、PDF 与掌上阅读。
+- 翻译窗口中无局部选区时，⌘C 复制完整译文；保留 ⌘R 重译、⌘S 收藏与 ⌘P 固定。
+- 精简设置、答疑、导入、导出与文档处理文案，使用说明默认折叠；错误及恢复确认保留。
+
 ## 0.5.21 · 2026-10-28
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.21) · Build 245 · 前端 2.43 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.21)

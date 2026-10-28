@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.43" />
+    <link rel="stylesheet" href="/layout.css?v=2.44" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -95,7 +95,6 @@
             <div>
               <div class="eyebrow">PREFERENCES</div>
               <h1>让阅读合你心意</h1>
-              <p>从字里行间，到陪你读书的服务。</p>
             </div>
           </header>
           <div class="settings-tabs" role="tablist" aria-label="设置分类">
@@ -155,7 +154,22 @@
             role="tabpanel"
             aria-labelledby="tab-reading"
           >
-            <div class="settings-form" id="global-settings"></div>
+            <div>
+              <div class="settings-form" id="global-settings"></div>
+              <details class="inline-help keyboard-help">
+                <summary>快捷键</summary>
+                <dl>
+                  <dt>复制选段</dt>
+                  <dd>⌘C</dd>
+                  <dt>提问选段</dt>
+                  <dd>⌘⇧A</dd>
+                  <dt>翻译选段</dt>
+                  <dd>⌘⇧T</dd>
+                  <dt>复制原图</dt>
+                  <dd>⌘⇧C</dd>
+                </dl>
+              </details>
+            </div>
             <article class="type-sample">
               <small>阅读预览</small>
               <h2>留一点时间给书</h2>
@@ -244,11 +258,8 @@
                 找回恢复前的书库…
               </button>
               <hr />
-              <h2>让空间保持轻盈</h2>
-              <p class="setting-note">
-                清理
-                临时识别、搜索和导出缓存。随书保存的划词文字、原书、进度、书签、对话与服务设置保留。
-              </p>
+              <h2>清理缓存</h2>
+              <p class="setting-note">仅清理临时文件，书籍与记录保留。</p>
               <div class="service-actions">
                 <button id="data-clear-cache" class="secondary-button">
                   准备清理缓存</button
@@ -299,7 +310,7 @@
             class="icon-button"
             id="source-pdf-open"
             aria-label="查看原 PDF"
-            title="查看对应的原 PDF 页面，随后可返回"
+            title="查看原 PDF"
             hidden
           >
             <i data-icon="pages"></i>
@@ -316,7 +327,7 @@
             class="icon-button"
             id="ai-open"
             aria-label="书内 AI 答疑"
-            title="问当前页，或查看本书对话"
+            title="书内答疑"
           >
             <i data-icon="ask"></i>
           </button>
@@ -362,7 +373,7 @@
             id="reader-process"
             aria-label="文档处理"
             hidden
-            title="准备划词与增强 PDF 内容"
+            title="文档处理"
           >
             <i data-icon="settings"></i><span>文档处理</span></button
           ><button
@@ -521,11 +532,31 @@
       aria-label="选中内容操作"
       hidden
     >
-      <button id="copy-selection">
+      <button
+        id="copy-selection"
+        title="复制 · ⌘C"
+        aria-keyshortcuts="Meta+C Control+C"
+      >
         <i data-icon="copy"></i><span id="copy-label">复制</span></button
-      ><button id="copy-image" hidden><i data-icon="image"></i>复制原图</button
-      ><button id="ask-selection"><i data-icon="ask"></i>提问</button>
-      <button id="translate-selection" title="翻译选中内容 (⌘⇧T)">
+      ><button
+        id="copy-image"
+        title="复制原图 · ⌘⇧C"
+        aria-keyshortcuts="Meta+Shift+C Control+Shift+C"
+        hidden
+      >
+        <i data-icon="image"></i>复制原图</button
+      ><button
+        id="ask-selection"
+        title="提问 · ⌘⇧A"
+        aria-keyshortcuts="Meta+Shift+A Control+Shift+A"
+      >
+        <i data-icon="ask"></i>提问
+      </button>
+      <button
+        id="translate-selection"
+        title="翻译 · ⌘⇧T"
+        aria-keyshortcuts="Meta+Shift+T Control+Shift+T"
+      >
         <i data-icon="translate"></i>翻译
       </button>
       <button id="search-selection"><i data-icon="search"></i>查书内</button>
@@ -536,150 +567,187 @@
     <aside
       id="translation-panel"
       class="translation-panel"
-      aria-label="划词翻译"
+      aria-label="翻译"
       hidden
     >
       <header class="aside-head" id="translation-drag">
-        <strong>划词翻译</strong>
+        <strong>翻译</strong>
         <div class="translation-tools">
-          <button
-            id="translation-recent"
-            class="icon-button"
-            title="本书翻译记录"
-            aria-label="本书翻译记录"
-          >
-            <i data-icon="toc"></i>
-          </button>
           <button
             id="translation-pin"
             class="icon-button"
-            aria-label="固定翻译窗口"
+            aria-label="固定窗口"
             aria-pressed="false"
-            title="固定窗口 (⌘P)"
+            title="固定窗口 · ⌘P"
           >
             <i data-icon="pin"></i>
           </button>
+          <details class="translation-menu" id="translation-menu">
+            <summary class="icon-button" aria-label="更多翻译操作" title="更多">
+              <i data-icon="more"></i>
+            </summary>
+            <div class="translation-menu-items">
+              <button
+                id="translation-star"
+                aria-label="收藏翻译"
+                aria-pressed="false"
+                disabled
+              >
+                收藏 <kbd>⌘S</kbd>
+              </button>
+              <button id="translation-recent">翻译记录</button>
+              <button id="translation-source" hidden>返回原文</button>
+              <button id="translation-ask">提问 <kbd>⌘⇧A</kbd></button>
+              <a id="translation-settings-menu" href="#/settings/translation"
+                >翻译设置</a
+              >
+            </div>
+          </details>
           <button
             id="translation-close"
             class="icon-button"
             aria-label="关闭翻译"
+            title="关闭 · Esc"
           >
             <i data-icon="close"></i>
           </button>
         </div>
       </header>
-      <div class="translation-provider">
-        <label for="translation-provider">翻译服务</label
-        ><select id="translation-provider">
-          <option value="ai">AI 翻译</option>
-          <option value="google">Google 翻译</option></select
-        ><button id="translation-retry" title="重新翻译 (⌘R)">重新翻译</button>
-      </div>
-      <div class="translation-languages">
-        <label
-          ><span class="sr-only">原文语言</span
-          ><select id="translation-from" aria-label="原文语言"></select
-        ></label>
-        <button
-          id="translation-swap"
-          class="icon-button"
-          title="交换语言"
-          aria-label="交换语言"
-        >
-          <i data-icon="swap"></i>
-        </button>
-        <label
-          ><span class="sr-only">译文语言</span
-          ><select id="translation-to" aria-label="译文语言"></select
-        ></label>
-      </div>
       <div class="translation-scroll">
         <section id="translation-content">
-          <form id="translation-form">
-            <label for="translation-query" class="translation-label"
-              >原文</label
-            >
+          <form id="translation-form" class="translation-original-card">
+            <label for="translation-query" class="visually-hidden">原文</label>
             <div
               id="translation-original-preview"
               class="translation-original-preview"
             ></div>
-            <button type="button" id="translation-edit" aria-expanded="false">
-              编辑原文
-            </button>
             <textarea
-              hidden
               id="translation-query"
               maxlength="6000"
               rows="2"
-              placeholder="选择文字，或在这里修改原文"
+              placeholder="输入原文"
+              hidden
             ></textarea>
             <div class="translation-input-actions">
-              <button type="button" id="translation-copy-original">
-                复制原文</button
-              ><button
+              <button
+                type="button"
+                id="translation-copy-original"
+                class="icon-button"
+                aria-label="复制原文"
+                title="复制原文"
+              >
+                <i data-icon="copy"></i>
+              </button>
+              <button
+                type="button"
+                id="translation-edit"
+                class="icon-button"
+                aria-label="编辑原文"
+                title="编辑原文"
+                aria-expanded="false"
+              >
+                <i data-icon="edit"></i>
+              </button>
+              <span
+                id="translation-detected"
+                class="translation-label"
+                hidden
+              ></span>
+              <button
+                id="translation-submit"
                 class="primary-button"
                 type="submit"
-                id="translation-submit"
+                hidden
               >
                 翻译
               </button>
             </div>
           </form>
-          <div
-            id="translation-status"
-            class="translation-status"
-            role="status"
-            aria-live="polite"
-          ></div>
-          <button id="translation-stop" hidden>停止翻译</button>
-          <a id="translation-settings" href="#/settings/translation" hidden
-            >配置翻译服务</a
-          >
-          <section id="translation-result" hidden>
-            <div class="translation-result-heading">
-              <span id="translation-detected" class="translation-label"
-                >译文</span
-              ><button
-                id="translation-star"
-                class="icon-button"
-                aria-label="收藏翻译"
-                aria-pressed="false"
+          <div class="translation-languages">
+            <label
+              ><span class="visually-hidden">原文语言</span
+              ><select id="translation-from" aria-label="原文语言"></select
+            ></label>
+            <button
+              id="translation-swap"
+              class="icon-button"
+              title="交换语言"
+              aria-label="交换语言"
+            >
+              <i data-icon="swap"></i>
+            </button>
+            <label
+              ><span class="visually-hidden">译文语言</span
+              ><select id="translation-to" aria-label="译文语言"></select
+            ></label>
+          </div>
+          <section class="translation-result-card">
+            <div class="translation-provider">
+              <label for="translation-provider" class="visually-hidden"
+                >翻译服务</label
               >
-                <i data-icon="star"></i>
+              <select id="translation-provider" aria-label="翻译服务">
+                <option value="ai">AI 翻译</option>
+                <option value="google">Google 翻译</option>
+              </select>
+              <button
+                id="translation-retry"
+                class="icon-button"
+                title="重新翻译 · ⌘R"
+                aria-label="重新翻译"
+              >
+                <i data-icon="refresh"></i>
               </button>
             </div>
-            <div id="translation-output" class="translation-output"></div>
-            <div
-              id="translation-explanation"
-              class="translation-explanation"
-            ></div>
-            <div class="translation-result-actions">
-              <button id="translation-copy">
-                <i data-icon="copy"></i>复制译文</button
-              ><button id="translation-ask">
-                <i data-icon="ask"></i>继续提问
+            <div class="translation-feedback">
+              <div
+                id="translation-status"
+                class="translation-status"
+                role="status"
+                aria-live="polite"
+              ></div>
+              <button
+                id="translation-stop"
+                class="icon-button"
+                aria-label="停止翻译"
+                title="停止"
+                hidden
+              >
+                <i data-icon="close"></i>
               </button>
             </div>
+            <a id="translation-settings" href="#/settings/translation" hidden
+              >设置 AI 模型</a
+            >
+            <section id="translation-result" hidden>
+              <div id="translation-output" class="translation-output"></div>
+              <div
+                id="translation-explanation"
+                class="translation-explanation"
+              ></div>
+              <div class="translation-result-actions">
+                <button
+                  id="translation-copy"
+                  class="icon-button"
+                  aria-label="复制译文"
+                  title="复制译文 · ⌘C"
+                >
+                  <i data-icon="copy"></i>
+                </button>
+              </div>
+            </section>
           </section>
-          <button
-            id="translation-source"
-            class="translation-source"
-            hidden
-          ></button>
         </section>
         <section id="translation-history" hidden>
           <div class="translation-history-head">
-            <button id="translation-back">返回翻译</button
+            <button id="translation-back">返回</button
             ><label
               ><input
                 type="checkbox"
                 id="translation-only-favorites"
-              />只看收藏</label
+              />收藏</label
             >
           </div>
-          <p class="setting-note">
-            本书最近 100 条翻译保存在本机；收藏会优先保留。
-          </p>
           <div id="translation-history-items"></div>
         </section>
       </div>
@@ -739,9 +807,9 @@
         </button>
       </div>
       <div id="ai-model-status" class="ai-model-status" role="status"></div>
-      <a class="ai-settings-link" href="#/settings/ai">管理模型服务</a>
+      <a class="ai-settings-link" href="#/settings/ai">模型设置</a>
       <details id="ai-service-details" class="ai-service-details" hidden>
-        <summary>查看模型服务</summary>
+        <summary>模型</summary>
         <span id="ai-service"></span>
       </details>
       <div id="ai-history-list" class="ai-history-list" hidden></div>
@@ -761,7 +829,7 @@
         </div>
         <form id="ai-question-form">
           <label id="ai-image-option" class="knowledge-scope" hidden
-            ><input id="ai-send-image" type="checkbox" />本次附带原图</label
+            ><input id="ai-send-image" type="checkbox" />附带原图</label
           >
           <p id="ai-image-status" class="setting-note" hidden></p>
           <label class="knowledge-scope"
@@ -769,27 +837,28 @@
               id="ai-previous-knowledge"
               type="checkbox"
               checked
-            />检索本书当前位置之前的知识</label
+            />引用前文</label
           >
-          <label for="question-input">你想了解什么？</label
+          <label for="question-input">问题</label
           ><textarea
             id="question-input"
             rows="3"
-            placeholder="例如：这里为什么可以这样推导？"
+            placeholder="输入问题…"
             maxlength="6000"
           ></textarea>
           <div class="ai-form-actions">
             <button id="ai-submit" class="primary-button" type="submit">
-              发送提问</button
+              发送</button
             ><button id="ai-stop" class="secondary-button" type="button" hidden>
-              停止生成</button
+              停止</button
             ><button id="copy-question" class="secondary-button" type="button">
-              复制出处与对话
+              复制对话
             </button>
           </div>
-          <p class="setting-note">
-            发送时会将选段、附近文字及勾选检索后找到的此前资料交给配置的模型。对话与引用保存在本机。
-          </p>
+          <details class="inline-help">
+            <summary>发送内容</summary>
+            <p>选段、附近文字、引用资料与本次对话会发送给所选模型。</p>
+          </details>
         </form>
       </div>
     </aside>
@@ -797,8 +866,7 @@
     <dialog id="import-dialog" class="import-dialog">
       <form method="dialog" class="dialog-heading">
         <div>
-          <small>IMPORT</small>
-          <h2>把书放进来</h2>
+          <h2>导入书籍</h2>
         </div>
         <button class="icon-button" aria-label="关闭导入">
           <i data-icon="close"></i>
@@ -810,17 +878,14 @@
             class="drop-icon"
             ><i data-icon="import"></i></span
           ><strong>选择文件，或拖到这里</strong
-          ><small>EPUB · PDF · TXT · Kindle · 更多电子书格式</small></label
+          ><small>EPUB · PDF · TXT · Kindle 等</small></label
         >
         <div id="import-files" class="import-files"></div>
-        <p id="import-policy" class="import-policy">
-          EPUB 保留原书目录和插图。PDF、TXT
-          默认开启文档解析，可为每本书单独调整。
-        </p>
+        <p id="import-policy" class="import-policy">PDF、TXT 默认开启解析。</p>
         <div id="import-result" class="import-result" role="status"></div>
       </div>
       <div class="dialog-footer">
-        <span id="import-count">文件保存在本机</span
+        <span id="import-count"></span
         ><button class="primary-button" id="import-submit" disabled>
           导入书籍
         </button>
@@ -829,7 +894,6 @@
     <dialog id="jobs-dialog" class="jobs-dialog" aria-labelledby="jobs-title">
       <form method="dialog" class="dialog-heading">
         <div>
-          <small>LOCAL TASKS</small>
           <h2 id="jobs-title">导入与处理</h2>
         </div>
         <button class="icon-button" aria-label="关闭处理任务">
@@ -837,14 +901,15 @@
         </button>
       </form>
       <div class="jobs-body">
-        <p class="setting-note">
-          书籍导入后即可阅读。文字和目录在后台准备，关闭面板后会继续。
-        </p>
+        <p class="setting-note">正在后台处理，可关闭窗口。</p>
         <div id="import-jobs" class="job-list"></div>
-        <div class="formats-note" id="formats-note"></div>
+        <details class="inline-help">
+          <summary>支持的格式</summary>
+          <div class="formats-note" id="formats-note"></div>
+        </details>
       </div>
       <div class="dialog-footer">
-        <span>文件保存在本机</span
+        <span></span
         ><button class="primary-button" id="imports-add">
           <i data-icon="plus"></i>导入书籍
         </button>
@@ -994,10 +1059,7 @@
         <p id="local-preparation-status" class="setting-note" role="status">
           正在读取准备进度…
         </p>
-        <p class="setting-note">
-          阅读时提前准备后 3 页和前 1
-          页。结果随书保存在本机，重启、升级和书库备份后仍可用。
-        </p>
+        <p class="setting-note">自动预备附近页面，结果随书保存。</p>
         <div class="document-process-actions">
           <button type="button" id="local-prepare-all" class="secondary-button">
             提前准备整本</button
@@ -1045,9 +1107,7 @@
             暂停云解析
           </button>
         </div>
-        <p class="setting-note">
-          按批提交所选页，成功一批即可阅读一批。使用已配置服务的解析额度；原书保留，处理时可继续阅读。
-        </p>
+        <p class="setting-note">所选页面将上传至 MinerU，使用解析额度。</p>
         <form id="cloud-form" class="cloud-form">
           <label class="service-field"
             >PDF 文件页序<input
@@ -1068,9 +1128,7 @@
           <label class="setting-check"
             >重新提交解析<input id="cloud-fresh" type="checkbox"
           /></label>
-          <p class="setting-note">
-            默认复用已有结果与未完成任务。开始后会开启本书的文档解析；可在处理面板暂停。
-          </p>
+          <p class="setting-note">已完成页面会复用。</p>
           <p id="cloud-status" class="setting-note" role="status"></p>
           <a id="cloud-settings" href="#/settings/mineru">管理 MinerU 服务</a>
           <div class="cloud-footer">
@@ -1118,6 +1176,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.43"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.44"></script>
   </body>
 </html>

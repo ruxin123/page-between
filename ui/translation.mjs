@@ -89,7 +89,7 @@ export function createTranslation({
     $("translation-submit").disabled = unavailable || !!active;
     $("translation-retry").disabled = unavailable || !!active;
     if (unavailable) {
-      message("AI 翻译尚未配置。请配置翻译模型，或选择 Google 翻译。");
+      message("AI 尚未配置。");
       $("translation-settings").hidden = false;
     }
   }
@@ -97,7 +97,13 @@ export function createTranslation({
     editingOriginal = value;
     $("translation-query").hidden = !value;
     $("translation-original-preview").hidden = value;
-    $("translation-edit").textContent = value ? "完成编辑" : "编辑原文";
+    $("translation-edit").innerHTML = icon(value ? "check" : "edit");
+    $("translation-edit").title = value ? "完成编辑" : "编辑原文";
+    $("translation-edit").setAttribute(
+      "aria-label",
+      value ? "完成编辑" : "编辑原文",
+    );
+    $("translation-submit").hidden = !value;
     $("translation-edit").setAttribute("aria-expanded", String(value));
   }
   async function renderOriginal() {
@@ -123,20 +129,14 @@ export function createTranslation({
     $("translation-star").setAttribute("aria-pressed", String(item.favorite));
     $("translation-star").disabled = !!item.storageWarning;
     $("translation-detected").textContent =
-      (languages[item.detectedLanguage] || "原文") +
-      " → " +
-      (item.targetLanguage === "auto"
-        ? item.detectedLanguage === "zh"
-          ? languages.en
-          : languages.zh
-        : languages[item.targetLanguage]);
-    const words = item.text.trim().split(/\s+/).length;
-    $("translation-output").classList.toggle(
-      "is-term",
-      words <= 4 && item.text.length <= 40 && !/[。.!?？！\n]/.test(item.text),
-    );
-    message(item.storageWarning || `由 ${item.model} 翻译 · 已保存在本机`);
+      languages[item.detectedLanguage] || "";
+    $("translation-detected").hidden = !languages[item.detectedLanguage];
+    $("translation-provider").title = item.model || "";
+    $("translation-star").innerHTML =
+      `${item.favorite ? "取消收藏" : "收藏"}<kbd>⌘S</kbd>`;
+    message(item.storageWarning || "");
   }
+
   async function translate(force = false) {
     if (!context?.source) return;
     stop();
@@ -145,6 +145,7 @@ export function createTranslation({
       availability();
       return;
     }
+    setEditing(false);
     renderOriginal();
     const current = revision,
       request = structuredClone(context);
@@ -217,8 +218,8 @@ export function createTranslation({
   }
   function showSource() {
     $("translation-source").hidden = !context?.source;
-    $("translation-source").textContent =
-      (context?.source?.citation || "原书选段") + " · 返回原文";
+    $("translation-source").textContent = "返回原文";
+    $("translation-source").title = context?.source?.citation || "";
   }
   function position(rect) {
     if (pinned && panel.style.left) return;
@@ -250,6 +251,10 @@ export function createTranslation({
     result = null;
     message("");
     panel.hidden = false;
+    if (!detached) {
+      panel.tabIndex = -1;
+      panel.focus({ preventScroll: true });
+    }
     showContent();
     showSource();
     $("translation-query").value = context.source?.quote || "";
@@ -297,7 +302,7 @@ export function createTranslation({
                 `<button class="translation-history-item" data-translation="${index}"><span>${item.favorite ? "★ " : ""}${escapeHTML(item.text)}</span><small>${escapeHTML(item.translation)}</small></button>`,
             )
             .join("")
-        : '<p class="setting-note">还没有翻译记录。选择原文后点击“翻译”即可。</p>';
+        : '<p class="setting-note">暂无翻译记录</p>';
       $("translation-history-items")
         .querySelectorAll("[data-translation]")
         .forEach(
@@ -352,7 +357,7 @@ export function createTranslation({
     previewRevision++;
     result = null;
     $("translation-result").hidden = true;
-    message("原文已修改，按 Enter 翻译。");
+    message("");
   });
   $("translation-edit").onclick = () => {
     setEditing(!editingOriginal);
@@ -426,10 +431,28 @@ export function createTranslation({
           "aria-pressed",
           String(item.favorite),
         );
+        $("translation-star").innerHTML =
+          `${item.favorite ? "取消收藏" : "收藏"}<kbd>⌘S</kbd>`;
       }
     } catch (error) {
       toast(error.message, { kind: "warning" });
     }
+  };
+  panel.addEventListener("click", (event) => {
+    if (
+      !event.target.closest("#translation-menu") ||
+      event.target.closest(
+        ".translation-menu-items button,.translation-menu-items a",
+      )
+    )
+      $("translation-menu").open = false;
+  });
+  $("translation-settings-menu").onclick = (event) => {
+    if (settings) {
+      event.preventDefault();
+      settings();
+    }
+    if (!pinned) close();
   };
   $("translation-settings").onclick = (event) => {
     if (settings) {
@@ -462,6 +485,26 @@ export function createTranslation({
     }
     if ((event.metaKey || event.ctrlKey) && !event.altKey) {
       const key = event.key.toLowerCase();
+      const editing =
+        event.target.matches?.("input,textarea,select") ||
+        event.target.isContentEditable;
+      const selection = window.getSelection();
+      const selectedHere =
+        selection &&
+        !selection.isCollapsed &&
+        panel.contains(selection.anchorNode);
+      if (key === "c" && !editing && !selectedHere && result) {
+        event.preventDefault();
+        event.stopPropagation();
+        copy(result.translation);
+        return;
+      }
+      if (key === "a" && event.shiftKey && !editing && context?.source) {
+        event.preventDefault();
+        event.stopPropagation();
+        $("translation-ask").click();
+        return;
+      }
       if (["p", "r", "s"].includes(key)) {
         event.preventDefault();
         event.stopPropagation();

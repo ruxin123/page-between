@@ -3549,8 +3549,10 @@ body[data-mode="tutor"] .question-panel .aside-head {
   }
 }
 
-/* Quick translation keeps the original and its meaning in one quiet card. */
+/* Matching type and two quiet cards keep quick lookup close to the book. */
 .translation-panel {
+  --translation-font: 15px;
+  --translation-line: 1.8;
   position: fixed;
   z-index: 140;
   width: min(400px, calc(100vw - 16px));
@@ -3564,7 +3566,7 @@ body[data-mode="tutor"] .question-panel .aside-head {
   box-shadow: var(--shadow-card-hover);
   overflow: hidden;
   font:
-    14px/1.6 -apple-system,
+    13px/1.6 -apple-system,
     BlinkMacSystemFont,
     sans-serif;
 }
@@ -3574,15 +3576,22 @@ body[data-mode="tutor"] .question-panel .aside-head {
 }
 .translation-panel .aside-head {
   flex-shrink: 0;
-  padding: 8px 12px;
+  padding: 4px 8px;
   cursor: move;
+  border-bottom: 0;
+}
+.translation-panel .aside-head strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--secondary);
 }
 .translation-tools,
 .translation-languages,
-.translation-result-heading,
 .translation-input-actions,
 .translation-result-actions,
-.translation-history-head {
+.translation-history-head,
+.translation-provider,
+.translation-feedback {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3599,14 +3608,14 @@ body[data-mode="tutor"] .question-panel .aside-head {
   vertical-align: middle;
 }
 .translation-panel button:not(.icon-button):not(.primary-button) {
-  color: var(--accent);
+  color: var(--ink);
   background: transparent;
   border: 0;
   border-radius: 6px;
   padding: 4px 8px;
 }
 .translation-panel button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 .translation-panel .icon-button[aria-pressed="true"] {
@@ -3615,115 +3624,205 @@ body[data-mode="tutor"] .question-panel .aside-head {
 }
 .translation-panel button:focus-visible,
 .translation-panel select:focus-visible,
-.translation-panel textarea:focus-visible {
+.translation-panel textarea:focus-visible,
+.translation-panel summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.translation-scroll {
+  overflow: auto;
+  min-height: 0;
+  padding: 4px 12px 12px;
+  overscroll-behavior: contain;
+}
+.translation-original-card,
+.translation-result-card {
+  background: color-mix(in srgb, var(--surface) 65%, var(--soft));
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 12px;
+}
 .translation-languages {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: 8px 4px;
 }
 .translation-languages label {
   flex: 1;
   min-width: 0;
 }
-.translation-languages select {
+.translation-languages select,
+.translation-provider select {
   width: 100%;
   background: transparent;
   color: var(--ink);
   border: 0;
   font: inherit;
   padding: 4px;
+  min-width: 0;
 }
-.translation-scroll {
-  overflow: auto;
-  min-height: 0;
-  padding: 16px;
-  overscroll-behavior: contain;
+.translation-provider {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.translation-provider select {
+  flex: 1;
+  font-weight: 500;
 }
 .translation-label {
   font-size: 12px;
   color: var(--secondary);
 }
+.translation-original-preview,
+.translation-output,
 .translation-panel textarea {
-  display: block;
-  resize: vertical;
-  width: 100%;
-  min-height: 56px;
-  max-height: 180px;
-  color: var(--ink);
-  background: transparent;
-  border: 0;
-  padding: 4px 0;
   font:
-    14px/1.7 -apple-system,
-    sans-serif;
-}
-.translation-input-actions {
-  justify-content: space-between;
-  margin-top: 8px;
-}
-.translation-input-actions .primary-button {
-  padding: 4px 16px;
-  min-height: 32px;
-}
-.translation-status {
-  font-size: 12px;
-  color: var(--secondary);
-  margin: 12px 0;
-  overflow-wrap: anywhere;
-}
-.translation-result-heading {
-  justify-content: space-between;
-  border-top: 1px solid var(--line);
-  padding-top: 8px;
-}
-.translation-output {
-  font:
-    18px/1.85 ReaderHanSerif,
-    ReaderSourceSerif,
+    var(--translation-font) / var(--translation-line) ReaderSourceSerif,
+    ReaderHanSerif,
     Georgia,
     serif;
   overflow-wrap: anywhere;
 }
-.translation-output.is-term {
-  font-size: 24px;
-  line-height: 1.6;
+.translation-original-preview {
+  max-height: 220px;
+  overflow: auto;
 }
+.translation-original-preview p,
 .translation-output p {
-  margin: 8px 0;
+  margin: 0 0 8px;
+  font-size: inherit;
+  line-height: inherit;
 }
+.translation-original-preview p:last-child,
+.translation-output p:last-child {
+  margin-bottom: 0;
+}
+.translation-panel textarea {
+  display: block;
+  resize: vertical;
+  width: 100%;
+  min-height: 64px;
+  max-height: 220px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.translation-input-actions {
+  margin-top: 8px;
+}
+.translation-input-actions .primary-button {
+  padding: 4px 12px;
+  min-height: 28px;
+  margin-left: auto;
+}
+.translation-input-actions .icon-button,
+.translation-result-actions .icon-button {
+  width: 28px;
+  height: 28px;
+}
+.translation-feedback {
+  gap: 4px;
+}
+.translation-status {
+  font-size: 12px;
+  color: var(--secondary);
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.translation-status:empty {
+  display: none;
+}
+.translation-output {
+  padding-top: 12px;
+}
+.translation-explanation {
+  font-size: 13px;
+  color: var(--secondary);
+}
+.translation-explanation:empty {
+  display: none;
+}
+.translation-result-actions {
+  padding-top: 8px;
+}
+.translation-original-preview math,
 .translation-output math,
 .translation-explanation math {
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
 }
+.translation-original-preview annotation,
 .translation-output annotation,
 .translation-explanation annotation {
   display: none;
 }
-.translation-explanation {
-  font-size: 13px;
-  color: var(--secondary);
-}
-.translation-result-actions {
-  justify-content: space-between;
-  padding-top: 8px;
-}
-.translation-source {
-  text-align: left;
-  font-size: 12px !important;
-  margin-top: 16px;
+.translation-original-preview table,
+.translation-output table {
+  font-size: 14px;
+  border-collapse: collapse;
   width: 100%;
-  overflow-wrap: anywhere;
-  border-top: 1px solid var(--line) !important;
-  border-radius: 0 !important;
-  padding-top: 12px !important;
+}
+.translation-original-preview td,
+.translation-original-preview th,
+.translation-output td,
+.translation-output th {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+}
+.translation-original-preview pre,
+.translation-output pre,
+.translation-original-preview .source-table {
+  overflow: auto;
+  max-width: 100%;
+}
+.translation-menu {
+  position: relative;
+}
+.translation-menu summary {
+  list-style: none;
+  cursor: pointer;
+}
+.translation-menu summary::-webkit-details-marker {
+  display: none;
+}
+.translation-menu-items {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 3;
+  min-width: 176px;
+  padding: 4px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card-hover);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.translation-menu-items button,
+.translation-menu-items a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  text-align: left;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 13px;
+}
+.translation-menu-items button:hover,
+.translation-menu-items a:hover {
+  background: var(--soft) !important;
+}
+.translation-menu-items kbd {
+  font-size: 11px;
+  color: var(--secondary);
 }
 .translation-history-head {
   justify-content: space-between;
   font-size: 12px;
+  margin-bottom: 8px;
 }
 .translation-history-item {
   display: block;
@@ -3767,6 +3866,31 @@ body[data-mode="translation"] .translation-panel {
 body[data-mode="translation"] .translation-panel .aside-head {
   cursor: default;
 }
+body[data-mode="translation"] .translation-panel .aside-head > strong {
+  visibility: hidden;
+}
+.service-layout {
+  grid-template-columns: minmax(0, 720px);
+}
+.service-help,
+.inline-help {
+  font-size: 12px;
+  color: var(--secondary);
+}
+.service-help summary,
+.inline-help summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.ai-model-status:empty,
+.setting-note:empty {
+  display: none;
+}
+#settings-translation [data-translation-model] {
+  margin: 12px 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+}
 @media (prefers-reduced-motion: no-preference) {
   .translation-panel {
     animation: translation-appear 160ms ease-out;
@@ -3783,79 +3907,19 @@ body[data-mode="translation"] .translation-panel .aside-head {
   }
 }
 
-.translation-panel .sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-.translation-provider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px 0;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-.translation-provider label {
-  color: var(--secondary);
-}
-.translation-provider select {
-  flex: 1;
-  min-width: 0;
-  padding: 4px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-}
-.translation-original-preview {
-  font:
-    15px/1.8 ReaderSourceSerif,
-    ReaderHanSerif,
-    Georgia,
-    serif;
-  max-height: 200px;
-  overflow: auto;
-  overflow-wrap: anywhere;
-  margin: 8px 0;
-}
-.translation-original-preview p {
-  margin: 8px 0;
-}
-.translation-original-preview annotation {
+.service-result:empty {
   display: none;
 }
-.translation-original-preview math {
-  max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
+.keyboard-help dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 24px;
+  max-width: 280px;
 }
-.translation-original-preview table,
-.translation-output table {
-  font-size: 14px;
-  border-collapse: collapse;
-  width: 100%;
+.keyboard-help dt,
+.keyboard-help dd {
+  margin: 0;
 }
-.translation-original-preview td,
-.translation-original-preview th,
-.translation-output td,
-.translation-output th {
-  border: 1px solid var(--line);
-  padding: 4px 8px;
-}
-.translation-original-preview pre,
-.translation-output pre,
-.translation-original-preview .source-table {
-  overflow: auto;
-  max-width: 100%;
-}
-#settings-translation [data-translation-model] {
-  margin: 16px 0;
-  padding: 16px 0 0;
-  border-top: 1px solid var(--line);
+.translation-explanation p {
+  margin: 8px 0 0;
 }

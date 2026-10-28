@@ -69,6 +69,15 @@ assert(base && ["webkit", "chromium"].includes(engine));
       doc.dispatchEvent(new Event("selectionchange"));
       return range.toString();
     }, type);
+  const menu = async (id) => {
+    await page.locator("#translation-menu summary").click();
+    await page.locator(id).click();
+  };
+  const editText = async (text) => {
+    if (await page.locator("#translation-query").isHidden())
+      await page.locator("#translation-edit").click();
+    await page.locator("#translation-query").fill(text);
+  };
   try {
     await page.goto(base + "/#/read/demo-b");
     await ready();
@@ -87,14 +96,14 @@ assert(base && ["webkit", "chromium"].includes(engine));
       await page.evaluate(() => translationCopied),
       await page.locator("#translation-output").innerText(),
     );
-    await page.locator("#translation-star").click();
+    await menu("#translation-star");
     await page.waitForFunction(
       () =>
         document
           .querySelector("#translation-star")
           .getAttribute("aria-pressed") === "true",
     );
-    await page.locator("#translation-recent").click();
+    await menu("#translation-recent");
     await page.locator(".translation-history-item").first().waitFor();
     assert(await page.locator(".translation-history-item").count());
     const before = requests.length;
@@ -110,11 +119,10 @@ assert(base && ["webkit", "chromium"].includes(engine));
     await page.locator("#translation-history-open").click();
     await page.locator(".translation-history-item").first().click();
     await result();
-    await page.locator("#translation-edit").click();
-    await page.locator("#translation-query").fill("SLOW first");
+    await editText("SLOW first");
     await page.locator("#translation-submit").click();
     await page.waitForTimeout(100);
-    await page.locator("#translation-query").fill("second");
+    await editText("second");
     await page.locator("#translation-submit").click();
     await result();
     await page.waitForTimeout(1800);
@@ -128,9 +136,7 @@ assert(base && ["webkit", "chromium"].includes(engine));
         .innerText()
         .then((s) => s.includes("失败"))),
     );
-    await page
-      .locator("#translation-query")
-      .fill("An injective map $f:A\\to B$.");
+    await editText("An injective map $f:A\\to B$.");
     await page.locator("#translation-submit").click();
     await result();
     assert(await page.locator("#translation-output math").count());
@@ -141,7 +147,7 @@ assert(base && ["webkit", "chromium"].includes(engine));
     await page.locator("#translation-to").selectOption("en");
     await result();
     assert.equal(requests.at(-1).targetLanguage, "en");
-    await page.locator("#translation-query").fill("term");
+    await editText("term");
     await page.locator("#translation-submit").click();
     await result();
     await page.locator("#translation-output").evaluate((node) => {
@@ -193,8 +199,7 @@ assert(base && ["webkit", "chromium"].includes(engine));
     await page.waitForTimeout(120);
     await page.keyboard.press("Meta+Shift+T");
     await result();
-    await page.locator("#translation-edit").click();
-    await page.locator("#translation-query").fill("SLOW cancellation");
+    await editText("SLOW cancellation");
     await page.locator("#translation-submit").click();
     await page.waitForTimeout(100);
     await page.locator("#translation-stop").click();

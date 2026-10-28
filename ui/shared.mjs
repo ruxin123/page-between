@@ -7,6 +7,8 @@ export const escapeHTML = (value) =>
       ],
   );
 const paths = {
+  edit: "M16 3l5 5M3 21l5-1L21 7l-5-5L3 15z",
+  refresh: "M20 8a8 8 0 1 0 1 7M20 3v5h-5",
   translate:
     "M3 5h12M9 3v2M5 8c1 4 4 7 8 9M13 5c0 6-4 10-9 12M14 21l4-11 4 11M15.5 17h5",
   swap: "M3 7h16l-4-4M21 17H5l4 4",

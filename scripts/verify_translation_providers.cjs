@@ -86,7 +86,7 @@ async function api(path, body) {
         document.querySelector("#translation-original-preview math") &&
         document.querySelector("#translation-original-preview table"),
     );
-    await page.locator("#translation-submit").click();
+    await page.locator("#translation-retry").click();
     await result();
     for (const tag of ["h2", "strong", "math", "table", "ul", "code"])
       assert(await page.locator("#translation-output " + tag).count(), tag);
@@ -121,9 +121,9 @@ async function api(path, body) {
     await select();
     await result();
     assert(
-      (await page.locator("#translation-status").innerText()).includes(
-        "translation-only-model",
-      ),
+      (
+        await page.locator("#translation-provider").getAttribute("title")
+      ).includes("translation-only-model"),
     );
     await page.locator("#translation-close").click();
     await page.route("**/api/translation/status", (r) =>

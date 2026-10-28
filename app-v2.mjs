@@ -39,7 +39,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.43";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.44";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
 
@@ -125,7 +125,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.43";
+document.body.dataset.readerBuild = "2.44";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -765,7 +765,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.43",
+        build: "2.44",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -3000,7 +3000,7 @@ function openImport() {
   $("import-files").innerHTML = "";
   $("import-result").textContent = "";
   $("import-submit").disabled = true;
-  $("import-count").textContent = "文件保存在本机";
+  $("import-count").textContent = "";
   updateImportControls();
   $("import-dialog").showModal();
 }
@@ -3037,7 +3037,7 @@ function renderImportFiles() {
   updateImportControls();
   $("import-count").textContent = importFiles.length
     ? `${importFiles.length} 个文件`
-    : "文件保存在本机";
+    : "";
 }
 async function submitImport() {
   if (importBusy || importComplete || !importFiles.length) return;
@@ -3241,14 +3241,32 @@ function handleKeydown(event) {
   if (event.target.closest?.(".question-panel,.translation-panel")) return;
   if (
     (event.metaKey || event.ctrlKey) &&
-    event.shiftKey &&
+    !event.shiftKey &&
     !event.altKey &&
-    event.key.toLowerCase() === "t"
+    event.key.toLowerCase() === "c" &&
+    currentSelection &&
+    (event.target.ownerDocument || document).getSelection()?.isCollapsed
   ) {
     event.preventDefault();
+    if (currentSelection.kind === "image") copyImage();
+    else copyText(currentSelection.text);
+    return;
+  }
+  if (
+    (event.metaKey || event.ctrlKey) &&
+    event.shiftKey &&
+    !event.altKey &&
+    ["t", "a", "c"].includes(event.key.toLowerCase())
+  ) {
     const doc = event.target.ownerDocument || document;
     if (!doc.getSelection()?.isCollapsed) captureSelection(doc);
-    translateSelection();
+    if (!currentSelection) return;
+    event.preventDefault();
+    const key = event.key.toLowerCase();
+    if (key === "t") translateSelection();
+    else if (key === "a") askSelection();
+    else if (currentSelection.image) copyImage();
+    else copyText(currentSelection.text);
     return;
   }
   if (
@@ -3775,12 +3793,13 @@ window.readerOpenTutorSource = async (book, position) => {
   await showRoute({ ...position, updatedAt: lastInput });
   if (readerReady) await savePosition(true);
 };
-$("ask-selection").onclick = () => {
+function askSelection() {
   if (!currentSelection) return;
   const context = tutorContext(currentSelection);
   if (context) tutor.openContext(context);
   $("selection-toolbar").hidden = true;
-};
+}
+$("ask-selection").onclick = askSelection;
 const translator = createTranslation({
   api,
   post,

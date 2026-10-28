@@ -13,7 +13,11 @@ export function enablePanelDragging(panel, handle) {
     });
   };
   handle.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || event.target.closest("button,a,input")) return;
+    if (
+      event.button !== 0 ||
+      event.target.closest("button,a,input,textarea,select,summary")
+    )
+      return;
     const rectangle = panel.getBoundingClientRect();
     start = {
       x: event.clientX,
@@ -119,7 +123,7 @@ export function createTutor({
           if (message.role === "user")
             return `<article class="ai-message ai-user"><small>你${message.imageAttached ? " · 已附原图" : ""}</small><div>${escapeHTML(message.content)}</div></article>`;
           if (message.status === "generating")
-            return `<article class="ai-message"><small>AI · 正在生成</small>${references(message, index)}<div class="ai-stream">${escapeHTML(message.content || "正在检索原文并组织回答…")}</div></article>`;
+            return `<article class="ai-message"><small>AI · 正在生成</small>${references(message, index)}<div class="ai-stream">${escapeHTML(message.content || "正在生成…")}</div></article>`;
           if (message.status === "error" || message.status === "stopped")
             return `<article class="ai-message ai-error"><small>${message.status === "stopped" ? "已停止" : "本次未完成"}</small><p>${escapeHTML(message.error)}</p><div class="ai-answer">${message.html || escapeHTML(message.content)}</div>${references(message, index)}${index === active.messages.length - 1 ? '<button class="secondary-button" data-ai-retry>重新生成</button>' : ""}</article>`;
           return `<article class="ai-message"><small>AI</small><div class="ai-answer">${message.html || escapeHTML(message.content)}</div>${references(message, index)}</article>`;
@@ -177,10 +181,10 @@ export function createTutor({
       pending ||
       active?.messages.at(-1)?.status === "generating";
     $("ai-image-status").textContent = !supportsImages
-      ? "当前模型按文字模式使用；可在模型设置中启用图像能力。"
+      ? "当前模型不支持图像。"
       : $("ai-send-image").checked
-        ? "本次会将原图交给模型，并随对话保存在本机。"
-        : "本次仅发送文字，原图留在本机。";
+        ? "附带原图。"
+        : "仅发送文字。";
   }
   function references(message, messageIndex) {
     const status = message.indexStatus;
@@ -227,7 +231,7 @@ export function createTutor({
       if (!supportsImages) $("ai-send-image").checked = false;
       imageControls();
       $("ai-model-status").textContent = config.configured
-        ? "已配置模型 · 对话保存在本机"
+        ? ""
         : config.message;
       $("ai-service-details").hidden = !config.configured;
       $("ai-service").textContent = config.configured
@@ -276,7 +280,7 @@ export function createTutor({
                 `<button class="ai-history-item" data-ai-conversation="${escapeHTML(item.id)}"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.citation)}</span><small>${item.status === "generating" ? "生成中" : item.status === "error" ? "可重新生成" : item.status === "stopped" ? "已停止" : "已保存"}</small></button>`,
             )
             .join("")
-        : '<div class="empty-state">这本书还没有对话。选中原文提问，或围绕当前页开始。</div>';
+        : '<div class="empty-state">暂无对话</div>';
     } catch (error) {
       $("ai-history-list").textContent = error.message;
     }

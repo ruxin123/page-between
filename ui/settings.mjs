@@ -32,31 +32,23 @@ export function createServiceSettings({ document, api, post, toast }) {
   function render(service) {
     const config = saved.services[service],
       ai = service === "ai";
-    const title = ai
-      ? "为书中的疑问，接上一个好帮手"
-      : "为复杂版面，多准备一种解法";
-    const description = ai
-      ? "接入你选择的模型，用来解释术语、翻译和讨论书中内容。"
-      : "EPUB 沿用原书结构。扫描 PDF 可通过文档解析补足文字、公式与图表。";
     const container = $("settings-" + service);
     container.innerHTML =
       service === "translation"
         ? translationSettingsMarkup(config, saved)
         : `<form class="service-form" data-service="${service}">
       <div class="service-heading"><span class="service-symbol">${icon(ai ? "ask" : "pages")}</span><div><h2>${ai ? "模型服务" : "MinerU 云解析"}</h2><span class="service-badge" data-ready="${config.ready}">${ai ? (config.ready ? "已配置" : "尚未配置") : config.ready ? "按需启用" : "尚未配置"}</span></div></div>
-      <p class="service-description">${description}</p>
+
       <fieldset><legend class="visually-hidden">${ai ? "模型服务配置" : "MinerU 服务配置"}</legend>
-        <label class="service-field">服务地址<input name="baseUrl" type="url" maxlength="2048" required spellcheck="false" autocomplete="off" placeholder="${ai ? "https://…/v1" : "https://mineru.net/api/v4"}" value="${escapeHTML(config.baseUrl)}"><small>${ai ? "使用兼容 Chat Completions 的接口；本机模型可用回环 HTTP 地址。" : "填写 MinerU 云服务的 API v4 根地址。"}</small></label>
+        <label class="service-field">服务地址<input name="baseUrl" type="url" maxlength="2048" required spellcheck="false" autocomplete="off" placeholder="${ai ? "https://…/v1" : "https://mineru.net/api/v4"}" value="${escapeHTML(config.baseUrl)}"><small>${ai ? "兼容 Chat Completions；本机可用 HTTP。" : "MinerU API v4 地址。"}</small></label>
         <label class="service-field">${ai ? "模型名称" : "解析模型"}${ai ? `<input name="model" type="text" maxlength="200" required spellcheck="false" autocomplete="off" placeholder="填写服务商提供的模型 ID" value="${escapeHTML(config.model)}">` : `<select name="model"><option value="vlm" ${config.model === "vlm" ? "selected" : ""}>VLM · 复杂版面</option><option value="pipeline" ${config.model === "pipeline" ? "selected" : ""}>Pipeline · 通用解析</option></select>`}</label>
-        ${ai ? `<label class="setting-check">此模型支持图像输入<input name="supportsImages" type="checkbox" ${config.supportsImages ? "checked" : ""}></label><p class="setting-note">确认模型与接口支持图像后启用。提问时可选择是否附带原图；连接测试仍只发送一句文字。</p>` : ""}
-        <label class="service-field">${ai ? "API Key" : "API Token"}<input name="key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="${config.hasKey ? "已保存，留空保持现有凭据" : ai ? "填写 Key；本机模型可留空" : "填写 MinerU Token"}" aria-describedby="${service}-key-note"><small id="${service}-key-note">${config.hasKey ? (config.source === "environment" ? "正在沿用现有凭据。保存后转交 macOS 钥匙串管理。" : "凭据保存在 macOS 钥匙串中，不回显原值。") : "凭据仅由本机服务读取，保存到 macOS 钥匙串。"}</small></label>
+        ${ai ? `<label class="setting-check">此模型支持图像输入<input name="supportsImages" type="checkbox" ${config.supportsImages ? "checked" : ""}></label><p class="setting-note">提问时可附带原图。</p>` : ""}
+        <label class="service-field">${ai ? "API Key" : "API Token"}<input name="key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="${config.hasKey ? "已保存，留空保持现有凭据" : ai ? "填写 Key；本机模型可留空" : "填写 MinerU Token"}" aria-describedby="${service}-key-note"><small id="${service}-key-note">${config.hasKey ? (config.source === "environment" ? "沿用现有凭据。" : "保存在 macOS 钥匙串。") : "保存在 macOS 钥匙串。"}</small></label>
         ${config.hasKey ? '<label class="setting-check remove-key">移除已保存的凭据<input type="checkbox" name="removeKey"></label>' : ""}
-        <p class="service-storage-note">${saved.keychainAvailable ? "保存后立即生效。" : "钥匙串组件当前不可用，含凭据的配置暂时不能保存。"}${config.source === "environment" ? "当前使用已有配置。" : ""}</p>
+        <p class="service-storage-note">${saved.keychainAvailable ? "" : "钥匙串组件当前不可用，含凭据的配置暂时不能保存。"}${config.source === "environment" ? "" : ""}</p>
         <div class="service-actions"><button type="submit" class="primary-button">保存设置</button><button type="button" class="secondary-button" data-test>${ai ? "测试连接" : "检查配置"}</button><button type="button" class="service-reset" data-reset>还原修改</button></div>
       </fieldset><p class="service-result" data-result role="status" aria-live="polite"></p></form>
-      <aside class="service-explainer"><small>${ai ? "陪你读懂" : "原书优先"}</small><h2>${title}</h2>
-        ${ai ? `<p>选中原文就能提问，也可以围绕当前页发起讨论。对话与出处保存在这台设备。</p><div class="service-note"><strong>发送范围由你掌握</strong><p>发问时会发送选段、附近文字和近期对话。阅读与复制在本机完成。</p></div><div class="service-note"><strong>先试一句，再开始阅读</strong><p>「测试连接」发送一句简短测试文字，使用当前表单配置。测试通过后请保存设置。</p></div>` : `<p>当前阅读器使用本机 OCR 增强 PDF 的目录和文字选择，导入时可以单独开关。</p><div class="service-note"><strong>先选一小段，再增强整本</strong><p>在 PDF 的书籍设置里选择「精细解析」，可以指定页段、暂停并继续。这里只检查配置格式，Token 有效性在实际任务中确认。</p></div><div class="service-note"><strong>已有好格式，保留好排版</strong><p>EPUB 直接使用原书目录、插图与正文。MinerU 用于扫描教材等复杂资料。</p></div>`}
-      </aside>`;
+      <details class="service-help"><summary>使用说明</summary>${ai ? "<p>兼容 Chat Completions 接口。提问时会发送选段、附近文字与本次对话。</p>" : "<p>使用 MinerU API v4。所选 PDF 页面将上传至配置的服务并使用解析额度。</p>"}</details>`;
     const form = container.querySelector("form");
     form.onsubmit = (event) => {
       event.preventDefault();
@@ -68,7 +60,7 @@ export function createServiceSettings({ document, api, post, toast }) {
     form.querySelector("[data-reset]").onclick = () => render(service);
     form.oninput = () => {
       updateTranslationFields(form);
-      form.querySelector("[data-result]").textContent = "有修改尚未保存。";
+      form.querySelector("[data-result]").textContent = "未保存";
       form.querySelector("[data-result]").dataset.kind = "";
     };
   }
@@ -95,8 +87,8 @@ export function createServiceSettings({ document, api, post, toast }) {
     result.textContent = saving
       ? "正在保存…"
       : ["ai", "translation"].includes(service)
-        ? "正在连接模型，最多等待 45 秒…"
-        : "正在检查填写内容…";
+        ? "连接中…"
+        : "检查中…";
     try {
       const data = await post("/api/settings/" + (saving ? "save" : "test"), {
         service,
@@ -107,13 +99,13 @@ export function createServiceSettings({ document, api, post, toast }) {
         render(service);
         const message = data.cleanupWarning
           ? "新配置已保存；旧凭据清理未完成，可稍后检查钥匙串。"
-          : "设置已保存，之后的新请求将使用这份配置。";
+          : "已保存。";
         const status = $("settings-" + service).querySelector("[data-result]");
-        status.textContent = message;
+        status.textContent = data.cleanupWarning ? message : "";
         status.dataset.kind = data.cleanupWarning ? "warning" : "success";
         toast(message, { kind: data.cleanupWarning ? "warning" : "success" });
       } else {
-        result.textContent = data.message;
+        result.textContent = data.verified === false ? "格式有效" : "连接成功";
         result.dataset.kind = data.verified === false ? "" : "success";
       }
     } catch (error) {
@@ -137,7 +129,7 @@ export function createServiceSettings({ document, api, post, toast }) {
     if (["reading", "data"].includes(section) || saved) return;
     if (!loading)
       loading = (async () => {
-        $("settings-load-status").textContent = "正在读取本机服务设置…";
+        $("settings-load-status").textContent = "读取设置…";
         try {
           saved = await api("/api/settings");
           render("ai");

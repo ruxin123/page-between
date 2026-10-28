@@ -145,6 +145,7 @@ def build(demo=False):
             "-parse-as-library",
             ROOT / "native/App.swift",
             ROOT / "native/Palm.swift",
+            ROOT / "native/Translation.swift",
             "-o",
             contents / "MacOS/page-between",
         ]
@@ -176,8 +177,8 @@ def build(demo=False):
         "CFBundleExecutable": "page-between",
         "CFBundlePackageType": "APPL",
         "CFBundleIconFile": "App.icns",
-        "CFBundleShortVersionString": "0.5.20",
-        "CFBundleVersion": "244",
+        "CFBundleShortVersionString": "0.5.21",
+        "CFBundleVersion": "245",
         "NSHighResolutionCapable": True,
         "PageBetweenDemo": demo,
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},

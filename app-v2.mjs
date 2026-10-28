@@ -10,6 +10,7 @@ import {
 import { escapeHTML, icon } from "/ui/shared.mjs";
 import { createLibraryView } from "/ui/library.mjs";
 import { createToasts } from "/ui/feedback.mjs";
+import { createTranslation } from "/ui/translation.mjs";
 import { createTutor } from "/ui/tutor.mjs";
 import { createServiceSettings } from "/ui/settings.mjs";
 import { createDocumentParsing, formatPages } from "/ui/mineru.mjs";
@@ -38,7 +39,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.42";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.43";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
 
@@ -124,7 +125,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.42";
+document.body.dataset.readerBuild = "2.43";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -764,7 +765,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.42",
+        build: "2.43",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1108,7 +1109,7 @@ function watchSelection(doc) {
   const schedule = (event) => {
     if (
       event?.target?.closest?.(
-        ".selection-toolbar,.question-panel,.reader-settings",
+        ".selection-toolbar,.question-panel,.translation-panel,.reader-settings",
       )
     )
       return;
@@ -1120,7 +1121,7 @@ function watchSelection(doc) {
   doc.addEventListener("pointerdown", (event) => {
     if (
       event.target.closest?.(
-        ".selection-toolbar,.question-panel,.reader-settings",
+        ".selection-toolbar,.question-panel,.translation-panel,.reader-settings",
       )
     )
       return;
@@ -1227,6 +1228,10 @@ function showToolbar(rectangle) {
   const bar = $("selection-toolbar");
   bar.hidden = false;
   $("copy-selection").hidden = currentSelection.kind === "image";
+  $("translate-selection").hidden =
+    currentSelection.kind === "image" ||
+    currentSelection.kind === "equation" ||
+    !currentSelection.text?.trim();
   $("copy-image").hidden = !currentSelection.image;
   $("chapter-start").hidden =
     current.type !== "txt" ||
@@ -3207,6 +3212,7 @@ function handleKeydown(event) {
     setTocOpen(false);
     $("reader-settings").hidden = true;
     $("question-panel").hidden = true;
+    translator.close();
     clearSelection();
     if ($("reader").classList.contains("focused")) setFocus(false);
     return;
@@ -3232,7 +3238,19 @@ function handleKeydown(event) {
     return;
   }
   if (route !== "reader" || editing) return;
-  if (event.target.closest?.(".question-panel")) return;
+  if (event.target.closest?.(".question-panel,.translation-panel")) return;
+  if (
+    (event.metaKey || event.ctrlKey) &&
+    event.shiftKey &&
+    !event.altKey &&
+    event.key.toLowerCase() === "t"
+  ) {
+    event.preventDefault();
+    const doc = event.target.ownerDocument || document;
+    if (!doc.getSelection()?.isCollapsed) captureSelection(doc);
+    translateSelection();
+    return;
+  }
   if (
     (event.metaKey || event.ctrlKey) &&
     !event.altKey &&
@@ -3285,8 +3303,10 @@ function handleKeydown(event) {
 function onCopy(event) {
   const selection = event.target.ownerDocument?.defaultView?.getSelection();
   const inTutor =
-    event.target.closest?.(".question-panel") ||
-    selection?.anchorNode?.parentElement?.closest(".question-panel");
+    event.target.closest?.(".question-panel,.translation-panel") ||
+    selection?.anchorNode?.parentElement?.closest(
+      ".question-panel,.translation-panel",
+    );
   if (!inTutor && selection?.rangeCount && !selection.isCollapsed)
     captureSelection(event.target.ownerDocument || document);
   if (
@@ -3760,6 +3780,49 @@ $("ask-selection").onclick = () => {
   const context = tutorContext(currentSelection);
   if (context) tutor.openContext(context);
   $("selection-toolbar").hidden = true;
+};
+const translator = createTranslation({
+  api,
+  post,
+  toast,
+  openWindow:
+    window.webkit?.messageHandlers?.appNative ||
+    window.readerDetachedTranslation
+      ? (request) =>
+          (
+            window.webkit.messageHandlers.appNative ||
+            window.webkit.messageHandlers.readerNative
+          ).postMessage({ action: "translate", ...request })
+      : undefined,
+  openSource: (book, position) => window.readerOpenTutorSource(book, position),
+  ask: (context) => tutor.openContext(context),
+  settings:
+    native && palm
+      ? () =>
+          window.webkit.messageHandlers.readerNative.postMessage({
+            action: "settings",
+            section: "translation",
+          })
+      : undefined,
+});
+function translateSelection() {
+  if (
+    !currentSelection?.text?.trim() ||
+    ["image", "equation"].includes(currentSelection.kind)
+  ) {
+    toast("请先选中需要翻译的文字。");
+    return;
+  }
+  const context = tutorContext(currentSelection);
+  if (!context) return;
+  delete context.source.image;
+  const bar = $("selection-toolbar").getBoundingClientRect();
+  translator.open(context, { left: bar.left, bottom: bar.bottom });
+  $("selection-toolbar").hidden = true;
+}
+$("translate-selection").onclick = translateSelection;
+$("translation-history-open").onclick = () => {
+  if (current) translator.open({ book: current.id }, null, true);
 };
 $("ai-open").onclick = tutor.showHistory;
 if (palm && native)

@@ -41,6 +41,7 @@ from pdf_preparation import PDFPreparation
 from paths import DATA, RUNTIME, DEMO, APP_MODE, DATA_PREFIX, CACHE
 from storage import load, save
 import ai_tutor
+import translation
 import service_settings
 import mineru_api
 import book_index
@@ -507,8 +508,21 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({"ready": True, "desktop": APP_MODE})
             if not self.authenticated():
                 return self.json({"error": "请通过页间 App 打开此阅读空间。"}, 401)
+            if route.path == "/api/translation/status":
+                return self.json(translation.status())
             if route.path == "/api/ai/status":
                 return self.json(ai_tutor.status())
+            if route.path in {"/api/translation/history", "/api/translation/task", "/api/translation/item"}:
+                book = book_for(query.get("book", [""])[0])
+                if not book:
+                    raise ValueError("找不到这本书。")
+                if route.path.endswith("/item"):
+                    return self.json(translation.lookup(book, query.get("id", [""])[0]))
+                return self.json(
+                    {"items": translation.history(book)}
+                    if route.path.endswith("/history")
+                    else translation.task(book, query.get("id", [""])[0])
+                )
             if route.path == "/api/settings":
                 return self.json(service_settings.public_settings())
             if route.path == "/api/ai/conversations":
@@ -921,8 +935,14 @@ class Handler(SimpleHTTPRequestHandler):
                 if route.path.endswith("/save"):
                     return self.json(service_settings.update(service, config))
                 snapshot = service_settings.candidate(service, config, require_key=True)
-                if service == "ai":
-                    endpoint = snapshot["baseUrl"]
+                if service == "translation":
+                    if snapshot["provider"] == "google":
+                        translation.google_translation.request("A quiet page.", "en", "zh-CN", {"event": threading.Event()})
+                        return self.json({"message": "Google 翻译连接成功。测试未保存设置。"})
+                    if snapshot["useChatModel"]:
+                        snapshot = service_settings.ai_configuration()
+                if service in {"ai", "translation"}:
+                    endpoint = snapshot.get("url") or snapshot["baseUrl"]
                     if not endpoint.endswith("/chat/completions"):
                         endpoint += "/chat/completions"
                     ai_tutor.complete(
@@ -940,6 +960,24 @@ class Handler(SimpleHTTPRequestHandler):
                         "verified": False,
                     }
                 )
+            if route.path in {"/api/translation/start", "/api/translation/cancel", "/api/translation/favorite"}:
+                if not isinstance(payload, dict):
+                    raise ValueError("翻译内容无效。")
+                book = book_for(payload.get("book"))
+                if not book:
+                    raise ValueError("找不到这本书。")
+                if route.path.endswith("/start"):
+                    return self.json(translation.start(book, payload))
+                if route.path.endswith("/cancel"):
+                    return self.json(translation.cancel(book, payload.get("id")))
+                return self.json(translation.favorite(book, payload.get("id"), payload.get("favorite")))
+            if route.path == "/api/translation/preview":
+                if not isinstance(payload, dict) or not isinstance(payload.get("source"), dict):
+                    raise ValueError("原文选段无效。")
+                book = book_for(payload.get("book"))
+                if not book:
+                    raise ValueError("找不到这本书。")
+                return self.json({"html": translation.preview(book, payload["source"], payload.get("text"))})
             if route.path == "/api/ai/preview":
                 if not isinstance(payload, dict):
                     raise ValueError("选段内容无效。")

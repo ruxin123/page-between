@@ -1,3 +1,7 @@
+import {
+  translationSettingsMarkup,
+  updateTranslationFields,
+} from "./translation-settings.mjs";
 import { escapeHTML, icon } from "/ui/shared.mjs";
 
 export function createServiceSettings({ document, api, post, toast }) {
@@ -35,7 +39,10 @@ export function createServiceSettings({ document, api, post, toast }) {
       ? "接入你选择的模型，用来解释术语、翻译和讨论书中内容。"
       : "EPUB 沿用原书结构。扫描 PDF 可通过文档解析补足文字、公式与图表。";
     const container = $("settings-" + service);
-    container.innerHTML = `<form class="service-form" data-service="${service}">
+    container.innerHTML =
+      service === "translation"
+        ? translationSettingsMarkup(config, saved)
+        : `<form class="service-form" data-service="${service}">
       <div class="service-heading"><span class="service-symbol">${icon(ai ? "ask" : "pages")}</span><div><h2>${ai ? "模型服务" : "MinerU 云解析"}</h2><span class="service-badge" data-ready="${config.ready}">${ai ? (config.ready ? "已配置" : "尚未配置") : config.ready ? "按需启用" : "尚未配置"}</span></div></div>
       <p class="service-description">${description}</p>
       <fieldset><legend class="visually-hidden">${ai ? "模型服务配置" : "MinerU 服务配置"}</legend>
@@ -60,6 +67,7 @@ export function createServiceSettings({ document, api, post, toast }) {
     };
     form.querySelector("[data-reset]").onclick = () => render(service);
     form.oninput = () => {
+      updateTranslationFields(form);
       form.querySelector("[data-result]").textContent = "有修改尚未保存。";
       form.querySelector("[data-result]").dataset.kind = "";
     };
@@ -73,6 +81,10 @@ export function createServiceSettings({ document, api, post, toast }) {
       key: form.elements.key.value,
       removeKey: form.elements.removeKey?.checked || false,
     };
+    if (service === "translation") {
+      config.provider = form.elements.provider.value;
+      config.useChatModel = form.elements.useChatModel.checked;
+    }
     if (service === "ai")
       config.supportsImages = form.elements.supportsImages.checked;
     const result = form.querySelector("[data-result]");
@@ -82,7 +94,7 @@ export function createServiceSettings({ document, api, post, toast }) {
     result.dataset.kind = "";
     result.textContent = saving
       ? "正在保存…"
-      : service === "ai"
+      : ["ai", "translation"].includes(service)
         ? "正在连接模型，最多等待 45 秒…"
         : "正在检查填写内容…";
     try {
@@ -114,7 +126,7 @@ export function createServiceSettings({ document, api, post, toast }) {
     }
   }
   async function show(section = "reading") {
-    if (!["reading", "ai", "mineru", "data"].includes(section))
+    if (!["reading", "ai", "translation", "mineru", "data"].includes(section))
       section = "reading";
     for (const tab of tabs) {
       const selected = tab.dataset.settingsTab === section;
@@ -130,6 +142,7 @@ export function createServiceSettings({ document, api, post, toast }) {
           saved = await api("/api/settings");
           render("ai");
           render("mineru");
+          render("translation");
           $("settings-load-status").textContent =
             saved.profile === "demo" ? "演示模式的应用设置独立保存。" : "";
         } catch (error) {

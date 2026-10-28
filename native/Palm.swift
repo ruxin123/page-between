@@ -27,7 +27,8 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     var lastHotkeyWasBackground = false
     let standalone: Bool
     let session: String
-    var showMainSettings: (() -> Void)?
+    var showMainSettings: ((String) -> Void)?
+    var showTranslation: (([String:Any], WKWebView?) -> Void)?
     var showTutor: (([String:Any]) -> Void)?
 
     init(address: URL, statusFile: URL, standalone: Bool = true, session: String = "") {
@@ -72,6 +73,9 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         panel.setFrameAutosaveName("PageBetweenPalm" + (standalone ? "Standalone" : "App"))
         panel.setFrameUsingName("PageBetweenPalm" + (standalone ? "Standalone" : "App"))
         let configuration=WKWebViewConfiguration()
+        if showTranslation != nil {
+            configuration.userContentController.addUserScript(WKUserScript(source:"window.readerDetachedTranslation=true;",injectionTime:.atDocumentStart,forMainFrameOnly:true))
+        }
         if showTutor != nil {
             configuration.userContentController.addUserScript(WKUserScript(source:"window.readerDetachedTutor=true;",injectionTime:.atDocumentStart,forMainFrameOnly:true))
         }
@@ -185,12 +189,14 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
               message.frameInfo.securityOrigin.host == address.host,
               message.frameInfo.securityOrigin.port == address.port else { return }
         guard let body=message.body as? [String:Any],let action=body["action"] as? String else { return }
+        if action=="translate" { showTranslation?(body, message.webView);return }
         if action=="tutor" { showTutor?(body);return }
         if action=="close" { panel.performClose(nil) }
         if action=="settings" {
-            if let showMainSettings=showMainSettings { showMainSettings() }
+            let section = body["section"] as? String == "translation" ? "translation" : "ai"
+            if let showMainSettings=showMainSettings { showMainSettings(section) }
             else if var parts=URLComponents(url:address,resolvingAgainstBaseURL:false) {
-                parts.query=nil;parts.fragment="/settings/ai"
+                parts.query=nil;parts.fragment="/settings/"+section
                 if let url=parts.url { NSWorkspace.shared.open(url) }
             }
         }

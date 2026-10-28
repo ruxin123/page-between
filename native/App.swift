@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var output: Pipe?
   var base: URL?
   var palm: PalmDelegate?
+  var translator: TranslationWindow?
   var tutorWindow: NSWindow?
   var tutorWeb: WKWebView?
   var tutorReady = false
@@ -93,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func startEngine() {
     ready = false
+    translator?.shutdown()
+    translator = nil
     base = nil
     tutorWindow?.orderOut(nil)
     tutorWeb?.configuration.userContentController.removeScriptMessageHandler(forName: "tutorNative")
@@ -319,6 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       }
       return
     }
+    if action == "translate" { showTranslation(body, from: message.webView); return }
     if action == "tutor" { showTutor(body); return }
     if action == "ready" {
       ready = true
@@ -352,8 +356,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         palm = PalmDelegate(
           address: url, statusFile: support.appendingPathComponent("Library/palm-window.json"),
           standalone: false, session: session)
-        palm?.showMainSettings = { [weak self] in self?.loadMain("/settings/ai") }
+        palm?.showMainSettings = { [weak self] section in self?.loadMain("/settings/" + section) }
         palm?.showTutor = { [weak self] request in self?.showTutor(request) }
+        palm?.showTranslation = { [weak self] request, view in self?.showTranslation(request, from: view) }
       }
       palm?.configureHotkeys(body["keys"] as? String ?? "arrows")
       palm?.show(url)
@@ -362,6 +367,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func validBookID(_ book: String) -> Bool {
     book.range(of: "^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$", options: .regularExpression) != nil
+  }
+
+  func showTranslation(_ request: [String: Any], from view: WKWebView?) {
+    guard let base = base else { return }
+    if translator == nil {
+      translator = TranslationWindow(base: base, session: session, dataStore: web.configuration.websiteDataStore)
+      translator?.action = { [weak self] body in
+        guard let self = self, let action = body["action"] as? String else { return }
+        if action == "settings" { self.loadMain("/settings/translation") }
+        if action == "tutor" { self.showTutor(body) }
+        if action == "source", let book = body["book"] as? String, self.validBookID(book),
+          let position = body["position"] as? [String: Any], let index = position["index"] as? Int, index > 0 {
+          self.window.makeKeyAndOrderFront(nil)
+          NSApp.activate(ignoringOtherApps: true)
+          Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            _ = try? await self.web.callAsyncJavaScript("await window.readerOpenTutorSource(book, position);",
+              arguments: ["book": book, "position": position], in: nil, contentWorld: .page)
+          }
+        }
+      }
+    }
+    translator?.show(request, from: view)
   }
 
   func showTutor(_ request: [String: Any]) {

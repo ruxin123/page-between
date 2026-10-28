@@ -1,5 +1,8 @@
+const mode = new URLSearchParams(location.search).get("mode");
 await import(
-  new URLSearchParams(location.search).get("mode") === "tutor"
-    ? "/ui/tutor-window.mjs?v=2.42"
-    : "/app-v2.mjs?v=2.42"
+  mode === "tutor"
+    ? "/ui/tutor-window.mjs?v=2.43"
+    : mode === "translation"
+      ? "/ui/translation-window.mjs?v=2.43"
+      : "/app-v2.mjs?v=2.43"
 );

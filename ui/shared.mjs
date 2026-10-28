@@ -7,6 +7,9 @@ export const escapeHTML = (value) =>
       ],
   );
 const paths = {
+  translate:
+    "M3 5h12M9 3v2M5 8c1 4 4 7 8 9M13 5c0 6-4 10-9 12M14 21l4-11 4 11M15.5 17h5",
+  swap: "M3 7h16l-4-4M21 17H5l4 4",
   check: "M5 12l4 4L19 6",
   warning: "M12 3L2 21h20zM12 9v5M12 18h.1",
   library: "M4 4h6v16H4zM14 4h6v16h-6zM4 8h6M14 8h6",

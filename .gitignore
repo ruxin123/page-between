@@ -15,6 +15,8 @@
 !/layout.css
 !/epub-reader.css
 !/server.py
+!/google_translation.py
+!/translation.py
 !/ai_tutor.py
 !/service_settings.py
 !/mineru_api.py
@@ -37,6 +39,7 @@
 !/native/
 /native/*
 !/native/OCR.swift
+!/native/Translation.swift
 !/native/Palm.swift
 !/native/Secrets.swift
 !/native/App.swift
@@ -58,6 +61,7 @@
 !/tests/zoom.test.mjs
 !/tests/jobs.test.mjs
 !/tests/feedback.test.mjs
+!/tests/translation_test.py
 !/tests/ai_tutor_test.py
 !/tests/settings_test.py
 !/tests/storage_test.py

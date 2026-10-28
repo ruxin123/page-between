@@ -24,10 +24,12 @@ CONFIG = (
 LOCK = threading.RLock()
 DEFAULTS = {
     "ai": {"baseUrl": "", "model": "", "supportsImages": False},
+    "translation": {"baseUrl": "", "model": "", "provider": "ai", "useChatModel": True},
     "mineru": {"baseUrl": "https://mineru.net/api/v4", "model": "vlm"},
 }
 ENV = {
     "ai": ("AI_BASE_URL", "AI_MODEL", "AI_API_KEY"),
+    "translation": ("TRANSLATION_BASE_URL", "TRANSLATION_MODEL", "TRANSLATION_API_KEY"),
     "mineru": ("MINERU_BASE_URL", "MINERU_MODEL_VERSION", "MINERU_API_TOKEN"),
 }
 
@@ -132,6 +134,13 @@ def validated(service, config, *, require_key=False):
     base = text(config.get("baseUrl", ""), "服务地址", 2048).rstrip("/")
     model = text(config.get("model", ""), "模型名称", 200)
     key = text(config.get("key", ""), "凭据", 4096)
+    extra = {}
+    if service == "translation":
+        if not isinstance(config.get("provider", "ai"), str) or config.get("provider", "ai") not in {"ai", "google"} or type(config.get("useChatModel", True)) is not bool:
+            raise SettingsError("翻译服务选项无效。")
+        extra = {"provider": config.get("provider", "ai"), "useChatModel": config.get("useChatModel", True)}
+        if not base and not model and (extra["useChatModel"] or extra["provider"] == "google"):
+            return {"baseUrl": "", "model": "", "key": key, "host": "", **extra}
     try:
         address = urlsplit(base)
         address.port
@@ -153,9 +162,9 @@ def validated(service, config, *, require_key=False):
         raise SettingsError("请填写模型名称。")
     if service == "mineru" and model not in {"vlm", "pipeline"}:
         raise SettingsError("请选择受支持的 MinerU 解析模型。")
-    if require_key and not key and (service == "mineru" or not local):
+    if require_key and not key and (service == "mineru" or not local) and (service != "translation" or extra["provider"] == "ai" and not extra["useChatModel"]):
         raise SettingsError("请在设置中填写服务凭据。")
-    result = {"baseUrl": base, "model": model, "key": key, "host": address.netloc}
+    result = {"baseUrl": base, "model": model, "key": key, "host": address.netloc, **extra}
     if service == "ai":
         if type(config.get("supportsImages", False)) is not bool:
             raise SettingsError("图像能力开关无效。")
@@ -163,11 +172,15 @@ def validated(service, config, *, require_key=False):
     return result
 
 
-def ai_configuration():
-    config = effective("ai")
+def ai_configuration(service="ai"):
+    config = effective(service)
+    if service == "translation":
+        if config["useChatModel"]:
+            return ai_configuration("ai")
+        config = {**config, "provider": "ai"}
     if not config["baseUrl"] or not config["model"]:
-        raise SettingsError("请先在「设置 → AI 答疑」配置模型服务。")
-    result = validated("ai", config, require_key=True)
+        raise SettingsError("请先在设置中配置 AI 答疑或翻译专用模型。")
+    result = validated(service, config, require_key=True)
     endpoint = result["baseUrl"]
     if not endpoint.endswith("/chat/completions"):
         endpoint += "/chat/completions"
@@ -176,7 +189,7 @@ def ai_configuration():
         "model": result["model"],
         "key": result["key"],
         "host": result["host"],
-        "supportsImages": result["supportsImages"],
+        "supportsImages": result.get("supportsImages", False),
     }
 
 
@@ -185,11 +198,11 @@ def public_settings():
     for service in DEFAULTS:
         config = effective(service, read_key=False)
         try:
-            validated(
-                service,
-                {**config, "key": "present" if config["hasKey"] else ""},
-                require_key=True,
-            )
+            check_service, check_config = service, config
+            if service == "translation" and config["provider"] == "ai" and config["useChatModel"]:
+                check_service, check_config = "ai", effective("ai", read_key=False)
+            if service != "translation" or config["provider"] != "google":
+                validated(check_service, {**check_config, "key": "present" if check_config["hasKey"] else ""}, require_key=True)
             ready, message = True, "配置完整"
         except SettingsError as error:
             ready, message = False, str(error)
@@ -199,6 +212,8 @@ def public_settings():
         services[service].update(ready=ready, message=message)
         if service == "ai":
             services[service]["supportsImages"] = config.get("supportsImages", False)
+        if service == "translation":
+            services[service].update(provider=config["provider"], useChatModel=config["useChatModel"])
     return {
         "services": services,
         "keychainAvailable": sys.platform == "darwin"
@@ -222,6 +237,9 @@ def candidate(service, payload, *, require_key=False):
         raise SettingsError("不能同时替换与移除凭据。")
     old = effective(service, read_key=False)
     draft = {**payload, "key": incoming}
+    if service == "translation":
+        draft.setdefault("provider", old["provider"])
+        draft.setdefault("useChatModel", old["useChatModel"])
     if service == "ai":
         draft.setdefault("supportsImages", old.get("supportsImages", False))
     config = validated(service, draft)
@@ -263,6 +281,8 @@ def update(service, payload):
         }
         if service == "ai":
             data["services"][service]["supportsImages"] = config["supportsImages"]
+        if service == "translation":
+            data["services"][service].update(provider=config["provider"], useChatModel=config["useChatModel"])
         try:
             save(CONFIG, data)
         except OSError:

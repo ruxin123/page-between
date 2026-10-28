@@ -1,7 +1,7 @@
 import { escapeHTML } from "./shared.mjs";
 import { prepareQuestionImage } from "./book-images.mjs";
 
-function enablePanelDragging(panel, handle) {
+export function enablePanelDragging(panel, handle) {
   let start;
   const place = (left, top) => {
     const rectangle = panel.getBoundingClientRect();

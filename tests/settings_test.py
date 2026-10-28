@@ -39,6 +39,35 @@ class Settings(unittest.TestCase):
         self.assertTrue(ai_tutor.status()["configured"])
         settings.keychain.assert_not_called()
 
+    def test_translation_can_inherit_or_use_its_own_keychain_model(self):
+        with self.assertRaises(settings.SettingsError):
+            settings.ai_configuration("translation")
+        settings.update("ai", self.config)
+        inherited = settings.ai_configuration("translation")
+        self.assertEqual(inherited["key"], "example-credential")
+        self.assertEqual(inherited["model"], "example-model")
+        settings.update("translation", {**self.config, "model": "translation-model", "key": "translation-credential", "useChatModel": False, "provider": "ai"})
+        self.assertEqual(settings.ai_configuration("translation")["key"], "translation-credential")
+        self.assertEqual(settings.ai_configuration("translation")["model"], "translation-model")
+        self.assertEqual(settings.ai_configuration()["key"], "example-credential")
+        settings.update("translation", {**self.config, "model": "translation-model", "key": "", "useChatModel": True, "provider": "ai"})
+        self.assertEqual(settings.ai_configuration("translation")["model"], "example-model")
+        settings.keychain.reset_mock()
+        self.assertTrue(settings.public_settings()["services"]["translation"]["ready"])
+        settings.keychain.assert_not_called()
+
+    def test_google_needs_no_model_and_invalid_provider_is_rejected(self):
+        import translation
+        saved = settings.update("translation", {"baseUrl": "", "model": "", "key": "", "provider": "google", "useChatModel": True})
+        self.assertTrue(saved["services"]["translation"]["ready"])
+        self.assertEqual(translation.configuration()["provider"], "google")
+        self.assertFalse(translation.status()["aiReady"])
+        with self.assertRaises(ValueError):
+            translation.configuration("ai")
+        for value in [[], "other", None]:
+            with self.assertRaises(settings.SettingsError):
+                settings.update("translation", {"baseUrl": "", "model": "", "key": "", "provider": value})
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

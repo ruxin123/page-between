@@ -273,7 +273,12 @@ def verify(app, epubcheck=None, samples=()):
                     received.append(
                         json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                     )
-                    body = '{"choices":[{"message":{"content":"Image transport verified. [1]"}}]}'.encode()
+                    content = "Image transport verified. [1]"
+                    incoming = received[-1]
+                    if incoming["messages"][0]["content"].startswith("你是阅读翻译助手"):
+                        prompt = json.loads(incoming["messages"][1]["content"])
+                        content = json.dumps({"translation": "译文：" + prompt["original"], "detectedLanguage": "en", "explanation": "单射"})
+                    body = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(body)))
@@ -519,6 +524,22 @@ def verify(app, epubcheck=None, samples=()):
                 json.dumps({"prefs": {"fontSize": 23}}).encode(),
                 content_type="application/json",
             )
+            translation_payload = {"book": book["id"], "source": {"quote": r"An injective map $f:A\to B$.", "context": "A one-to-one function.", "position": {"index": 1}}}
+            translated = json.loads(request("/api/translation/start", json.dumps(translation_payload).encode(), content_type="application/json")[2])
+            deadline = time.monotonic() + 20
+            while translated["status"] == "running" and time.monotonic() < deadline:
+                time.sleep(.05)
+                translated = json.loads(request("/api/translation/task?book=" + book["id"] + "&id=" + translated["id"])[2])
+            assert translated["status"] == "ready", translated
+            translation_result = translated["result"]
+            assert r"$f:A\to B$" in translation_result["translation"] and "<math" in translation_result["html"]
+            request("/api/translation/favorite", json.dumps({"book": book["id"], "id": translation_result["id"], "favorite": True}).encode(), content_type="application/json")
+            before = len(received)
+            cached = json.loads(request("/api/translation/start", json.dumps(translation_payload).encode(), content_type="application/json")[2])
+            assert cached["status"] == "ready" and cached["result"]["favorite"] and len(received) == before
+            request("/api/translation/history?book=" + book["id"], authenticated=False, expected_status=401)
+            bad = {**translation_payload, "targetLanguage": "unknown"}
+            request("/api/translation/start", json.dumps(bad).encode(), content_type="application/json", expected_status=400)
             backup = json.loads(
                 request("/api/data/backup", b"{}", content_type="application/json")[2]
             )
@@ -534,6 +555,9 @@ def verify(app, epubcheck=None, samples=()):
             process.wait(timeout=10)
             base = start()
             assert json.loads(request("/api/state")[2])["prefs"]["fontSize"] == 23
+            translation_restored = json.loads(request("/api/translation/item?book=" + book["id"] + "&id=" + translation_result["id"])[2])
+            assert translation_restored["translation"] == translation_result["translation"] and translation_restored["favorite"]
+            assert "<math" in translation_restored["html"]
             for name, checksum in prepared_files.items():
                 assert (
                     __import__("hashlib")
@@ -650,6 +674,9 @@ def verify(app, epubcheck=None, samples=()):
                 "epubcheck": epubcheck is not None,
                 "originalPageMapping": True,
                 "verifiedBackupRestore": True,
+                "selectionTranslation": True,
+                "translationFormulaAndCache": True,
+                "translationFavoriteBackupRestore": True,
                 "signature": "ad-hoc verified",
                 "formatSamples": sample_results,
             }

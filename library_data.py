@@ -469,6 +469,7 @@ def backup(snapshot):
 
 def normalize_recovery(root):
     from ai_tutor import answer_html, source_for
+    from translation import validate_history
 
     collection, _, conversations = validate(root)
     books = {book["id"]: book for book in collection["books"]}
@@ -479,6 +480,7 @@ def normalize_recovery(root):
                 phase="从备份恢复，可按需继续解析。",
             )
     for book in books.values():
+        validate_history(book, root / "books")
         if book.get("processing") == "pending":
             book.update(
                 processing="ready", processingNote="已从备份恢复，可按需继续解析。"

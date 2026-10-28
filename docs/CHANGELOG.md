@@ -2,6 +2,18 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.21 · 2026-10-28
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.21) · Build 245 · 前端 2.43 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.21)
+
+- 新增划词翻译：PDF、TXT、EPUB 与掌上阅读共用选区入口，支持 ⌘⇧T 快速调用。
+- 译文使用独立 macOS 浮窗，可拖出主窗口、调整大小、固定或点击别处收起；可直接返回原文或交给书内答疑。
+- 支持 AI / Google 双翻译服务：设置中选择默认服务，浮窗可切换并重译；AI 模型可独立配置，默认沿用书内答疑。
+- 默认中英互译，支持指定源语言、目标语言和交换语言；原文可修改，AI 对单词和术语提供语境释义。
+- 原文与译文都渲染 Markdown、公式、列表和表格；保护公式、代码和链接，复制原文保持原始内容。
+- 本书最近 100 条译文、收藏与出处保存在本机，查看历史无需再次调用模型，并随书库备份恢复。
+- Google 无需 Key，仅发送待译原文；AI 只在主动翻译时发送选段及少量附近文字。
+
 ## 0.5.20 · 2026-10-28
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.20) · Build 244 · 前端 2.42 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.20)

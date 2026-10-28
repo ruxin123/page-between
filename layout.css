@@ -1507,6 +1507,85 @@ body[data-theme="blue"] .pdf-paper.tinted canvas {
   width: 15px;
   height: 15px;
 }
+.reader-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px;
+  color: var(--ink);
+  background: var(--surface);
+  font-variant-numeric: tabular-nums;
+}
+.reader-zoom button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  border-radius: 4px;
+}
+.reader-zoom button:hover:not(:disabled) {
+  background: var(--soft);
+}
+.reader-zoom svg {
+  width: 15px;
+  height: 15px;
+}
+.reader-zoom input {
+  width: 56px;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--paper);
+  color: inherit;
+  text-align: center;
+  font: inherit;
+  font-size: 12px;
+}
+.reader-zoom select {
+  width: 20px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+#position-label {
+  min-width: 0;
+  flex: 1;
+}
+.page-controls {
+  flex: none;
+}
+.palm-footer .reader-zoom {
+  height: 24px;
+  gap: 0;
+  border: 0;
+  padding: 0;
+}
+.palm-footer .reader-zoom button {
+  width: 20px;
+  height: 22px;
+  padding: 2px;
+}
+.palm-footer .reader-zoom input {
+  width: 40px;
+  font-size: 10px;
+  padding: 2px 0;
+}
+.palm-footer .reader-zoom select {
+  width: 16px;
+}
+#palm-position {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 #page-label {
   min-width: 50px;
   text-align: center;
@@ -2924,6 +3003,7 @@ body[data-native="true"] #palm-close {
 }
 .pdf-page {
   position: relative;
+  margin-inline: auto;
   background: white;
   box-shadow: var(--shadow);
   line-height: 0;

@@ -55,6 +55,7 @@
 !/tests/page-turn.test.mjs
 !/tests/library.test.mjs
 !/tests/theme.test.mjs
+!/tests/zoom.test.mjs
 !/tests/jobs.test.mjs
 !/tests/feedback.test.mjs
 !/tests/ai_tutor_test.py

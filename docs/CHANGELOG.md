@@ -2,6 +2,16 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.20 · 2026-10-28
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.20) · Build 244 · 前端 2.42 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.20)
+
+- 阅读底栏增加缩小、百分比输入、常用比例和放大控件，掌上窗口同步提供。
+- PDF 支持 25%–400% 缩放、适合宽度与适合整页；不同尺寸的页面保持原有大小关系，放大后可横向滚动。
+- TXT、可重排 EPUB 等格式按比例调节正文大小，工具栏保持原尺寸；阅读设置中的字号与缩放控件同步。
+- 支持 ⌘＋ / ⌘－、⌘0，以及按住 ⌘ / Ctrl 滚动正文；EPUB 内也可使用。
+- 手动缩放保留阅读位置与偏好，适合整页将当前页完整放入视野；旧版本的 PDF 缩放设置继续兼容。
+
 ## 0.5.19 · 2026-10-28
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.19) · Build 243 · 前端 2.41 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.19)

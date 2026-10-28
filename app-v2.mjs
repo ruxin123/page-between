@@ -38,8 +38,9 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.41";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.42";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
+import { createReaderZoom } from "/ui/zoom.mjs";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -68,6 +69,7 @@ const defaults = {
   lineHeight: 1.95,
   textWidth: 680,
   pdfZoom: 100,
+  pdfZoomMode: "legacy",
   pdfTint: true,
   palmScale: 1,
   textMode: "pages",
@@ -122,7 +124,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.41";
+document.body.dataset.readerBuild = "2.42";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -144,6 +146,41 @@ function post(path, value) {
   });
 }
 const toast = createToasts($("toasts"));
+const readerZoom = createReaderZoom({
+  roots: [$("reader-zoom"), $("palm-zoom")],
+  getState: () => ({
+    value: currentZoom(),
+    pdf: current?.type === "pdf",
+    min: current?.type === "pdf" ? 25 : 50,
+    max: current?.type === "pdf" ? 400 : 200,
+    enabled: route === "reader" && readerReady,
+    hidden: ["comic", "pre-paginated"].includes(current?.layout),
+  }),
+  change: (value) =>
+    changePreference(
+      typeof value === "string"
+        ? "pdfZoomMode"
+        : current?.type === "pdf"
+          ? "pdfZoom"
+          : palm
+            ? "palmScale"
+            : "fontSize",
+      typeof value === "string"
+        ? value
+        : current?.type === "pdf"
+          ? value
+          : palm
+            ? value / 100
+            : (21 * value) / 100,
+    ),
+  toast,
+});
+function currentZoom() {
+  if (current?.type !== "pdf")
+    return palm ? prefs.palmScale * 100 : (prefs.fontSize / 21) * 100;
+  if (prefs.pdfZoomMode === "custom") return prefs.pdfZoom;
+  return pdfNaturalWidth ? (pdfWidth / pdfNaturalWidth) * 100 : 100;
+}
 const dataSettings = createDataSettings({ api, post, toast });
 const bookExport = createBookExport({
   post,
@@ -393,8 +430,8 @@ function settingsMarkup() {
   ];
   const select = (label, key, options) =>
     `<label class="setting-row">${label}<select data-pref="${key}">${options.map(([value, title]) => `<option value="${value}" ${prefs[key] === value ? "selected" : ""}>${title}</option>`).join("")}</select></label>`;
-  const range = (label, key, min, max, step, output) =>
-    `<label class="setting-range"><span>${label}<output data-output="${key}">${output}</output></span><input data-pref="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${prefs[key]}"></label>`;
+  const range = (label, key, min, max, step, output, value = prefs[key]) =>
+    `<label class="setting-range"><span>${label}<output data-output="${key}">${output}</output></span><input data-pref="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></label>`;
   return `<section class="settings-section"><h2>浏览方式</h2>${select(
     pdf ? "PDF 阅读" : palm ? "掌上窗口" : "文字阅读",
     pdf ? "pdfMode" : palm ? "palmMode" : "textMode",
@@ -420,7 +457,7 @@ function settingsMarkup() {
       : ""
   }<p class="setting-note">${pdf ? "保留原书页面，目录和文字选择随页可用。" : "翻页时可使用左右方向键、空格、触控板，或底部翻页按钮。"}</p></section><section class="settings-section"><h2>阅读主题</h2><div class="theme-choices">${themes.map(([theme, title, color]) => `<button data-theme="${theme}" aria-pressed="${prefs.theme === theme}"><span class="theme-circle" style="background:${color}"></span>${title}</button>`).join("")}</div></section>${
     pdf
-      ? `<section class="settings-section"><h2>原书版面</h2><p class="setting-note">保留原书字体和排版，通过缩放调整大小。</p>${range("页面缩放", "pdfZoom", 75, 180, 5, `${prefs.pdfZoom}%`)}<button class="secondary-button" data-fit style="margin-top:15px">适合页面宽度</button><label class="setting-check">随主题柔化页面<input data-pref="pdfTint" type="checkbox" ${prefs.pdfTint ? "checked" : ""}></label></section>`
+      ? `<section class="settings-section"><h2>原书版面</h2><p class="setting-note">保留原书字体和排版，通过缩放调整大小。</p>${range("页面缩放", "pdfZoom", 25, 400, 5, `${Math.round(currentZoom())}%`, currentZoom())}<button class="secondary-button" data-fit style="margin-top:15px">适合页面宽度</button><label class="setting-check">随主题柔化页面<input data-pref="pdfTint" type="checkbox" ${prefs.pdfTint ? "checked" : ""}></label></section>`
       : `<section class="settings-section"><h2>字里行间</h2>${select(
           "中文字体",
           "zhFont",
@@ -435,7 +472,7 @@ function settingsMarkup() {
           ["source-serif", "Source Serif 4"],
           ["georgia", "Georgia"],
           ["system", "系统字体"],
-        ])}${palm ? range("字号偏好", "palmScale", 0.85, 1.25, 0.05, `${Math.round(prefs.palmScale * 100)}%`) : range("字号", "fontSize", 16, 30, 1, `${prefs.fontSize} px`)}${!palm ? range("行距", "lineHeight", 1.5, 2.4, 0.05, prefs.lineHeight.toFixed(2)) + range("正文宽度", "textWidth", 480, 860, 20, `${prefs.textWidth} px`) : `<p class="setting-note adaptive-size-note">随窗口调整，当前 ${actualSize().toFixed(1)} px。</p>`}</section>`
+        ])}${palm ? range("字号偏好", "palmScale", 0.5, 2, 0.05, `${Math.round(prefs.palmScale * 100)}%`) : range("字号", "fontSize", 10.5, 42, 0.5, `${Number(prefs.fontSize.toFixed(1))} px`)}${!palm ? range("行距", "lineHeight", 1.5, 2.4, 0.05, prefs.lineHeight.toFixed(2)) + range("正文宽度", "textWidth", 480, 860, 20, `${prefs.textWidth} px`) : `<p class="setting-note adaptive-size-note">随窗口调整，当前 ${actualSize().toFixed(1)} px。</p>`}</section>`
   }<section class="settings-section"><h2>掌上阅读</h2>${palm && native ? '<div class="window-sizes"><button class="secondary-button" data-window-size="compact">小巧</button><button class="secondary-button" data-window-size="standard">标准</button></div>' : ""}<p class="setting-note">独立小窗，默认置顶。窗口缩小时，字号会同步调整；阅读位置与主阅读器共享。</p>${
     desktop
       ? select("后台翻页", "palmKeys", [
@@ -452,12 +489,8 @@ function renderSettings() {
 }
 function actualSize() {
   return palm
-    ? clamp(
-        palmTypography(innerWidth, innerHeight, prefs.fontSize).size *
-          prefs.palmScale,
-        10.5,
-        25,
-      )
+    ? palmTypography(innerWidth, innerHeight, prefs.fontSize).size *
+        prefs.palmScale
     : prefs.fontSize;
 }
 function applyPreferences() {
@@ -475,6 +508,7 @@ function applyPreferences() {
   style.setProperty("--reading-line", palm ? 1.65 : prefs.lineHeight);
   style.setProperty("--reading-width", `${prefs.textWidth}px`);
   $("pdf-paper").classList.toggle("tinted", prefs.pdfTint);
+  readerZoom.update();
   document
     .querySelectorAll(".adaptive-size-note")
     .forEach(
@@ -624,6 +658,7 @@ function restoreAnchor(anchor) {
 }
 
 async function changePreference(key, value) {
+  lastInput = Date.now();
   if (key === "palmKeys") {
     if (!["arrows", "letters", "off"].includes(value)) return;
     try {
@@ -642,12 +677,49 @@ async function changePreference(key, value) {
   const anchor = pendingAnchor;
   retainedAnchor = anchor;
   prefs[key] = value;
+  if (key === "pdfZoom") prefs.pdfZoomMode = "custom";
   applyPreferences();
-  postState({ prefs: { [key]: value } }).catch((error) => toast(error.message));
-  if (key === "pdfZoom" || key === "pdfMode") {
-    if (current?.type === "pdf" && route === "reader")
-      renderCurrent(makePosition());
+  document.querySelectorAll(`[data-pref="${key}"]`).forEach((control) => {
+    if (control.type === "checkbox") control.checked = !!value;
+    else if (document.activeElement !== control) control.value = value;
+  });
+  postState({
+    prefs: {
+      [key]: value,
+      ...(key === "pdfZoom" ? { pdfZoomMode: "custom" } : {}),
+    },
+  }).catch((error) => toast(error.message));
+  if (["pdfZoom", "pdfZoomMode", "pdfMode"].includes(key)) {
+    if (current?.type === "pdf" && route === "reader") {
+      const position = makePosition(),
+        view = $("reading-viewport"),
+        before = $("pdf-paper").getBoundingClientRect(),
+        center =
+          key === "pdfZoom" && readerReady && before.width
+            ? clamp(
+                (view.getBoundingClientRect().left +
+                  view.clientWidth / 2 -
+                  before.left) /
+                  before.width,
+                0,
+                1,
+              )
+            : null;
+      if (key === "pdfZoomMode" && value === "page")
+        Object.assign(position, { pdfY: 0, top: 0 });
+      await renderCurrent(position);
+      if (center !== null) {
+        const after = $("pdf-paper").getBoundingClientRect();
+        view.scrollLeft +=
+          after.left +
+          after.width * center -
+          view.getBoundingClientRect().left -
+          view.clientWidth / 2;
+      }
+    }
+    pendingAnchor = null;
     renderSettings();
+    if (readerReady) await savePosition(true);
     return;
   }
   if (current?.type === "epub" && readerReady) await styleEpub();
@@ -692,7 +764,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.41",
+        build: "2.42",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -775,6 +847,7 @@ function currentProgress() {
 }
 
 function updateProgress() {
+  readerZoom.update();
   if (!current || !location) return;
   const progress = currentProgress();
   const active = activeTocItem(),
@@ -1578,12 +1651,13 @@ function refreshPdfEnhancements() {
 let pdfDocument,
   pdfRevision = 0,
   pdfWidth = 0,
+  pdfNaturalWidth = 0,
   pdfUse = 0,
   pdfDirection = 1,
   pdfRenderQueue = Promise.resolve();
 const pdfTasks = new Map();
 const pdfQueued = new Set();
-const pdfPageRatios = new WeakMap();
+const pdfPageDimensions = new WeakMap();
 function releasePdfPage(root) {
   root.querySelectorAll("canvas").forEach((canvas) => {
     canvas.width = 0;
@@ -1647,7 +1721,8 @@ async function paintPdfPage(index, revision) {
     if (!active()) return;
     root._pageProxy = page;
     const viewport = page.getViewport({
-        scale: pdfWidth / page.getViewport({ scale: 1 }).width,
+        scale:
+          parseFloat(root.style.width) / page.getViewport({ scale: 1 }).width,
       }),
       // Bound each backing store to 8 MP, including enlarged pages on Retina displays.
       density = Math.min(
@@ -1938,10 +2013,10 @@ async function renderPdf(position, revision) {
   if (revision !== renderRevision) return;
   const page = await pdf.getPage(position.index);
   if (revision !== renderRevision) return;
-  if (!pdfPageRatios.has(pdf)) {
+  if (!pdfPageDimensions.has(pdf)) {
     // Read geometry without rendering: estimated heights move mixed-size jump targets.
     const dimensions = (async () => {
-      const ratios = [];
+      const sizes = [];
       for (let start = 1; start <= pdf.numPages; start += 32) {
         const batch = await Promise.all(
           Array.from(
@@ -1950,30 +2025,68 @@ async function renderPdf(position, revision) {
               try {
                 const entry = await pdf.getPage(start + offset);
                 const size = entry.getViewport({ scale: 1 });
-                return size.height / size.width;
+                return { width: size.width, height: size.height };
               } catch {
                 return null; // A damaged page retains its own retry path.
               }
             },
           ),
         );
-        ratios.push(...batch);
+        sizes.push(...batch);
       }
-      return ratios;
+      return sizes;
     })();
-    pdfPageRatios.set(pdf, dimensions);
+    pdfPageDimensions.set(pdf, dimensions);
   }
-  const ratios = await pdfPageRatios.get(pdf);
+  const dimensions = await pdfPageDimensions.get(pdf);
+  const ratios = dimensions.map((size) =>
+    size ? size.height / size.width : null,
+  );
   if (revision !== renderRevision) return;
   pdfDocument = pdf;
   pdfRevision = revision;
+  const natural = page.getViewport({ scale: 1 }),
+    widest = dimensions.reduce(
+      (max, size) => Math.max(max, size?.width || 0),
+      natural.width,
+    ),
+    tallest = dimensions.reduce(
+      (max, size) => Math.max(max, size?.height || 0),
+      natural.height,
+    ),
+    view = $("reading-viewport"),
+    padding = getComputedStyle(view),
+    availableWidth = Math.max(
+      1,
+      view.clientWidth -
+        parseFloat(padding.paddingLeft) -
+        parseFloat(padding.paddingRight),
+    ),
+    availableHeight = Math.max(
+      1,
+      view.clientHeight -
+        parseFloat(padding.paddingTop) -
+        parseFloat(padding.paddingBottom),
+    );
+  pdfNaturalWidth = (widest * 96) / 72;
+  const scale =
+    prefs.pdfZoomMode === "custom"
+      ? ((96 / 72) * prefs.pdfZoom) / 100
+      : prefs.pdfZoomMode === "width"
+        ? availableWidth / widest
+        : prefs.pdfZoomMode === "page"
+          ? Math.min(availableWidth / widest, availableHeight / tallest)
+          : null;
   pdfWidth =
-    (Math.min(
-      960,
-      $("reading-viewport").clientWidth - (innerWidth < 760 ? 26 : 80),
-    ) *
-      prefs.pdfZoom) /
-    100;
+    scale !== null
+      ? widest * scale
+      : (Math.min(960, view.clientWidth - (innerWidth < 760 ? 26 : 80)) *
+          prefs.pdfZoom) /
+        100;
+  const widthForPage = (index) =>
+    scale === null
+      ? pdfWidth
+      : (dimensions[index - 1]?.width || natural.width) * scale;
   const viewport = page.getViewport({
       scale: pdfWidth / page.getViewport({ scale: 1 }).width,
     }),
@@ -1986,7 +2099,7 @@ async function renderPdf(position, revision) {
   stack.classList.toggle("continuous", prefs.pdfMode === "scroll");
   stack.style.paddingBottom =
     prefs.pdfMode === "scroll"
-      ? `${Math.max(0, $("reading-viewport").clientHeight - pdfWidth * (ratios.at(-1) || viewport.height / viewport.width))}px`
+      ? `${Math.max(0, $("reading-viewport").clientHeight - widthForPage(book.pages) * (ratios.at(-1) || viewport.height / viewport.width))}px`
       : "0px";
   const indices =
     prefs.pdfMode === "scroll"
@@ -1997,8 +2110,9 @@ async function renderPdf(position, revision) {
     root.className = "pdf-page";
     root.setAttribute("aria-hidden", "true");
     root.dataset.page = index;
-    root.style.height = `${pdfWidth * (ratios[index - 1] || viewport.height / viewport.width)}px`;
-    root.style.width = `${pdfWidth}px`;
+    const width = widthForPage(index);
+    root.style.height = `${width * (ratios[index - 1] || viewport.height / viewport.width)}px`;
+    root.style.width = `${width}px`;
     stack.append(root);
   }
   restorePosition(() => scrollPdfTo(position));
@@ -2108,6 +2222,7 @@ let lastWheel = 0,
   touchStart;
 function attachPageGestures(target) {
   target.addEventListener("wheel", onPageInput, { passive: false });
+  target.addEventListener("wheel", zoomWheel, { passive: false });
   target.addEventListener(
     "touchstart",
     (event) => {
@@ -2136,6 +2251,21 @@ function attachPageGestures(target) {
     },
     { passive: true },
   );
+}
+let lastZoomWheel = 0;
+function zoomWheel(event) {
+  if (
+    route !== "reader" ||
+    !(event.ctrlKey || event.metaKey) ||
+    event.altKey ||
+    !event.deltaY
+  )
+    return;
+  event.preventDefault();
+  if (!readerReady || Date.now() - lastZoomWheel < 100) return;
+  lastZoomWheel = Date.now();
+  lastInput = Date.now();
+  readerZoom.step(event.deltaY < 0 ? 1 : -1);
 }
 function frameDocument() {
   return $("epub-frame").contentDocument;
@@ -2496,6 +2626,7 @@ async function renderCurrent(position) {
   pagination = null;
   const revision = ++renderRevision;
   readerReady = false;
+  readerZoom.update();
   $("reading-viewport").setAttribute("aria-busy", "true");
   $("bookmark-button").disabled = true;
   $("ai-open").disabled = true;
@@ -3039,6 +3170,8 @@ function validatePreferences(input) {
     if (!["pages", "scroll"].includes(output[key])) output[key] = defaults[key];
   if (!["arrows", "letters", "off"].includes(output.palmKeys))
     output.palmKeys = defaults.palmKeys;
+  if (!["legacy", "custom", "width", "page"].includes(output.pdfZoomMode))
+    output.pdfZoomMode = "legacy";
   if (!["paper", "sage", "blue", "night"].includes(output.theme))
     output.theme = "paper";
   if (!["han-serif", "han-sans", "wenkai", "system"].includes(output.zhFont))
@@ -3048,11 +3181,11 @@ function validatePreferences(input) {
   )
     output.enFont = "literata";
   for (const [key, min, max] of [
-    ["fontSize", 16, 30],
+    ["fontSize", 10.5, 42],
     ["lineHeight", 1.5, 2.4],
     ["textWidth", 480, 860],
-    ["pdfZoom", 75, 180],
-    ["palmScale", 0.85, 1.25],
+    ["pdfZoom", 25, 400],
+    ["palmScale", 0.5, 2],
   ])
     output[key] = clamp(output[key], min, max);
   return output;
@@ -3100,6 +3233,16 @@ function handleKeydown(event) {
   }
   if (route !== "reader" || editing) return;
   if (event.target.closest?.(".question-panel")) return;
+  if (
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey &&
+    ["+", "=", "-", "0"].includes(event.key)
+  ) {
+    event.preventDefault();
+    if (event.key === "0") readerZoom.reset();
+    else readerZoom.step(event.key === "-" ? -1 : 1);
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
     event.preventDefault();
     bookSearch.open();
@@ -3250,7 +3393,8 @@ document.addEventListener("click", async (event) => {
     changePreference("theme", theme.dataset.theme);
     return;
   }
-  if (event.target.closest("[data-fit]")) changePreference("pdfZoom", 100);
+  if (event.target.closest("[data-fit]"))
+    changePreference("pdfZoomMode", "width");
 });
 document.addEventListener("input", (event) => {
   const key = event.target.dataset.pref;
@@ -3829,7 +3973,8 @@ async function poll(resume = false) {
         if (!onlyKeysChanged && current.type === "pdf") {
           if (
             previousPrefs.pdfMode !== prefs.pdfMode ||
-            previousPrefs.pdfZoom !== prefs.pdfZoom
+            previousPrefs.pdfZoom !== prefs.pdfZoom ||
+            previousPrefs.pdfZoomMode !== prefs.pdfZoomMode
           )
             await renderCurrent(makePosition());
         } else if (!onlyKeysChanged) {

@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.41" />
+    <link rel="stylesheet" href="/layout.css?v=2.42" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -416,6 +416,7 @@
           <i data-icon="timer"></i
           ><span id="timer-label">专注一会儿</span></button
         ><span id="position-label"></span>
+        <div id="reader-zoom" class="reader-zoom"></div>
         <div class="page-controls">
           <button id="previous-button" class="icon-button" aria-label="上一屏">
             <i data-icon="back"></i></button
@@ -433,8 +434,9 @@
       <footer id="palm-footer" class="palm-footer" hidden>
         <button id="palm-previous" aria-label="掌上上一屏">
           <i data-icon="back"></i></button
-        ><span id="palm-position"></span
-        ><button id="palm-next" aria-label="掌上下一屏">
+        ><span id="palm-position"></span>
+        <div id="palm-zoom" class="reader-zoom"></div>
+        <button id="palm-next" aria-label="掌上下一屏">
           <i data-icon="forward"></i>
         </button>
       </footer>
@@ -937,6 +939,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.41"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.42"></script>
   </body>
 </html>

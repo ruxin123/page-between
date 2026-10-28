@@ -13,6 +13,7 @@ const paths = {
   shelf: "M4 4v16h16V4M4 13h16M8 5v8M12 7v6M16 5v8",
   import: "M12 3v12M7 10l5 5 5-5M4 16v5h16v-5",
   plus: "M12 5v14M5 12h14",
+  minus: "M5 12h14",
   search: "M21 21l-5-5M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14",
   settings: "M4 7h16M4 17h16M8 4v6M16 14v6",
   back: "M15 5l-7 7 7 7",

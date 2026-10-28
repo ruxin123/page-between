@@ -40,6 +40,7 @@
 /native/*
 !/native/OCR.swift
 !/native/Translation.swift
+!/native/BookSource.swift
 !/native/Palm.swift
 !/native/Secrets.swift
 !/native/App.swift

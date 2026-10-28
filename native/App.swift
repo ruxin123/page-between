@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var base: URL?
   var palm: PalmDelegate?
   var translator: TranslationWindow?
+  var bookSource: BookSourceWindow?
   var tutorWindow: NSWindow?
   var tutorWeb: WKWebView?
   weak var tutorSourceView: WKWebView?
@@ -335,6 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       return
     }
     if action == "translate" { showTranslation(body, from: message.webView); return }
+    if action == "bookSource" { openBookSource(); return }
     if action == "tutor" { showTutor(body, from: message.webView); return }
     if action == "ready" {
       ready = true
@@ -563,7 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   }
 
   func importPendingFiles() {
-    guard ready, !importing, !pendingFiles.isEmpty, let base = base else { return }
+    guard ready, !importing, !pendingFiles.isEmpty, base != nil else { return }
     importing = true
     let files = pendingFiles
     pendingFiles = []
@@ -571,29 +573,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       guard let self = self else { return }
       do {
         for file in files {
-          guard file.isFileURL,
-            let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0,
-            size <= 200 * 1024 * 1024
-          else {
-            throw NSError(domain: "Import", code: 1)
-          }
-          var parts = URLComponents(
-            url: base.appendingPathComponent("api/import"), resolvingAgainstBaseURL: false)!
-          parts.queryItems = [
-            URLQueryItem(name: "name", value: file.lastPathComponent),
-            URLQueryItem(
-              name: "parse",
-              value: ["pdf", "txt"].contains(file.pathExtension.lowercased()) ? "1" : "0"),
-          ]
-          var request = self.request(parts.url!)
-          request.httpMethod = "POST"
-          request.timeoutInterval = 180
-          request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
           self.window.title = "页间 · 正在导入书籍…"
-          let (_, response) = try await URLSession.shared.upload(for: request, fromFile: file)
-          guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw NSError(domain: "Import", code: 2)
-          }
+          try await self.importLocalBook(file, parse: ["pdf", "txt"].contains(file.pathExtension.lowercased()))
         }
         self.loadMain("/library")
       } catch {
@@ -606,6 +587,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       self.importing = false
       self.importPendingFiles()
     }
+  }
+
+  func importLocalBook(_ file: URL, parse: Bool) async throws {
+    guard let base = base, ready, file.isFileURL, supported.contains(file.pathExtension.lowercased()),
+      let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0, size <= BookSourceWindow.maximumBytes
+    else { throw NSError(domain: "Import", code: 1) }
+    var parts = URLComponents(url: base.appendingPathComponent("api/import"), resolvingAgainstBaseURL: false)!
+    parts.queryItems = [URLQueryItem(name: "name", value: file.lastPathComponent), URLQueryItem(name: "parse", value: parse ? "1" : "0")]
+    var request = self.request(parts.url!); request.httpMethod = "POST"; request.timeoutInterval = 180
+    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+    let (_, response) = try await URLSession.shared.upload(for: request, fromFile: file)
+    guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw NSError(domain: "Import", code: 2) }
+  }
+
+  @objc func openBookSource() {
+    if bookSource == nil {
+      let source = BookSourceWindow(demo: demo)
+      source.importBook = { [weak self] file, parse in
+        guard let self = self else { throw NSError(domain: "Import", code: 1) }
+        try await self.importLocalBook(file, parse: parse)
+        _ = try? await self.web.evaluateJavaScript("window.dispatchEvent(new Event('app-library-refresh'))")
+      }
+      source.showLibrary = { [weak self] in self?.loadMain("/library") }
+      bookSource = source
+    }
+    bookSource?.show()
   }
 
   func buildMenu() {
@@ -641,6 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     app.addItem(
       withTitle: "退出页间", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     action(file, "导入书籍…", #selector(openImport), "o")
+    action(file, "找书…", #selector(openBookSource))
     file.addItem(.separator())
     file.addItem(
       withTitle: "关闭窗口", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
@@ -733,6 +741,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    bookSource?.shutdown()
     if let key = hotkey { UnregisterEventHotKey(key) }
     if let handler = hotkeyHandler { RemoveEventHandler(handler) }
     stopEngine(engine)

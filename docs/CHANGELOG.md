@@ -2,6 +2,16 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.24 · 2026-10-28
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.24) · Build 248 · 前端 2.46 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.24)
+
+- 新增「找书」：在独立 macOS 窗口内浏览 Z-Library 网站，使用网站原有搜索、登录及格式选择。
+- 提供官方资料入口、公告列出的备用地址与手动网址输入，支持前进、后退、刷新和清除登录。
+- 下载完成后可直接加入书库，PDF / TXT 默认开启文档解析，EPUB 默认关闭，允许逐本调整。
+- 复用已有格式验证、文件去重及导入流程；支持取消下载，拒绝不支持的文件、空文件及超过 200 MB 的文件。
+- 书源使用独立网站会话，不提供阅读器本机桥接；不需要在页间填写网站账号密码。
+
 ## 0.5.23 · 2026-10-28
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.23) · Build 247 · 前端 2.45 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.23)

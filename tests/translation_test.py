@@ -102,6 +102,59 @@ class Translation(unittest.TestCase):
         finally:
             http.shutdown(); http.server_close(); thread.join()
 
+    def test_google_receives_math_semantics_and_allows_symbol_reordering(self):
+        original = r"An element $a$ of $G$ acts on the finite set $X = \{1,2,3\}$ according to a rule."
+        expected = r"群 $G$ 中的元素 $a$ 按规则作用于有限集 $X=\{1,2,3\}$。"
+        sent = []
+        def google(text, *args):
+            sent.append(text)
+            return {"translation": expected, "detectedLanguage": "en", "explanation": ""}
+        config = {"provider": "google", "url": "test", "model": "Google 翻译"}
+        with patch.object(t, "configuration", return_value=config), patch.object(t.google_translation, "translate", side_effect=google):
+            job = self.wait(t.start(self.book, {**self.payload, "text": original})["id"])
+        self.assertEqual(sent, [original])
+        self.assertEqual(job["status"], "ready", job)
+        self.assertTrue(job["result"]["translation"].startswith("群 $G$ 中的元素 $a$"))
+        self.assertIn(r"$X = \{1,2,3\}$", job["result"]["translation"])
+        self.assertIn("<math", job["result"]["html"])
+        self.assertEqual(job["result"]["textVersion"], t.GOOGLE_TEXT_VERSION)
+
+    def test_google_validates_formula_content_not_positions(self):
+        original = r"A map $f:A\to B$ sends $a$ to $b$; $a$ is fixed."
+        translated = r"$a$ 固定。映射 $f:A \rightarrow B$ 将 $a$ 映到 $b$。"
+        fixed = t.restore_google_math(original, translated)
+        self.assertEqual(fixed, r"$a$ 固定。映射 $f:A\to B$ 将 $a$ 映到 $b$。")
+        for bad in [r"$a$ 固定，映射 $f:A\to B$ 将 $a$ 映到 $c$。", translated + " $b$", translated.replace("$b$", "")]:
+            with self.assertRaisesRegex(ValueError, "公式"):
+                t.restore_google_math(original, bad)
+
+    def test_old_google_cache_is_not_reused_and_history_can_still_be_read(self):
+        import hashlib
+        config = {"provider": "google", "url": "test", "model": "Google 翻译"}
+        calls = []
+        def google(text, *args):
+            calls.append(text)
+            return {"translation": text, "detectedLanguage": "en", "explanation": ""}
+        with patch.object(t, "configuration", return_value=config), patch.object(t.google_translation, "translate", side_effect=google):
+            first = self.wait(t.start(self.book, self.payload)["id"])["result"]
+            data = load(t.history_path(self.book), {})
+            prepared = t.prepare(self.book, self.payload)
+            data["items"][0]["cacheKey"] = hashlib.sha256(json.dumps([prepared, "google", "test", "Google 翻译"], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            data["items"][0].pop("textVersion")
+            save(t.history_path(self.book), data)
+            self.assertIn("translationWarning", t.lookup(self.book, first["id"]))
+            next_job = self.wait(t.start(self.book, self.payload)["id"])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(next_job["status"], "ready")
+        self.assertNotIn("translationWarning", next_job["result"])
+
+    def test_google_never_splits_a_latex_expression_to_fit_a_chunk(self):
+        formula = "$" + "x+" * 2200 + "x$"
+        source = "Before. " + formula + " After."
+        pieces = list(t.google_translation.chunks(source))
+        self.assertEqual("".join(pieces), source)
+        self.assertTrue(any(formula in piece for piece in pieces))
+
     def test_table_preview_and_provider_conversion_preserve_raw_formula(self):
         text = "Input\tRule\none\t$x^2$"
         source = {"quote": text, "context": "", "position": {"index": 1}, "kind": "table"}

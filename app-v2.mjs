@@ -39,7 +39,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.44";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.45";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
 
@@ -93,6 +93,8 @@ let renderRevision = 0,
   textLayerTask,
   epubObserver,
   currentSelection,
+  selectionAction,
+  selectionEpoch = 0,
   lastAnchor,
   pendingAnchor;
 let saveTimer,
@@ -125,7 +127,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.44";
+document.body.dataset.readerBuild = "2.45";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -765,7 +767,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.44",
+        build: "2.45",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1094,18 +1096,96 @@ function dismissSelection() {
     .forEach((element) => element.removeAttribute("data-reader-selected"));
 }
 function clearSelection() {
+  selectionEpoch++;
+  selectionAction = null;
   dismissSelection();
   window.getSelection()?.removeAllRanges();
   try {
     $("epub-frame").contentWindow?.getSelection()?.removeAllRanges();
   } catch {}
 }
+function rememberSelectionAction() {
+  if (!currentSelection) return;
+  const doc =
+    currentSelection.document ||
+    (current.type === "epub" ? frameDocument() : document);
+  const selected = doc.getSelection();
+  selectionAction = {
+    book: current.id,
+    epoch: selectionEpoch,
+    selection: { ...currentSelection },
+    document: doc,
+    range:
+      currentSelection.kind === "text" && selected?.rangeCount
+        ? selected.getRangeAt(0).cloneRange()
+        : null,
+    element:
+      current.type === "pdf"
+        ? document.querySelector(".pdf-object.selected")
+        : doc.querySelector("[data-reader-selected]"),
+  };
+}
+function restoreSelectionAction(saved = selectionAction, consume = true) {
+  if (
+    !saved ||
+    saved.epoch !== selectionEpoch ||
+    route !== "reader" ||
+    !readerReady ||
+    saved.book !== current?.id
+  )
+    return false;
+  const doc = current.type === "epub" ? frameDocument() : document;
+  if (doc !== saved.document) return false;
+  if (
+    document.activeElement?.closest(".question-panel,.translation-panel")
+      ?.hidden
+  )
+    $("reading-viewport").focus({ preventScroll: true });
+  let rectangle;
+  if (saved.element?.isConnected) {
+    if (current.type === "pdf") saved.element.classList.add("selected");
+    else saved.element.setAttribute("data-reader-selected", "true");
+    rectangle = saved.element.getBoundingClientRect();
+  } else if (saved.range) {
+    const root =
+      current.type === "epub"
+        ? doc.body
+        : current.type === "pdf"
+          ? $("pdf-paper")
+          : $("chapter-body");
+    if (!root?.contains(saved.range.commonAncestorContainer)) return false;
+    const selected = doc.getSelection();
+    selected.removeAllRanges();
+    selected.addRange(saved.range.cloneRange());
+    rectangle = [...saved.range.getClientRects()]
+      .filter((rect) => rect.width && rect.height)
+      .at(-1);
+  }
+  if (!rectangle) return false;
+  if (consume) selectionAction = null;
+  currentSelection = { ...saved.selection };
+  if (doc !== document) {
+    const frame = $("epub-frame").getBoundingClientRect();
+    rectangle = {
+      left: rectangle.left + frame.left,
+      top: rectangle.top + frame.top,
+      bottom: rectangle.bottom + frame.top,
+      width: rectangle.width,
+      height: rectangle.height,
+    };
+  }
+  showToolbar(rectangle);
+  return true;
+}
 function watchSelection(doc) {
   let dragging = false,
     pdfDragAnchor = null,
     preservePdfAnchor = false,
     highlightFrame,
-    timer;
+    timer,
+    pendingAction,
+    pointerStart,
+    pointerMoved = false;
   const schedule = (event) => {
     if (
       event?.target?.closest?.(
@@ -1115,6 +1195,11 @@ function watchSelection(doc) {
       return;
     clearTimeout(timer);
     timer = setTimeout(() => {
+      if (
+        selectionAction &&
+        (!$("question-panel").hidden || !$("translation-panel").hidden)
+      )
+        return;
       if (route === "reader" && !dragging) captureSelection(doc);
     }, 80);
   };
@@ -1126,6 +1211,10 @@ function watchSelection(doc) {
     )
       return;
     dragging = true;
+    pendingAction = selectionAction;
+    selectionAction = null;
+    pointerStart = [event.clientX, event.clientY];
+    pointerMoved = false;
     pdfDragAnchor = null;
     preservePdfAnchor = !event.shiftKey;
     if (!event.target.closest?.(".pdf-object")) dismissSelection();
@@ -1136,11 +1225,26 @@ function watchSelection(doc) {
   doc.addEventListener("pointerup", (event) => {
     dragging = false;
     pdfDragAnchor = null;
+    if (pendingAction && !pointerMoved && doc.getSelection()?.isCollapsed)
+      restoreSelectionAction(pendingAction);
+    pendingAction = null;
     schedule(event);
+  });
+  doc.addEventListener("pointermove", (event) => {
+    if (
+      dragging &&
+      pointerStart &&
+      Math.hypot(
+        event.clientX - pointerStart[0],
+        event.clientY - pointerStart[1],
+      ) > 4
+    )
+      pointerMoved = true;
   });
   doc.addEventListener("pointercancel", () => {
     dragging = false;
     pdfDragAnchor = null;
+    pendingAction = null;
   });
   doc.addEventListener("selectionchange", () => {
     const selection = doc.getSelection();
@@ -1271,6 +1375,16 @@ function captureSelection(doc = document) {
         ? $("pdf-paper")
         : $("chapter-body");
   if (!root?.contains(range.commonAncestorContainer)) return;
+  const savedRange = selectionAction?.range;
+  if (
+    selectionAction &&
+    (!savedRange ||
+      savedRange.startContainer !== range.startContainer ||
+      savedRange.startOffset !== range.startOffset ||
+      savedRange.endContainer !== range.endContainer ||
+      savedRange.endOffset !== range.endOffset)
+  )
+    selectionAction = null;
   const text =
     current.type === "pdf"
       ? canonicalSelection(range, root)
@@ -3767,6 +3881,7 @@ const tutor = createTutor({
   post,
   toast,
   getContext: tutorContext,
+  closeWindow: () => restoreSelectionAction(),
   openWindow:
     window.webkit?.messageHandlers?.appNative || window.readerDetachedTutor
       ? (request) =>
@@ -3796,7 +3911,10 @@ window.readerOpenTutorSource = async (book, position) => {
 function askSelection() {
   if (!currentSelection) return;
   const context = tutorContext(currentSelection);
-  if (context) tutor.openContext(context);
+  if (context) {
+    rememberSelectionAction();
+    tutor.openContext(context);
+  }
   $("selection-toolbar").hidden = true;
 }
 $("ask-selection").onclick = askSelection;
@@ -3804,6 +3922,7 @@ const translator = createTranslation({
   api,
   post,
   toast,
+  closeWindow: () => restoreSelectionAction(),
   openWindow:
     window.webkit?.messageHandlers?.appNative ||
     window.readerDetachedTranslation
@@ -3834,6 +3953,7 @@ function translateSelection() {
   }
   const context = tutorContext(currentSelection);
   if (!context) return;
+  rememberSelectionAction();
   delete context.source.image;
   const bar = $("selection-toolbar").getBoundingClientRect();
   translator.open(context, { left: bar.left, bottom: bar.bottom });
@@ -3919,8 +4039,17 @@ window.addEventListener("resize", () => {
   }, 80);
 });
 window.addEventListener("hashchange", showRoute);
+window.addEventListener("reader-selection-resume", () =>
+  restoreSelectionAction(selectionAction, false),
+);
 window.addEventListener("focus", () => {
   if (route === "reader" && current?.type === "pdf") ensurePdfPages();
+  if (
+    $("question-panel").hidden &&
+    $("translation-panel").hidden &&
+    !document.querySelector("dialog[open]")
+  )
+    restoreSelectionAction(selectionAction, false);
 });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && route === "reader" && current?.type === "pdf")

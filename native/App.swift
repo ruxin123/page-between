@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var translator: TranslationWindow?
   var tutorWindow: NSWindow?
   var tutorWeb: WKWebView?
+  weak var tutorSourceView: WKWebView?
   var tutorReady = false
   var tutorBook: String?
   var pendingTutor: [String: Any]?
@@ -30,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var hotkey: EventHotKeyRef?
   var hotkeyHandler: EventHandlerRef?
   var hotkeyHandlerStatus: OSStatus = -1
+
   var hotkeyRegistrationStatus: OSStatus = -1
   let demo =
     CommandLine.arguments.contains("--demo")
@@ -44,6 +46,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var support: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("Page Between/" + (demo ? "Review Demo" : "Personal"))
+  }
+
+  func windowDidBecomeKey(_ notification: Notification) {
+    web?.evaluateJavaScript("window.dispatchEvent(new Event('reader-selection-resume'))")
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    if notification.object as? NSWindow === tutorWindow {
+      tutorSourceView?.evaluateJavaScript("window.dispatchEvent(new Event('reader-selection-resume'))")
+    }
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -323,7 +335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       return
     }
     if action == "translate" { showTranslation(body, from: message.webView); return }
-    if action == "tutor" { showTutor(body); return }
+    if action == "tutor" { showTutor(body, from: message.webView); return }
     if action == "ready" {
       ready = true
       writeRuntime()
@@ -357,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
           address: url, statusFile: support.appendingPathComponent("Library/palm-window.json"),
           standalone: false, session: session)
         palm?.showMainSettings = { [weak self] section in self?.loadMain("/settings/" + section) }
-        palm?.showTutor = { [weak self] request in self?.showTutor(request) }
+        palm?.showTutor = { [weak self] request in self?.showTutor(request, from: self?.palm?.web) }
         palm?.showTranslation = { [weak self] request, view in self?.showTranslation(request, from: view) }
       }
       palm?.configureHotkeys(body["keys"] as? String ?? "arrows")
@@ -392,12 +404,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     translator?.show(request, from: view)
   }
 
-  func showTutor(_ request: [String: Any]) {
+  func showTutor(_ request: [String: Any], from view: WKWebView? = nil) {
     guard let base = base, let context = request["context"] as? [String: Any],
       let book = context["book"] as? String, validBookID(book),
       context["source"] is [String: Any], JSONSerialization.isValidJSONObject(context),
       let bytes = try? JSONSerialization.data(withJSONObject: context), bytes.count <= 12 * 1024 * 1024
     else { return }
+    if let view = view { tutorSourceView = view }
     if tutorWindow?.isVisible == false, tutorReady, tutorBook == book,
       request["history"] as? Bool == true
     {
@@ -422,6 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       panel.isMovable = true
       panel.isReleasedWhenClosed = false
       panel.contentView = view
+      panel.delegate = self
       panel.setFrameAutosaveName(demo ? "PageBetweenDemoTutor" : "PageBetweenTutor")
       let restored = panel.setFrameUsingName(demo ? "PageBetweenDemoTutor" : "PageBetweenTutor")
       if !restored, let screen = window.screen?.visibleFrame {

@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, build_opener
 
 from ai_tutor import NoRedirect
+from pdf_selection import MATH
 
 ENDPOINT = "https://translate.google.com/translate_a/single"
 COOLDOWN_UNTIL = 0
@@ -23,6 +24,10 @@ def chunks(text, maximum=4000):
             token = text.rfind("PBMZ", 0, split)
             if token >= 0 and "END" not in text[token:split]:
                 split = token
+        for formula in MATH.finditer(text):
+            if formula.start() < split < formula.end():
+                split = formula.start() or formula.end()
+                break
         yield text[:split]
         text = text[split:]
     if text:
@@ -68,6 +73,7 @@ def translate(text, source, target, control):
     if target == "auto":
         # Detect from the actual prose, rather than Han characters inside TeX.
         probe = re.sub(r"PBMZ[a-zA-Z0-9]+END", "", text)
+        probe = MATH.sub("", probe)
         target = "en" if source.startswith("zh") or source == "auto" and re.search(r"[\u3400-\u9fff]", probe) else "zh-CN"
     elif target == "zh":
         target = "zh-CN"
@@ -76,6 +82,9 @@ def translate(text, source, target, control):
         leading = chunk[:len(chunk) - len(chunk.lstrip())]
         trailing = chunk[len(chunk.rstrip()):]
         if not chunk.strip():
+            parts.append(chunk)
+            continue
+        if MATH.fullmatch(chunk.strip()):
             parts.append(chunk)
             continue
         translated, detected = request(chunk.strip(), source, target, control)

@@ -2,6 +2,15 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.23 · 2026-10-28
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.23) · Build 247 · 前端 2.45 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.23)
+
+- 修复 Google 翻译前用随机占位符替换公式导致的数学语义偏差。Google 现在接收 LaTeX 原文，译后按公式内容校验与恢复，允许正常语序调整。
+- 旧 Google 翻译缓存不再复用；历史旧译文可查看，并提示重新翻译。公式被遗漏或改写时明确提示。
+- 打开翻译或答疑后保留选段，关闭或移开弹窗时恢复选区及操作栏，可直接切换操作，无需重新划词。
+- 重新选词、换书、翻章和 Esc 正常更新或清除选区，避免恢复过期内容。主窗口、EPUB 与掌上阅读共用此行为。
+
 ## 0.5.22 · 2026-10-28
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.22) · Build 246 · 前端 2.44 · [对应源码](https://github.com/ruxin123/page-between/tree/v0.5.22)

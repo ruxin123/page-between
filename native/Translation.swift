@@ -11,6 +11,7 @@ final class TranslationWindow: NSObject, NSWindowDelegate, WKNavigationDelegate,
   private var ready = false
   private var pending: [String: Any]?
   private var pinned = false
+  private weak var sourceView: WKWebView?
   private var mouseMonitor: Any?
   private var deactivateObserver: NSObjectProtocol?
 
@@ -66,6 +67,7 @@ final class TranslationWindow: NSObject, NSWindowDelegate, WKNavigationDelegate,
       JSONSerialization.isValidJSONObject(context),
       let bytes = try? JSONSerialization.data(withJSONObject: context), bytes.count <= 128 * 1024
     else { return }
+    sourceView = view
     pending = ["context": context, "history": request["history"] as? Bool ?? false]
     if !pinned || !panel.isVisible {
       let screen = view?.window?.screen ?? NSScreen.main
@@ -100,9 +102,13 @@ final class TranslationWindow: NSObject, NSWindowDelegate, WKNavigationDelegate,
   }
 
   func dismiss() {
+    let wasVisible = panel.isVisible
     pending = nil
     panel.orderOut(nil)
     if ready { web.evaluateJavaScript("window.readerTranslationDismiss?.();") }
+    if wasVisible {
+      sourceView?.evaluateJavaScript("window.dispatchEvent(new Event('reader-selection-resume'))")
+    }
   }
 
   func shutdown() {

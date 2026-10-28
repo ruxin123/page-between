@@ -171,6 +171,9 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     func webView(_ webView:WKWebView,didFinish navigation:WKNavigation!) { loaded=true;writeStatus() }
     func windowDidResize(_ notification:Notification) { writeStatus() }
     func windowDidMove(_ notification:Notification) { writeStatus() }
+    func windowDidBecomeKey(_ notification:Notification) {
+        web?.evaluateJavaScript("window.dispatchEvent(new Event('reader-selection-resume'))")
+    }
     func windowShouldClose(_ sender:NSWindow)->Bool {
         if closing { return true }
         closing=true

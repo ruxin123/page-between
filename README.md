@@ -8,11 +8,11 @@
 
 ## 下载与安装
 
-当前版本 **0.5.22**，提供 Apple Silicon（arm64）安装包。
+当前版本 **0.5.23**，提供 Apple Silicon（arm64）安装包。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.22/page-between-0.5.22-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
+| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.23/page-between-0.5.23-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
 
 1. 下载 ZIP 并解压，将「页间.app」拖入应用程序文件夹。
 2. 打开应用，在书库点击「导入书籍」，选择文件并设置是否启用文档解析。

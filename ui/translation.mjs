@@ -73,10 +73,11 @@ export function createTranslation({
     panel.removeAttribute("aria-busy");
   }
   function close() {
+    const visible = !panel.hidden;
     stop();
     historyRevision++;
     panel.hidden = true;
-    closeWindow?.();
+    if (visible) closeWindow?.();
   }
   function pin(value) {
     pinned = value;
@@ -134,7 +135,7 @@ export function createTranslation({
     $("translation-provider").title = item.model || "";
     $("translation-star").innerHTML =
       `${item.favorite ? "取消收藏" : "收藏"}<kbd>⌘S</kbd>`;
-    message(item.storageWarning || "");
+    message(item.storageWarning || item.translationWarning || "");
   }
 
   async function translate(force = false) {

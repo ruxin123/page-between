@@ -10,7 +10,8 @@ import subprocess
 import threading
 import time
 import uuid
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
+from difflib import SequenceMatcher
 
 import ai_tutor
 import google_translation
@@ -51,11 +52,13 @@ def records(book, root=None):
     return data
 
 
-def public(item, *, rendered=False):
+def public(item, *, rendered=False, book=None):
     result = copy.deepcopy(item)
     result.pop("cacheKey", None)
     if rendered:
-        result["html"] = ai_tutor.answer_html(result["translation"], source=True)
+        result["html"] = (ai_tutor.source_preview(book, {"quote": result["translation"], "position": result["source"]["position"]})
+                          if book and book.get("type") == "pdf" and len(result["translation"]) <= 6000
+                          else ai_tutor.answer_html(result["translation"], source=True))
         result["explanationHtml"] = ai_tutor.answer_html(result.get("explanation", ""), source=True)
         if result.get("provider") == "google" and result.get("textVersion", 1) < GOOGLE_TEXT_VERSION:
             result["translationWarning"] = "旧版译文，建议重新翻译。"
@@ -72,7 +75,7 @@ def lookup(book, ident):
         item = next((row for row in records(book)["items"] if row["id"] == ident and row.get("favorite") is True), None)
         if not item:
             raise ValueError("找不到这条翻译。")
-        return public(item, rendered=True)
+        return public(item, rendered=True, book=book)
 
 
 def favorite(book, ident, value):
@@ -178,35 +181,117 @@ def google_math_spans(text):
                      and re.match(r"\$\d", match.group()) and text[match.end():match.end() + 1].isdigit())]
 
 
+MATH_SYMBOLS = {
+    "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta", "ε": r"\epsilon",
+    "θ": r"\theta", "λ": r"\lambda", "μ": r"\mu", "π": r"\pi", "σ": r"\sigma",
+    "τ": r"\tau", "φ": r"\phi", "ω": r"\omega", "Γ": r"\Gamma", "Δ": r"\Delta",
+    "Σ": r"\Sigma", "Ω": r"\Omega", "∅": r"\varnothing", "∈": r"\in", "∉": r"\notin",
+    "⊂": r"\subset", "⊆": r"\subseteq", "∪": r"\cup", "∩": r"\cap", "×": r"\times",
+    "→": r"\to", "⇒": r"\Rightarrow", "⇔": r"\Leftrightarrow", "≠": r"\neq",
+    "≤": r"\leq", "≥": r"\geq", "∞": r"\infty", "ℝ": r"\mathbb{R}", "ℤ": r"\mathbb{Z}",
+}
+
+
 def math_identity(value):
     delimiter = 2 if value.startswith(("$$", r"\(", r"\[")) else 1
-    value = value[delimiter:-delimiter]
+    value = html.unescape(value[delimiter:-delimiter])
+    for symbol, command in MATH_SYMBOLS.items():
+        value = value.replace(symbol, command + " ")
+    value = re.sub(r"[₀₁₂₃₄₅₆₇₈₉ₙ]+", lambda m: "_{" + m[0].translate(str.maketrans("₀₁₂₃₄₅₆₇₈₉ₙ", "0123456789n")) + "}", value)
+    value = re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+", lambda m: "^{" + m[0].translate(str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻", "0123456789+-")) + "}", value)
     value = re.sub(r"\\(?:left|right)\.", "", value)
     value = re.sub(r"\\(?:left|right|displaystyle|quad|qquad)(?![A-Za-z])", "", value)
-    value = re.sub(r"\\(?:rightarrow|to)(?![A-Za-z])", lambda _: r"\to", value)
+    for aliases, canonical in [("rightarrow|to", "to"), ("emptyset|varnothing", "varnothing"),
+                               ("ne|neq", "neq"), ("le|leq", "leq"), ("ge|geq", "geq")]:
+        value = re.sub(r"\\(?:" + aliases + r")(?![A-Za-z])", lambda _, c=canonical: "\\" + c, value)
     for spacing in (r"\,", r"\!", r"\;"):
         value = value.replace(spacing, "")
     value = re.sub(r"\s+", "", value)
-    value = re.sub(r"([_^])\{([A-Za-z0-9])\}", r"\1\2", value)
-    return value
+    return re.sub(r"([_^])\{([A-Za-z0-9])\}", r"\1\2", value)
+
+
+def recover_math_delimiters(originals, translated):
+    counts = Counter(math_identity(m.group()) for m in google_math_spans(translated))
+    wanted = Counter(math_identity(m.group()) for m in originals)
+    protected = [*CODE.finditer(translated), *google_math_spans(translated)]
+    edits = []
+    for match in originals:
+        key = math_identity(match.group())
+        missing = wanted[key] - counts[key]
+        if missing <= 0:
+            continue
+        raw = match.group()
+        delimiter = 2 if raw.startswith(("$$", r"\(", r"\[")) else 1
+        body = raw[delimiter:-delimiter].strip()
+        variants = [body] if re.search(r"\\[A-Za-z]+|[_^]", body) else []
+        variants += [symbol for symbol, command in MATH_SYMBOLS.items() if math_identity("$" + command + "$") == key]
+        for variant in variants:
+            found = [m for m in re.finditer(r"(?<![\w\\])" + re.escape(variant) + r"(?!\w)", translated)
+                     if not any(part.start() < m.end() and part.end() > m.start() for part in protected)
+                     and not any(left < m.end() and right > m.start() for left, right, _ in edits)]
+            if len(found) != missing:
+                continue
+            edits.extend((m.start(), m.end(), raw) for m in found)
+            counts[key] += missing
+            break
+    for left, right, raw in sorted(edits, reverse=True):
+        translated = translated[:left] + raw + translated[right:]
+    return translated
 
 
 def restore_google_math(original, translated):
-    # Translation may reorder symbols; match their contents, never their ordinal position.
+    originals = google_math_spans(original)
+    translated = recover_math_delimiters(originals, translated)
+    targets = google_math_spans(translated)
+    source_keys = [math_identity(m.group()) for m in originals]
+    target_keys = [math_identity(m.group()) for m in targets]
+    source_counts, target_counts = Counter(source_keys), Counter(target_keys)
     remaining = defaultdict(deque)
-    for match in google_math_spans(original):
-        remaining[math_identity(match.group())].append(match.group())
+    for index, key in enumerate(source_keys):
+        remaining[key].append(index)
+    matched = {}
+    for index, key in enumerate(target_keys):
+        # An excess duplicate can be a different variable Google changed into this one.
+        if source_counts[key] == target_counts[key] and remaining[key]:
+            matched[index] = remaining[key].popleft()
+    available = {i for i in range(len(originals)) if i not in matched.values()}
+    pending = {i for i in range(len(targets)) if i not in matched}
+    while available and pending:
+        if len(available) == len(pending) and len({source_keys[i] for i in available}) == 1:
+            for target, source in zip(sorted(pending), sorted(available)):
+                matched[target] = source
+            available.clear(); pending.clear()
+            break
+        if max(len(available), len(pending)) > 64:
+            break
+        scores = {(target, source): SequenceMatcher(None, target_keys[target], source_keys[source], autojunk=False).ratio()
+                  for target in pending for source in available}
+        found = None
+        for target in sorted(pending):
+            choices = sorted(((scores[target, source], source) for source in available), reverse=True)
+            score, source = choices[0]
+            row_margin = score - (choices[1][0] if len(choices) > 1 else 0)
+            column_margin = score - max((scores[other, source] for other in pending if other != target), default=0)
+            if score >= .55 and row_margin >= .12 and column_margin >= .12:
+                found = target, source
+                break
+        if found is None:
+            break
+        target, source = found
+        matched[target] = source; pending.remove(target); available.remove(source)
     pieces, cursor = [], 0
-    for match in google_math_spans(translated):
-        candidates = remaining[math_identity(match.group())]
-        if not candidates:
-            raise ValueError("Google 修改了公式，请重新翻译或切换 AI；原文未改变。")
-        pieces.extend([translated[cursor:match.start()], candidates.popleft()])
-        cursor = match.end()
-    if any(remaining.values()):
-        raise ValueError("Google 未完整保留公式，请重新翻译或切换 AI；原文未改变。")
+    for index, match in enumerate(targets):
+        formula = originals[matched[index]].group() if index in matched else "〔公式参见原文〕"
+        pieces.extend([translated[cursor:match.start()], formula]); cursor = match.end()
     pieces.append(translated[cursor:])
-    return "".join(pieces)
+    text = "".join(pieces)
+    warning = ""
+    if available or pending:
+        source_formulas = list(dict.fromkeys(originals[i].group() for i in sorted(available)))
+        if source_formulas:
+            text += "\n\n原文公式：\n\n" + "\n\n".join(source_formulas)
+        warning = "部分公式无法可靠对应，请对照原文公式。"
+    return {"translation": text, "formulaWarning": warning}
 
 
 def preview(book, source, text):
@@ -331,7 +416,8 @@ def run(book, prepared, config, job):
                   "sourceLanguage": prepared["sourceLanguage"], "targetLanguage": prepared["targetLanguage"]}
         if config["provider"] == "google":
             translated = google_translation.translate(text, prepared["sourceLanguage"], prepared["targetLanguage"], job["control"])
-            translated["translation"] = restore_google_math(original, translated["translation"])
+            restored = restore_google_math(original, translated["translation"])
+            translated["translation"] = restored["translation"]
             raw = json.dumps(translated)
         else:
             raw = ai_tutor.complete(config, [{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}],
@@ -340,7 +426,9 @@ def run(book, prepared, config, job):
         item = {**prepared, **decoded, "id": uuid.uuid4().hex, "createdAt": time.time(), "favorite": False, "model": config["model"], "provider": config["provider"]}
         if config["provider"] == "google":
             item["textVersion"] = GOOGLE_TEXT_VERSION
-        result = public(item, rendered=True)
+            if restored["formulaWarning"]:
+                item["formulaWarning"] = restored["formulaWarning"]
+        result = public(item, rendered=True, book=book)
         with LOCK:
             if job["status"] != "running":
                 return

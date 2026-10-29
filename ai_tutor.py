@@ -23,7 +23,7 @@ from book_import import text_chapter_index, position_label
 import service_settings
 import book_index
 import book_images
-from pdf_enhancement import page_enrichment
+from pdf_enhancement import page_enrichment, formula_image
 from pdf_selection import standalone_math
 
 LOCK = threading.RLock()
@@ -283,6 +283,26 @@ def source_preview(book, payload):
             markdown,
         )
     rendered = answer_html(markdown, source=True)
+    if book["type"] == "pdf" and "math-unavailable" in rendered:
+        root = etree.fromstring(("<div>" + rendered + "</div>").encode(), etree.HTMLParser(encoding="utf-8", no_network=True))
+        for node in root.xpath('//*[@class="math-unavailable"]')[:4]:
+            formula = node.get("data-formula", "")
+            original = None
+            for page in range(source["position"]["index"], (source["position"].get("endIndex") or source["position"]["index"]) + 1):
+                try:
+                    original = formula_image(book, page, formula)
+                except (OSError, ValueError, KeyError, RuntimeError):
+                    original = None
+                if original:
+                    break
+            if original:
+                tail = node.tail
+                node.clear()
+                node.tail = tail
+                node.set("class", "source-formula-image")
+                node.set("title", "原文公式：识别结果无法渲染")
+                etree.SubElement(node, "img", src=original["src"], width=str(original["width"]), alt="原文公式")
+        rendered = "".join(etree.tostring(node, encoding="unicode", method="html") for node in root.find("body"))
     if tables:
         root = etree.fromstring(("<div>" + rendered + "</div>").encode(), etree.HTMLParser(encoding="utf-8", no_network=True))
         for paragraph in root.xpath("//p"):
@@ -398,10 +418,12 @@ def _answer_html(text, pandoc, source, reader_format=None):
     body = root.find("body")
     for node in failed_math:
         if source:
+            formula = standalone_math("".join(node.itertext())) or ""
             tail = node.tail
             node.clear()
             node.tail = tail
             node.text = "〔公式暂无法显示，请查看原文〕"
+            node.set("data-formula", formula)
         else:
             node.tag = "code"
         node.set("class", "math-unavailable")

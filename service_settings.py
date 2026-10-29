@@ -88,6 +88,8 @@ def keychain(operation, account, value=None):
     except (OSError, ValueError, subprocess.SubprocessError):
         raise SettingsError("钥匙串暂时无法访问，请解锁后重试。") from None
     if response.get("error"):
+        if response["error"] == "invalid_request":
+            raise SettingsError("凭据类型与钥匙串组件版本不兼容，请更新页间后重试。")
         raise SettingsError("钥匙串未允许本次操作，请检查系统授权后重试。")
     return response.get("value")
 

@@ -120,14 +120,45 @@ class Translation(unittest.TestCase):
         self.assertIn("<math", job["result"]["html"])
         self.assertEqual(job["result"]["textVersion"], t.GOOGLE_TEXT_VERSION)
 
-    def test_google_validates_formula_content_not_positions(self):
+    def test_google_matches_formula_content_after_reordering_and_local_edits(self):
         original = r"A map $f:A\to B$ sends $a$ to $b$; $a$ is fixed."
         translated = r"$a$ 固定。映射 $f:A \rightarrow B$ 将 $a$ 映到 $b$。"
         fixed = t.restore_google_math(original, translated)
-        self.assertEqual(fixed, r"$a$ 固定。映射 $f:A\to B$ 将 $a$ 映到 $b$。")
-        for bad in [r"$a$ 固定，映射 $f:A\to B$ 将 $a$ 映到 $c$。", translated + " $b$", translated.replace("$b$", "")]:
-            with self.assertRaisesRegex(ValueError, "公式"):
-                t.restore_google_math(original, bad)
+        self.assertEqual(fixed["translation"], r"$a$ 固定。映射 $f:A\to B$ 将 $a$ 映到 $b$。")
+        self.assertFalse(fixed["formulaWarning"])
+        repaired = t.restore_google_math(original, translated.replace("$b$", "$c$"))
+        self.assertEqual(repaired["translation"], fixed["translation"])
+        self.assertFalse(repaired["formulaWarning"])
+        source = r"Compare $x^2+1$ and $y^3+2$."
+        edited = t.restore_google_math(source, "比较 $y³+2$ 与 $x²+1$。")
+        self.assertEqual(edited["translation"], r"比较 $y^3+2$ 与 $x^2+1$。")
+        self.assertFalse(edited["formulaWarning"])
+        source = r"Compare $\frac{a}{b}+2$ and $\sum_{i=1}^n i$."
+        edited = t.restore_google_math(source, r"比较 $\sum_{i=1}^n j$ 与 $\frac{a}{b}+7$。")
+        self.assertEqual(edited["translation"], r"比较 $\sum_{i=1}^n i$ 与 $\frac{a}{b}+2$。")
+        self.assertFalse(edited["formulaWarning"])
+
+    def test_google_repairs_lost_delimiters_but_does_not_rewrite_code(self):
+        source = r"An element $\sigma$ of $S_n$ acts by $\frac{x}{y}$."
+        fixed = t.restore_google_math(source, r"$Sₙ$ 中的元素 σ 按 \frac{x}{y} 作用。")
+        self.assertEqual(fixed["translation"], r"$S_n$ 中的元素 $\sigma$ 按 $\frac{x}{y}$ 作用。")
+        self.assertFalse(fixed["formulaWarning"])
+        code = t.restore_google_math(r"$\sigma$ is used. `\sigma` is code.", "σ 被使用。`\\sigma` 是代码。")
+        self.assertEqual(code["translation"], r"$\sigma$ 被使用。`\sigma` 是代码。")
+
+    def test_google_ambiguous_duplicate_does_not_swap_variables_or_hide_prose(self):
+        fixed = t.restore_google_math("Map $a$ to $b$.", "将 $b$ 映射到 $b$。")
+        self.assertTrue(fixed["formulaWarning"])
+        self.assertIn("将", fixed["translation"])
+        self.assertIn("映射到", fixed["translation"])
+        self.assertIn("原文公式", fixed["translation"])
+        self.assertIn("$a$", fixed["translation"])
+        self.assertIn("$b$", fixed["translation"])
+        self.assertNotIn("将 $b$ 映射到 $a$", fixed["translation"])
+        missing = t.restore_google_math("Apply $x+y$.", "应用以下规则。")
+        self.assertIn("应用以下规则", missing["translation"])
+        self.assertIn("$x+y$", missing["translation"])
+        self.assertTrue(missing["formulaWarning"])
 
     def test_old_automatic_history_is_removed_but_favorites_survive(self):
         with patch.object(t.ai_tutor, "complete", side_effect=self.provider):
@@ -171,7 +202,9 @@ class Translation(unittest.TestCase):
         self.assertEqual(sum("PBMZabcN0END" in part for part in parts), 1)
         with patch.object(t, "configuration", return_value={"provider": "google", "url": "test", "model": "Google 翻译"}), patch.object(t.google_translation, "translate", return_value={"translation": "dropped formula", "detectedLanguage": "en", "explanation": ""}):
             job = self.wait(t.start(self.book, self.payload)["id"])
-        self.assertEqual(job["status"], "error")
+        self.assertEqual(job["status"], "ready", job)
+        self.assertIn("formulaWarning", job["result"])
+        self.assertIn("$f:A\\to B$", job["result"]["translation"])
         self.assertEqual(t.history(self.book), [])
 
     def test_formula_loss_fails_and_never_saves(self):

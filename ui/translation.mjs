@@ -135,7 +135,12 @@ export function createTranslation({
     $("translation-provider").title = item.model || "";
     $("translation-star").innerHTML =
       `${item.favorite ? "取消收藏" : "收藏"}<kbd>⌘S</kbd>`;
-    message(item.storageWarning || item.translationWarning || "");
+    message(
+      item.storageWarning ||
+        item.formulaWarning ||
+        item.translationWarning ||
+        "",
+    );
   }
 
   async function translate(force = false) {

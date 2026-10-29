@@ -1,6 +1,7 @@
 """One OCR/TOC pipeline for every PDF; no textbook-specific page tables."""
 
 import collections
+import base64
 import json
 import re
 import subprocess
@@ -20,6 +21,7 @@ from book_import import ROOT, path_for
 
 from paths import CACHE as CACHE_ROOT, RUNTIME
 from storage import save
+from pdf_selection import MATH, align_spans, standalone_math, utf16
 
 OCR = RUNTIME / "ocr-page"
 CACHE = CACHE_ROOT / "ocr-v4"
@@ -297,6 +299,77 @@ def page_enrichment(book, page, end_page=None):
     data = enrichment_data(book)
     return [block for number in range(page, (end_page or page) + 1)
             for block in data.get(str(number), {}).get("blocks", [])]
+
+
+def formula_image(book, page, formula):
+    """Crop a damaged formula using saved coordinates; never start OCR or save a bitmap."""
+    if not formula.strip():
+        return None
+    compact = lambda text: re.sub(r"\s+", "", text)
+    for block in page_enrichment(book, page):
+        if block.get("type") not in {"text", "equation"}:
+            continue
+        text = block.get("text", "")
+        whole = standalone_math(text)
+        bbox = None
+        rows = set()
+        if compact(whole if whole is not None else text) == compact(formula) and block.get("bbox"):
+            bbox = block["bbox"]
+        else:
+            matches = [match for match in MATH.finditer(text) if compact(standalone_math(match.group()) or "") == compact(formula)]
+            if len(matches) != 1:
+                continue
+            data = saved_selection(book, page)
+            if not data or not data.get("lines"):
+                continue
+            match = matches[0]
+            left, right = utf16(text[:match.start()]), utf16(text[:match.end()])
+            group = next((group for group in align_spans(data["lines"], [block]) if group["text"] == text), None)
+            boxes = []
+            for entry in (group or {}).get("spans", []):
+                offsets = {index for index, pair in enumerate(entry.get("map", [])) if pair and pair[0] < right and pair[1] > left}
+                if not offsets:
+                    continue
+                line = data["lines"][entry["index"]]
+                segments = line.get("segments", [])
+                if "".join(segment.get("text", "") for segment in segments).rstrip() != line["text"].rstrip():
+                    continue
+                cursor = 0
+                for segment in segments:
+                    end = cursor + utf16(segment.get("text", ""))
+                    if any(index in offsets for index in range(cursor, end)):
+                        boxes.append([segment["bbox"][0], line["bbox"][1], segment["bbox"][2], line["bbox"][3]])
+                        rows.add((line["bbox"][1], line["bbox"][3]))
+                    cursor = end
+            if boxes:
+                bbox = [min(box[0] for box in boxes), min(box[1] for box in boxes), max(box[2] for box in boxes), max(box[3] for box in boxes)]
+        if not bbox or len(bbox) != 4 or not all(isinstance(value, (int, float)) and 0 <= value <= 1 for value in bbox):
+            continue
+        # OCR line bounds include overbars; extra top padding can expose the preceding line.
+        x0, y0, x1, y1 = max(0, bbox[0] - .003), bbox[1], min(1, bbox[2] + .003), min(1, bbox[3] + .002)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        with open_pdf(source_path(book)) as document, PDF_LOCK:
+            original = document[page - 1]
+            try:
+                width, height = original.get_width(), original.get_height()
+                scale = min(3, 1600 / ((x1 - x0) * width), math.sqrt(2_000_000 / ((x1 - x0) * (y1 - y0) * width * height)))
+                bitmap = original.render(scale=scale, crop=(x0 * width, (1 - y1) * height, (1 - x1) * width, y0 * height))
+                try:
+                    image = bitmap.to_pil().copy()
+                finally:
+                    bitmap.close()
+            finally:
+                original.close()
+        output = io.BytesIO()
+        try:
+            image.save(output, format="PNG")
+            display_width = round(image.width / image.height * 27 * len(rows)) if rows else min(800, round((x1 - x0) * width * 96 / 72))
+        finally:
+            image.close()
+        if output.tell() <= 512 * 1024:
+            return {"src": "data:image/png;base64," + base64.b64encode(output.getvalue()).decode(), "width": max(1, display_width)}
+    return None
 
 
 def apply_enrichment(data, book, page, mode):

@@ -3891,6 +3891,17 @@ body[data-mode="translation"] .translation-panel .aside-head > strong {
   padding: 12px 0 0;
   border-top: 1px solid var(--line);
 }
+.source-formula-image {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.source-formula-image img {
+  display: block;
+  max-width: none;
+  height: auto;
+}
 @media (prefers-reduced-motion: no-preference) {
   .translation-panel {
     animation: translation-appear 160ms ease-out;
@@ -3923,3 +3934,29 @@ body[data-mode="translation"] .translation-panel .aside-head > strong {
 .translation-explanation p {
   margin: 8px 0 0;
 }
+
+/* Discovery shares the library's paper, ink and spacing tokens. */
+.book-source-dialog { width:min(1000px,94vw); max-height:90vh; padding:32px; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:16px; overflow:auto; }
+.book-source-dialog header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+.book-source-dialog h1 { margin:4px 0 0; font-size:28px; }
+.book-source-dialog header small { color:var(--secondary); letter-spacing:.12em; }
+.book-source-dialog [data-close] { width:40px; height:40px; font-size:24px; }
+.book-source-dialog form { display:flex; gap:12px; align-items:end; margin:16px 0; }
+.book-source-dialog input:not([type=checkbox]), .book-source-dialog select { min-width:0; width:100%; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }
+.book-source-dialog [data-search] input { flex:1; }
+.book-source-dialog select { width:120px; }
+.book-source-dialog [data-search] button { white-space:nowrap; }
+.book-source-dialog [data-account] label { flex:1; }
+.book-source-dialog [data-status] { min-height:24px; color:var(--secondary); }
+.source-browser { display:grid; grid-template-columns:minmax(0,1fr) minmax(240px,36%); gap:32px; }
+.source-browser:has([data-detail][hidden]) { grid-template-columns:1fr; }
+.source-browser aside { border-left:1px solid var(--line); padding-left:24px; }
+.source-browser aside label { display:block; margin:24px 0 16px; }
+.source-result { display:flex; width:100%; gap:16px; padding:20px 4px; border-bottom:1px solid var(--line); text-align:left; align-items:center; }
+.source-result > span:nth-child(2) { flex:1; min-width:0; }
+.source-result strong, .source-result small { display:block; overflow-wrap:anywhere; }
+.source-result small { margin-top:8px; color:var(--secondary); }
+.source-format { display:inline-flex; min-width:56px; padding:16px 8px; justify-content:center; background:var(--soft); color:var(--accent); font-size:12px; text-transform:uppercase; border-radius:8px; }
+.source-invitation { padding:48px 0; color:var(--secondary); }
+.source-description { white-space:pre-wrap; font-size:14px; line-height:1.8; }
+@media(max-width:700px) { .book-source-dialog { padding:20px; } .source-browser { grid-template-columns:1fr; } .source-browser aside { border-left:0; padding-left:0; border-top:1px solid var(--line); padding-top:24px; } .book-source-dialog [data-account] { flex-direction:column; align-items:stretch; } }

@@ -23,3 +23,7 @@ Georgia 与系统字体使用操作系统已有字体，不随仓库分发。演
 Python 依赖由 `requirements.txt` 声明，包括 lxml、pypdf、pypdfium2、Pillow、mobi、standard-imghdr、python-docx 和 ReportLab。Node.js、Pandoc、Tesseract、Swift 工具链由运行环境提供。请参照这些项目自身的许可证；本仓库没有将它们的授权统一替换为项目许可证。
 
 MinerU 没有作为源码副本分发，也没有内置 API 凭据或商业教材样本。
+
+## Optional book source component
+
+The in-app discovery client connects over MCP stdio to [rookslog/zlibrary-mcp](https://github.com/rookslog/zlibrary-mcp), MIT licensed. The optional installer pins commit `496a9290369e28c797af49caad832f7d542739f6`; upstream source and its license remain in the local component directory. Accounts and provider quotas belong to the user.

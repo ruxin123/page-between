@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.47" />
+    <link rel="stylesheet" href="/layout.css?v=2.48" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -145,6 +145,16 @@
               文档解析
             </button>
             <button
+              id="tab-source"
+              role="tab"
+              aria-controls="settings-source"
+              aria-selected="false"
+              tabindex="-1"
+              data-settings-tab="source"
+            >
+              书源账号
+            </button>
+            <button
               id="tab-data"
               role="tab"
               aria-controls="settings-data"
@@ -153,6 +163,19 @@
               data-settings-tab="data"
             >
               书库与数据
+            </button>
+          </div>
+          <div
+            id="settings-source"
+            class="service-panel"
+            role="tabpanel"
+            aria-labelledby="tab-source"
+            hidden
+          >
+            <h2>Z-Library</h2>
+            <p>配置找书账号与搜索组件。</p>
+            <button id="book-source-settings" class="primary-button">
+              管理书源账号
             </button>
           </div>
           <div
@@ -1178,6 +1201,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.47"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.48"></script>
   </body>
 </html>

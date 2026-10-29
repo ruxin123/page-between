@@ -256,6 +256,23 @@ class Tutor(unittest.TestCase):
             self.assertTrue(result.xpath('//annotation[contains(text(), "varnothing")]'))
             self.assertEqual(len(result.xpath("//table//tr")), 3)
 
+    def test_damaged_source_formula_uses_ephemeral_original_image_without_changing_copy(self):
+        quote = r"Before $x+\overline{y$ after."
+        payload = {"quote": quote, "position": {"index": 1}}
+        before = json.dumps(payload)
+        original = {"src": "data:image/png;base64,original", "width": 120}
+        with patch.object(tutor, "page_enrichment", return_value=[]), patch.object(tutor, "formula_image", return_value=original) as crop, patch.object(tutor.book_images, "save_image", side_effect=AssertionError("No bitmap cache")):
+            result = html.fromstring(tutor.source_preview({**self.book, "type": "pdf", "pages": 1}, payload))
+        self.assertEqual(json.dumps(payload), before)
+        self.assertEqual(crop.call_args.args[2], r"x+\overline{y")
+        self.assertEqual(result.xpath('//img/@src'), [original["src"]])
+        self.assertIn("Before", result.text_content())
+        self.assertIn("after.", result.text_content())
+        self.assertFalse(result.xpath('//*[@class="math-unavailable"]'))
+        with patch.object(tutor, "page_enrichment", return_value=[]), patch.object(tutor, "formula_image", side_effect=OSError("missing PDF")):
+            fallback = html.fromstring(tutor.source_preview({**self.book, "type": "pdf", "pages": 1}, payload))
+        self.assertTrue(fallback.xpath('//*[@class="math-unavailable"]'))
+
     def test_source_preview_bounds_and_untrusted_markup(self):
         for quote in (None, {}, "", "x" * 6001):
             with self.assertRaises(tutor.TutorError):

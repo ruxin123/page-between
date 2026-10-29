@@ -9,7 +9,7 @@ func run() throws -> [String: Any] {
           let operation = request["operation"],
           ["get", "set", "delete"].contains(operation),
           let account = request["account"],
-          account.range(of: "^(ai|mineru):[a-f0-9]{32}$", options: .regularExpression) != nil,
+          account.range(of: "^(ai|mineru|translation|book-source):[a-f0-9]{32}$", options: .regularExpression) != nil,
           let profile = request["profile"], ["personal", "demo"].contains(profile)
     else { return ["error": "invalid_request"] }
     let query: [String: Any] = [

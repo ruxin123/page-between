@@ -49,6 +49,52 @@ import book_index
 import epub_export
 import library_data
 import chapter_edit
+import book_source
+
+SOURCE_TASKS = {}
+SOURCE_LOCK = threading.Lock()
+
+
+def source_download(payload):
+    ref = book_source.bounded(payload.get("ref"), 1024)
+    enabled = payload.get("parse", True)
+    if type(enabled) is not bool:
+        raise ValueError("解析选项无效。")
+    with SOURCE_LOCK:
+        if any(task["status"] in {"downloading", "importing"} for task in SOURCE_TASKS.values()):
+            raise ValueError("已有下载正在进行。")
+        SOURCE_TASKS.clear()
+        ident = uuid.uuid4().hex
+        task = {"id": ident, "status":"downloading"}
+        SOURCE_TASKS[ident] = task
+    def run():
+        folder = book_source.DOWNLOADS / ident
+        try:
+            source = book_source.acquire(ref, folder)
+            if source.suffix.lower() not in SUPPORTED:
+                raise ValueError("页间暂不支持这个下载格式，请选择其他版本。")
+            task["status"] = "importing"
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            with IMPORT_LOCKS[digest]:
+                book = next((b for b in library()["books"] if b.get("sourceHash") == digest), None)
+                duplicate = book is not None
+                if book is None:
+                    book = import_book(source, enabled=enabled)
+                    with MUTEX:
+                        collection = library()
+                        collection["books"].append(book)
+                        save(DATA / "library.json", collection)
+                    if book["parseEnabled"]:
+                        start_job(book["id"])
+                task.update(status="ready", book=book, duplicate=duplicate)
+        except (ValueError, OSError) as error:
+            task.update(status="error", error=str(error) if isinstance(error, ValueError) else "下载导入未完成，请重试。")
+        except Exception:
+            task.update(status="error", error="导入未完成，请选择其他格式或重试。")
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+    threading.Thread(target=run, daemon=True).start()
+    return dict(task)
 
 MUTEX = threading.RLock()
 WORKERS = ThreadPoolExecutor(max_workers=2)
@@ -509,6 +555,15 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({"ready": True, "desktop": APP_MODE})
             if not self.authenticated():
                 return self.json({"error": "请通过页间 App 打开此阅读空间。"}, 401)
+            if route.path == "/api/book-source/settings":
+                return self.json(book_source.settings())
+            if route.path == "/api/book-source/component":
+                return self.json(dict(book_source.INSTALL))
+            if route.path == "/api/book-source/task":
+                task = SOURCE_TASKS.get(query.get("id", [""])[0])
+                if not task:
+                    raise ValueError("下载任务已过期。")
+                return self.json(dict(task))
             if route.path == "/api/translation/status":
                 return self.json(translation.status())
             if route.path == "/api/ai/status":
@@ -759,6 +814,14 @@ class Handler(SimpleHTTPRequestHandler):
                     else 2 * 1024 * 1024
                 )
             )
+            if route.path == "/api/book-source/settings":
+                return self.json(book_source.configure(payload))
+            if route.path == "/api/book-source/install":
+                return self.json(book_source.install_component())
+            if route.path == "/api/book-source/query":
+                return self.json(book_source.call(payload))
+            if route.path == "/api/book-source/download":
+                return self.json(source_download(payload))
             if re.fullmatch(
                 r"/api/books/[A-Za-z0-9][A-Za-z0-9_-]{0,80}/chapters", route.path
             ):

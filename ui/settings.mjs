@@ -118,7 +118,11 @@ export function createServiceSettings({ document, api, post, toast }) {
     }
   }
   async function show(section = "reading") {
-    if (!["reading", "ai", "translation", "mineru", "data"].includes(section))
+    if (
+      !["reading", "ai", "translation", "mineru", "data", "source"].includes(
+        section,
+      )
+    )
       section = "reading";
     for (const tab of tabs) {
       const selected = tab.dataset.settingsTab === section;
@@ -126,7 +130,7 @@ export function createServiceSettings({ document, api, post, toast }) {
       tab.tabIndex = selected ? 0 : -1;
       $("settings-" + tab.dataset.settingsTab).hidden = !selected;
     }
-    if (["reading", "data"].includes(section) || saved) return;
+    if (["reading", "data", "source"].includes(section) || saved) return;
     if (!loading)
       loading = (async () => {
         $("settings-load-status").textContent = "读取设置…";

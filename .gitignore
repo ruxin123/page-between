@@ -15,6 +15,7 @@
 !/layout.css
 !/epub-reader.css
 !/server.py
+!/book_source.py
 !/google_translation.py
 !/translation.py
 !/cache_policy.py
@@ -64,6 +65,7 @@
 !/tests/jobs.test.mjs
 !/tests/feedback.test.mjs
 !/tests/translation_test.py
+!/tests/book_source_test.py
 !/tests/cache_policy_test.py
 !/tests/ai_tutor_test.py
 !/tests/settings_test.py

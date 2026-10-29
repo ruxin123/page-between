@@ -1,12 +1,41 @@
 import sys
+import base64
+import io
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pdf_selection import align_spans, character_map, standalone_math, utf16
 
 
 class Selection(unittest.TestCase):
+    def test_damaged_formula_crop_uses_saved_character_geometry_and_never_recognizes_again(self):
+        from reportlab.pdfgen import canvas
+        from PIL import Image
+        import pdf_enhancement as enhancement
+
+        with tempfile.TemporaryDirectory() as temporary:
+            pdf = Path(temporary) / "original.pdf"
+            output = canvas.Canvas(str(pdf), pagesize=(240, 320), invariant=1)
+            output.setFont("Courier", 12)
+            output.drawString(24, 245, "Before x+y after")
+            output.line(88.8, 256, 96, 256)
+            output.save()
+            raw = "Before x+y after"
+            line = {"text": raw, "bbox": [.1, .195, .58, .245], "segments": [
+                {"text": char, "bbox": [.1 + i * .03, .2, .1 + (i+1) * .03, .24]} for i, char in enumerate(raw)]}
+            block = {"type": "text", "text": r"Before $x+\overline{y$ after", "bbox": [.1, .18, .9, .26]}
+            with patch.object(enhancement, "source_path", return_value=pdf), patch.object(enhancement, "page_enrichment", return_value=[block]), patch.object(enhancement, "saved_selection", return_value={"lines": [line]}), patch.object(enhancement, "recognize_page", side_effect=AssertionError("Must not start OCR")):
+                cropped = enhancement.formula_image({"id": "original"}, 1, r"x+\overline{y")
+            self.assertTrue(cropped["src"].startswith("data:image/png;base64,"))
+            with Image.open(io.BytesIO(base64.b64decode(cropped["src"].split(",")[1]))) as image:
+                self.assertGreater(image.width, 20)
+                self.assertGreater(image.height, 10)
+                self.assertLess(min(image.convert("L").getdata()), 100)
+            self.assertEqual([path.name for path in Path(temporary).iterdir()], ["original.pdf"])
+
     def test_unclosed_escape_run_is_not_a_complete_formula(self):
         self.assertIsNone(standalone_math("$" + "\\" * 4000))
 

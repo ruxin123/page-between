@@ -40,4 +40,16 @@ final class ServicesTests: XCTestCase {
         XCTAssertThrowsError(try ServiceRequests.translated(Data(#"{"sentences":[]}"#.utf8)))
     }
     func testCurrencyIsNotTreatedAsMath() { XCTAssertTrue(MathText.spans("Prices range from $50 to $70.").isEmpty) }
+
+    func testLongTranslationChunksPreserveFormulaAndUnicodeBoundaries() {
+        let formula = "$" + String(repeating: "x+", count: 2100) + "y$"
+        let text = String(repeating: "A paragraph 🪶 with words. ", count: 170) + formula + String(repeating: " Next paragraph 🪶. ", count: 220)
+        let chunks = ServiceRequests.translationChunks(text)
+        XCTAssertEqual(chunks.joined(), text)
+        XCTAssertTrue(chunks.contains(formula))
+        XCTAssertEqual(chunks.flatMap { MathText.spans($0).map(\.raw) }, [formula])
+        XCTAssertTrue(chunks.allSatisfy { ($0 as NSString).length <= 4000 || $0 == formula })
+        XCTAssertEqual(ServiceRequests.translationChunks(""), [])
+        XCTAssertEqual(ServiceRequests.targetLanguage("这是正文 $x$"), "en")
+    }
 }

@@ -32,11 +32,32 @@ public enum ServiceRequests {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["model": model, "messages": messages, "stream": false])
         return request
     }
-    public static func google(_ text: String) throws -> URLRequest {
+    public static func translationChunks(_ text: String, maximum: Int = 4000) -> [String] {
+        let source = text as NSString, formulas = MathText.spans(text)
+        let limit = max(16, maximum)
+        var start = 0, chunks: [String] = []
+        while start < source.length {
+            var end = min(start + limit, source.length)
+            if end < source.length {
+                let whitespace = source.rangeOfCharacter(from: .whitespacesAndNewlines, options: .backwards, range: NSRange(location: start + limit / 2, length: limit - limit / 2))
+                if whitespace.location != NSNotFound { end = whitespace.location }
+                if let formula = formulas.first(where: { $0.range.location < end && NSMaxRange($0.range) > end }) {
+                    end = formula.range.location > start ? formula.range.location : NSMaxRange(formula.range)
+                }
+                if (0xD800...0xDBFF).contains(source.character(at: end - 1)) { end -= 1 }
+            }
+            chunks.append(source.substring(with: NSRange(location: start, length: end - start)))
+            start = end
+        }
+        return chunks
+    }
+    public static func targetLanguage(_ text: String) -> String {
+        MathText.prose(text).range(of: #"[\u3400-\u9fff]"#, options: .regularExpression) == nil ? "zh-CN" : "en"
+    }
+    public static func google(_ text: String, target: String? = nil) throws -> URLRequest {
         guard text.count <= 12000 else { throw ServiceRequestFailure.selectionTooLong }
-        let target = MathText.prose(text).range(of: #"[\u3400-\u9fff]"#, options: .regularExpression) == nil ? "zh-CN" : "en"
         var components = URLComponents(string: "https://translate.google.com/translate_a/single")!
-        components.queryItems = ["client": "gtx", "sl": "auto", "tl": target, "dt": "t", "dj": "1"].map { URLQueryItem(name: $0.key, value: $0.value) }
+        components.queryItems = ["client": "gtx", "sl": "auto", "tl": target ?? targetLanguage(text), "dt": "t", "dj": "1"].map { URLQueryItem(name: $0.key, value: $0.value) }
         var request = URLRequest(url: components.url!); request.httpMethod = "POST"; request.timeoutInterval = 35
         request.setValue("application/x-www-form-urlencoded;charset=UTF-8", forHTTPHeaderField: "Content-Type")
         var form = URLComponents(); form.queryItems = [URLQueryItem(name: "q", value: text)]

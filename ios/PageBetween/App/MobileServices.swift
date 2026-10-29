@@ -78,9 +78,20 @@ private let readingNetwork: URLSession = {
         return try ServiceRequests.answer(data)
     }
     func google(_ text: String) async throws -> String {
-        let request = try ServiceRequests.google(text)
-        let (data, response) = try await readingNetwork.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw ServiceError.message("Google 翻译暂不可用，请重试或切换 AI。") }
-        return try ServiceRequests.translated(data)
+        guard text.count <= 12000 else { throw ServiceRequestFailure.selectionTooLong }
+        let target = ServiceRequests.targetLanguage(text)
+        var result = ""
+        for chunk in ServiceRequests.translationChunks(text) {
+            try Task.checkCancellation()
+            let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || MathText.spans(trimmed).first?.raw == trimmed { result += chunk; continue }
+            let leading = String(chunk.prefix(while: { $0.isWhitespace }))
+            let trailing = String(chunk.reversed().prefix(while: { $0.isWhitespace }).reversed())
+            let request = try ServiceRequests.google(trimmed, target: target)
+            let (data, response) = try await readingNetwork.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw ServiceError.message("Google 翻译暂不可用，请重试或切换 AI。") }
+            result += leading + (try ServiceRequests.translated(data)).trimmingCharacters(in: .whitespacesAndNewlines) + trailing
+        }
+        return result
     }
 }

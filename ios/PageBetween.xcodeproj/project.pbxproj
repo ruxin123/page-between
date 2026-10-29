@@ -1,0 +1,47 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 77;
+ objects = {
+ A10000000000000000000001 = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2700; TargetAttributes = {A20000000000000000000001 = {CreatedOnToolsVersion = 27.0; }; }; }; buildConfigurationList = A50000000000000000000001; compatibilityVersion = "Xcode 16.0"; developmentRegion = "zh-Hans"; knownRegions = (en, Base, "zh-Hans"); mainGroup = A30000000000000000000001; minimizedProjectReferenceProxies = 1; preferredProjectObjectVersion = 77; productRefGroup = A30000000000000000000003; projectDirPath = ""; projectRoot = ""; targets = (A20000000000000000000001,C20000000000000000000001); packageReferences = (A70000000000000000000001,A70000000000000000000002); };
+ A20000000000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = A50000000000000000000002; buildPhases = (A40000000000000000000001,A40000000000000000000002,A40000000000000000000003); buildRules = (); dependencies = (); fileSystemSynchronizedGroups = (A30000000000000000000002); name = PageBetween; packageProductDependencies = (A80000000000000000000001,A80000000000000000000002,A80000000000000000000003,A80000000000000000000004); productName = PageBetween; productReference = A60000000000000000000001; productType = "com.apple.product-type.application"; };
+ A30000000000000000000001 = {isa = PBXGroup; children = (A30000000000000000000002,C30000000000000000000001,A30000000000000000000003); sourceTree = "<group>"; };
+ A30000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (A30000000000000000000004); explicitFileTypes = {}; explicitFolders = (Web); path = PageBetween; sourceTree = "<group>"; };
+ A30000000000000000000003 = {isa = PBXGroup; children = (A60000000000000000000001,C60000000000000000000001); name = Products; sourceTree = "<group>"; };
+ A30000000000000000000004 = {isa = PBXFileSystemSynchronizedBuildFileExceptionSet; membershipExceptions = (Info.plist); target = A20000000000000000000001; };
+ A40000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+ A40000000000000000000002 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A90000000000000000000001,A90000000000000000000002,A90000000000000000000003,A90000000000000000000004); runOnlyForDeploymentPostprocessing = 0; };
+ A40000000000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+ A50000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (B10000000000000000000001,B10000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+ A50000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (B20000000000000000000001,B20000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+ A60000000000000000000001 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PageBetween.app; sourceTree = BUILT_PRODUCTS_DIR; };
+ A70000000000000000000001 = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/readium/swift-toolkit.git"; requirement = {kind = exactVersion; version = 3.11.1; }; };
+ A70000000000000000000002 = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/readium/ZIPFoundation.git"; requirement = {kind = exactVersion; version = 3.0.1; }; };
+ A80000000000000000000001 = {isa = XCSwiftPackageProductDependency; package = A70000000000000000000001; productName = ReadiumShared; };
+ A80000000000000000000002 = {isa = XCSwiftPackageProductDependency; package = A70000000000000000000001; productName = ReadiumStreamer; };
+ A80000000000000000000003 = {isa = XCSwiftPackageProductDependency; package = A70000000000000000000001; productName = ReadiumNavigator; };
+ A80000000000000000000004 = {isa = XCSwiftPackageProductDependency; package = A70000000000000000000002; productName = ReadiumZIPFoundation; };
+ A90000000000000000000001 = {isa = PBXBuildFile; productRef = A80000000000000000000001; };
+ A90000000000000000000002 = {isa = PBXBuildFile; productRef = A80000000000000000000002; };
+ A90000000000000000000003 = {isa = PBXBuildFile; productRef = A80000000000000000000003; };
+ A90000000000000000000004 = {isa = PBXBuildFile; productRef = A80000000000000000000004; };
+ B10000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; DEBUG_INFORMATION_FORMAT = dwarf; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; name = Debug; };
+ B10000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; SWIFT_COMPILATION_MODE = wholemodule; }; name = Release; };
+ B20000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = PageBetween/Info.plist; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = local.pagebetween.ios; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; TARGETED_DEVICE_FAMILY = 1; }; name = Debug; };
+ B20000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = PageBetween/Info.plist; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = local.pagebetween.ios; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; TARGETED_DEVICE_FAMILY = 1; }; name = Release; };
+
+ C20000000000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = C50000000000000000000001; buildPhases = (C40000000000000000000001,C40000000000000000000002,C40000000000000000000003); buildRules = (); dependencies = (C90000000000000000000002); fileSystemSynchronizedGroups = (C30000000000000000000001); name = PageBetweenUITests; productName = PageBetweenUITests; productReference = C60000000000000000000001; productType = "com.apple.product-type.bundle.ui-testing"; };
+ C30000000000000000000001 = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Tests/UI; sourceTree = "<group>"; };
+ C40000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+ C40000000000000000000002 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+ C40000000000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+ C50000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (C70000000000000000000001,C70000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+ C60000000000000000000001 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PageBetweenUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+ C70000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = local.pagebetween.ios.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = 1; TEST_TARGET_NAME = PageBetween; }; name = Debug; };
+ C70000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = local.pagebetween.ios.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = 1; TEST_TARGET_NAME = PageBetween; }; name = Release; };
+ C90000000000000000000001 = {isa = PBXContainerItemProxy; containerPortal = A10000000000000000000001; proxyType = 1; remoteGlobalIDString = A20000000000000000000001; remoteInfo = PageBetween; };
+ C90000000000000000000002 = {isa = PBXTargetDependency; target = A20000000000000000000001; targetProxy = C90000000000000000000001; };
+ };
+ rootObject = A10000000000000000000001;
+}

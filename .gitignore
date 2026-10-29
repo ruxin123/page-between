@@ -39,6 +39,14 @@
 !/indexing-flow.drawio
 !/indexing-flow.drawio.svg
 !/native/
+!/ios/
+!/.github/
+/ios/.build/
+/ios/build/
+/ios/DerivedData/
+/ios/**/xcuserdata/
+/ios/*.ipa
+/ios/*.xcarchive/
 /native/*
 !/native/OCR.swift
 !/native/Translation.swift

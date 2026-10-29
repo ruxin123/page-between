@@ -107,6 +107,8 @@ class ReviewMaterial(unittest.TestCase):
         )
         self.assertTrue(findings("script.py", ("ghp_" + "a" * 36).encode()))
         self.assertFalse(findings("docs/screenshots/library.png", b"\x89PNG"))
+        self.assertFalse(findings("ios/PageBetween/Assets.xcassets/AppIcon.appiconset/AppIcon.png", b"\x89PNG"))
+        self.assertTrue(findings("ios/private-book.png", b"\x89PNG"))
         self.assertFalse(findings("core.mjs", b'export const title="Example";'))
 
 

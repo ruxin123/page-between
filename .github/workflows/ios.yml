@@ -1,0 +1,67 @@
+name: iPhone build and reading flow
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+permissions:
+  contents: read
+concurrency:
+  group: iphone-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  iphone:
+    runs-on: macos-15-arm64
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Core tests
+        run: swift test --package-path ios --scratch-path "$RUNNER_TEMP/CoreTests"
+      - name: Choose iPhone simulator
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          runtimes = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'runtimes', '-j']))['runtimes']
+          usable = [r for r in runtimes if r.get('isAvailable') and r['identifier'].startswith('com.apple.CoreSimulator.SimRuntime.iOS-')]
+          runtime = max(usable, key=lambda r: tuple(int(n) for n in r['version'].split('.')))
+          device = subprocess.check_output(['xcrun', 'simctl', 'create', 'Page Between CI', 'com.apple.CoreSimulator.SimDeviceType.iPhone-16', runtime['identifier']], text=True).strip()
+          with open(os.environ['GITHUB_ENV'], 'a') as out: out.write('IPHONE_SIMULATOR=' + device + '\n')
+          subprocess.run(['xcrun', 'simctl', 'boot', device], check=True)
+          subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True)
+          PY
+      - name: Build and run on iPhone
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/PageBetween.xcodeproj -scheme PageBetween \
+            -destination "platform=iOS Simulator,id=$IPHONE_SIMULATOR" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/iPhone.xcresult" \
+            CODE_SIGNING_ALLOWED=NO | tee "$RUNNER_TEMP/iphone-build.log"
+      - name: Check packaged offline resources
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          app = Path(os.environ['RUNNER_TEMP']) / 'DerivedData/Build/Products/Debug-iphonesimulator/PageBetween.app'
+          for name in ['PageBetween', 'Info.plist', 'Web/markdown.html', 'Web/markdown.js', 'Web/selection.js', 'Web/vendor/katex.min.js', 'Web/vendor/marked.umd.js', 'Web/vendor/purify.min.js', 'PrivacyInfo.xcprivacy']:
+              assert (app / name).is_file(), 'Missing packaged resource: ' + name
+          assert len(list((app / 'Web/vendor/fonts').glob('*.woff2'))) > 10
+          PY
+      - name: Export anonymous UI screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/iPhone.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/iPhone.xcresult" --output-path "$RUNNER_TEMP/iphone-screenshots"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: iphone-results
+          path: |
+            ${{ runner.temp }}/iphone-build.log
+            ${{ runner.temp }}/iPhone.xcresult
+            ${{ runner.temp }}/iphone-screenshots
+          retention-days: 7

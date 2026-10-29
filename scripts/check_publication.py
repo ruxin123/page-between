@@ -56,7 +56,7 @@ def findings(name, content, denied=()):
         ".jpeg",
         ".gif",
         ".webp",
-    } and not name.startswith("docs/screenshots/"):
+    } and not name.startswith("docs/screenshots/") and name != "ios/PageBetween/Assets.xcassets/AppIcon.appiconset/AppIcon.png":
         issues.append("screenshot outside the reviewed gallery")
     if name.startswith(("assets/fonts/", "assets/vendor/")):
         return issues

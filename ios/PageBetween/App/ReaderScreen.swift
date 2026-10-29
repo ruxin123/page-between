@@ -1,0 +1,254 @@
+import SwiftUI
+import ReadiumShared
+import ReadiumNavigator
+import WebKit
+
+struct AssistantSelection: Identifiable {
+    let id = UUID()
+    let book: UUID
+    let quote: String
+    let locator: String
+    let translate: Bool
+}
+
+@MainActor final class MobileReader: NSObject, ObservableObject, EPUBNavigatorDelegate, PDFNavigatorDelegate {
+    @Published var controller: UIViewController?
+    @Published var publication: Publication?
+    @Published var contents: [ReadiumShared.Link] = []
+    @Published var chapter = ""
+    @Published var progress = 0.0
+    @Published var failure: String?
+    @Published var selection: AssistantSelection?
+    @Published var lastSelection: AssistantSelection?
+    @Published var fontScale = 100.0
+    @Published var fontFamily = ""
+    @Published var scroll = false
+    @Published var theme = "paper"
+    @Published var history: [Locator] = []
+    @Published var chromeVisible = true
+    var navigator: Navigator?
+    let store: LibraryStore
+    let book: MobileBook
+    private var saveTask: Task<Void, Never>?
+    private var loaded = false
+    private var directionalNavigation: DirectionalNavigationAdapter?
+
+    init(book: MobileBook, store: LibraryStore) {
+        self.book = book; self.store = store
+        super.init()
+        let defaults = UserDefaults.standard
+        fontScale = defaults.object(forKey: "reading.fontScale") == nil ? 100 : min(200, max(70, defaults.double(forKey: "reading.fontScale")))
+        fontFamily = defaults.string(forKey: "reading.fontFamily") ?? ""
+        theme = defaults.string(forKey: "reading.theme") ?? "paper"
+        let key = book.format == "pdf" ? "reading.pdfScroll" : "reading.textScroll"
+        scroll = defaults.object(forKey: key) == nil ? book.format == "pdf" : defaults.bool(forKey: key)
+    }
+    func load() async {
+        guard !loaded else { return }; loaded = true
+        do {
+            let publication = try await store.open(book)
+            self.publication = publication
+            contents = (try? await publication.tableOfContents().get()) ?? []
+            let locator = try book.locator.flatMap { try Locator(jsonString: $0) }
+            let actions = EditingAction.defaultActions + [EditingAction(title: "提问", action: #selector(ReaderHost.askSelection)), EditingAction(title: "翻译", action: #selector(ReaderHost.translateSelection))]
+            let view: UIViewController & Navigator
+            if publication.conforms(to: .pdf) {
+                view = try PDFNavigatorViewController(publication: publication, initialLocation: locator, config: .init(preferences: PDFPreferences(scroll: scroll, spread: .never), editingActions: actions), delegate: self)
+            } else if publication.conforms(to: .epub) || publication.conforms(to: .divina) {
+                let epub = try EPUBNavigatorViewController(publication: publication, initialLocation: locator, config: .init(preferences: preferences(), editingActions: actions))
+                epub.delegate = self; view = epub
+            } else { throw LibraryFailure.unsupported }
+            navigator = view
+            if let visual = view as? VisualNavigator {
+                directionalNavigation = DirectionalNavigationAdapter(pointerPolicy: .init(types: [.touch]), animatedTransition: true)
+                directionalNavigation?.bind(to: visual)
+                visual.addObserver(.tap { [weak self] _ in
+                    guard let self, (self.navigator as? SelectableNavigator)?.currentSelection == nil else { return false }
+                    withAnimation(.easeOut(duration: 0.2)) { self.chromeVisible.toggle() }
+                    return true
+                })
+            }
+            controller = ReaderHost(navigator: view, reader: self)
+            chapter = book.chapter
+            progress = book.progress
+        } catch { failure = error.localizedDescription }
+    }
+    private func preferences() -> EPUBPreferences {
+        EPUBPreferences(columnCount: .one, fontFamily: fontFamily.isEmpty ? nil : FontFamily(rawValue: fontFamily), fontSize: fontScale, lineHeight: 1.85, pageMargins: 1.0, publisherStyles: true, scroll: scroll, theme: theme == "night" ? .dark : theme == "sepia" ? .sepia : .light)
+    }
+    func apply() {
+        let defaults = UserDefaults.standard
+        defaults.set(fontScale, forKey: "reading.fontScale"); defaults.set(fontFamily, forKey: "reading.fontFamily"); defaults.set(theme, forKey: "reading.theme"); defaults.set(scroll, forKey: book.format == "pdf" ? "reading.pdfScroll" : "reading.textScroll")
+        (navigator as? EPUBNavigatorViewController)?.submitPreferences(preferences())
+        (navigator as? PDFNavigatorViewController)?.submitPreferences(PDFPreferences(scroll: scroll, spread: .never))
+    }
+    func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        chapter = locator.title ?? book.title
+        progress = locator.locations.totalProgression ?? locator.locations.progression ?? 0
+        saveTask?.cancel()
+        saveTask = Task { try? await Task.sleep(for: .milliseconds(350)); guard !Task.isCancelled else { return }; await flush() }
+    }
+    func navigator(_ navigator: Navigator, presentError error: NavigatorError) { failure = error.localizedDescription }
+    func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {
+        if let url = Bundle.main.url(forResource: "selection", withExtension: "js", subdirectory: "Web"), let script = try? String(contentsOf: url, encoding: .utf8) {
+            userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        }
+    }
+    func go(_ link: ReadiumShared.Link) async {
+        if let current = navigator?.currentLocation { history.append(current) }
+        if await navigator?.go(to: link) != true { _ = history.popLast(); failure = "暂时无法前往该章节。" }
+    }
+    func back() async { if let previous = history.popLast() { _ = await navigator?.go(to: previous) } }
+    func goSource(_ raw: String) async {
+        do {
+            let destination = try Locator(jsonString: raw)
+            if let current = navigator?.currentLocation { history.append(current) }
+            if await navigator?.go(to: destination) != true { _ = history.popLast(); failure = "原文暂时无法定位。" }
+        } catch { failure = error.localizedDescription }
+    }
+    func bookmark() async {
+        guard let locator = navigator?.currentLocation, let raw = try? locator.jsonString() else { return }
+        do { try await store.repository.toggleBookmark(book.id, title: chapter.isEmpty ? book.title : chapter, locator: raw); await store.refresh() }
+        catch { failure = error.localizedDescription }
+    }
+    func flush() async {
+        guard let locator = navigator?.currentLocation, let raw = try? locator.jsonString() else { return }
+        do { try await store.repository.saveLocation(book.id, locator: raw, progress: progress, chapter: chapter); await store.refresh() }
+        catch { failure = error.localizedDescription }
+    }
+    func ask(translate: Bool) {
+        guard let selected = (navigator as? SelectableNavigator)?.currentSelection, let text = selected.locator.text.highlight, !text.isEmpty, let locator = try? selected.locator.jsonString() else { failure = "请先长按选择一段文字。"; return }
+        Task {
+            var quote = text
+            if let epub = navigator as? EPUBNavigatorViewController,
+               case .success(let value) = await epub.evaluateJavaScript("window.pageBetweenSelectedSource?.()"), let source = value as? String, !source.isEmpty { quote = source }
+            guard quote.count <= 12000 else { failure = "选段过长，请缩小范围。"; return }
+            selection = AssistantSelection(book: book.id, quote: quote, locator: locator, translate: translate)
+            lastSelection = selection
+        }
+    }
+}
+
+@MainActor final class ReaderHost: UIViewController {
+    let navigator: UIViewController & Navigator
+    weak var reader: MobileReader?
+    init(navigator: UIViewController & Navigator, reader: MobileReader) { self.navigator = navigator; self.reader = reader; super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { fatalError("Storyboard is not used") }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        addChild(navigator); navigator.view.frame = view.bounds; navigator.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]; view.addSubview(navigator.view); navigator.didMove(toParent: self)
+    }
+    @objc func askSelection() { reader?.ask(translate: false) }
+    @objc func translateSelection() { reader?.ask(translate: true) }
+}
+
+struct NavigatorHost: UIViewControllerRepresentable {
+    let controller: UIViewController
+    func makeUIViewController(context: Context) -> UIViewController { controller }
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
+
+struct ReaderScreen: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var phase
+    @StateObject private var reader: MobileReader
+    @State private var toc = false
+    @State private var appearance = false
+    @State private var bookmarkTab = false
+    @State private var conversations = false
+    init(book: MobileBook, store: LibraryStore) { _reader = StateObject(wrappedValue: MobileReader(book: book, store: store)) }
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let controller = reader.controller { NavigatorHost(controller: controller) }
+                else if let failure = reader.failure { ContentUnavailableView("暂时无法打开", systemImage: "book.closed", description: Text(failure)) }
+                else { ProgressView("正在打开书籍…") }
+            }
+            .navigationTitle(reader.book.title).navigationBarTitleDisplayMode(.inline)
+            .toolbar(reader.chromeVisible ? .visible : .hidden, for: .navigationBar, .bottomBar)
+            .statusBarHidden(!reader.chromeVisible)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("书库", systemImage: "chevron.left") { Task { await reader.flush(); dismiss() } } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if !reader.history.isEmpty { Button("返回原位置", systemImage: "arrow.uturn.backward") { Task { await reader.back() } } }
+                    Button("目录", systemImage: "list.bullet") { toc = true }
+                    Menu {
+                        Button("阅读设置", systemImage: "textformat.size") { appearance = true }
+                        Button("答疑记录", systemImage: "text.bubble") { conversations = true }
+                        if let recent = reader.lastSelection {
+                            Button("提问最近选段", systemImage: "text.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: false) }
+                            Button("翻译最近选段", systemImage: "character.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: true) }
+                        }
+                    } label: { Image(systemName: "ellipsis") }.accessibilityIdentifier("reader.more")
+                }
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button("上一页", systemImage: "chevron.left") { Task { _ = await reader.navigator?.goBackward(options: .animated) } }
+                    Spacer()
+                    VStack(spacing: 3) { Text(reader.chapter).lineLimit(1).font(.caption); Text("\(Int(reader.progress * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
+                    Spacer()
+                    Button("书签", systemImage: "bookmark") { Task { await reader.bookmark() } }
+                    Button("下一页", systemImage: "chevron.right") { Task { _ = await reader.navigator?.goForward(options: .animated) } }
+                }
+            }
+            .sheet(isPresented: $toc) { navigationSheet }
+            .sheet(isPresented: $appearance) { NavigationStack { Form {
+                Toggle("连续滚动", isOn: $reader.scroll).onChange(of: reader.scroll) { reader.apply() }
+                if reader.book.format != "pdf" {
+                    Picker("字体", selection: $reader.fontFamily) { Text("原书").tag(""); Text("宋体").tag("Songti SC"); Text("苹方").tag("PingFang SC"); Text("Georgia").tag("Georgia") }.onChange(of: reader.fontFamily) { reader.apply() }
+                    LabeledContent("字号", value: "\(Int(reader.fontScale))%")
+                    Slider(value: $reader.fontScale, in: 70...200, step: 10).onChange(of: reader.fontScale) { reader.apply() }
+                    Picker("纸张", selection: $reader.theme) { Text("纸白").tag("paper"); Text("暖纸").tag("sepia"); Text("夜间").tag("night") }.onChange(of: reader.theme) { reader.apply() }
+                }
+            }.navigationTitle("阅读设置").navigationBarTitleDisplayMode(.inline).toolbar { Button("完成") { appearance = false } } }.presentationDetents([.medium]) }
+            .sheet(item: $reader.selection) { selection in AssistantScreen(selection: selection, title: reader.book.title, repository: reader.store.repository, openSource: { raw in Task { await reader.goSource(raw) } }) }
+            .sheet(isPresented: $conversations) { ConversationHistoryScreen(book: reader.book, repository: reader.store.repository, openSource: { raw in conversations = false; Task { await reader.goSource(raw) } }) }
+            .task { await reader.load() }
+            .onChange(of: phase) { if phase != .active { Task { await reader.flush() } } }
+            .alert("操作未完成", isPresented: Binding(get: { reader.failure != nil && reader.controller != nil }, set: { if !$0 { reader.failure = nil } })) { Button("好") { reader.failure = nil } } message: { Text(reader.failure ?? "") }
+        }.tint(MobilePalette.accent).preferredColorScheme(reader.theme == "night" ? .dark : .light)
+    }
+    private var navigationSheet: some View {
+        NavigationStack {
+            List {
+                Picker("导航", selection: $bookmarkTab) {
+                    Text("目录").tag(false)
+                    Text("书签").tag(true)
+                }.pickerStyle(.segmented)
+                if bookmarkTab { bookmarkRows }
+                else { chapterRows }
+            }
+            .navigationTitle("导航")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("完成") { toc = false } }
+        }
+    }
+    private var bookmarkRows: some View {
+        let marks: [ReadingBookmark] = reader.store.books.first(where: { $0.id == reader.book.id })?.bookmarks ?? []
+        return ForEach(marks) { mark in
+            Button(action: { openBookmark(mark) }) { Text(mark.title) }
+        }
+    }
+    private var chapterRows: some View {
+        let entries = flatten(reader.contents)
+        return ForEach(entries.indices, id: \.self) { index in
+            let item = entries[index]
+            Button {
+                Task { await reader.go(item.link); toc = false }
+            } label: {
+                Text(item.link.title ?? "章节").padding(.leading, CGFloat(item.depth * 16)).foregroundStyle(.primary)
+            }
+        }
+    }
+    private func openBookmark(_ mark: ReadingBookmark) {
+        Task { @MainActor in
+            do {
+                let locator = try Locator(jsonString: mark.locator)
+                guard let navigator = reader.navigator else { return }
+                if let current = navigator.currentLocation { reader.history.append(current) }
+                if await navigator.go(to: locator, options: .none) != true { _ = reader.history.popLast(); reader.failure = "书签暂时无法定位。" }
+                toc = false
+            } catch { reader.failure = error.localizedDescription }
+        }
+    }
+    private func flatten(_ links: [ReadiumShared.Link], depth: Int = 0) -> [(link: ReadiumShared.Link, depth: Int)] { links.flatMap { [(link: $0, depth: depth)] + flatten($0.children, depth: depth+1) } }
+}

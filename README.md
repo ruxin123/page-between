@@ -4,6 +4,8 @@
 
 [下载最新版本](https://github.com/ruxin123/page-between/releases/latest) · [全部版本](https://github.com/ruxin123/page-between/releases) · [更新日志](docs/CHANGELOG.md)
 
+iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcode 工程见 [iPhone 版](ios/README.md)。手机安装方式稍后确定，目前的 Releases 安装包适用于 macOS。
+
 ![页间书库](docs/screenshots/library.png)
 
 ## 下载与安装

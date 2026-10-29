@@ -1,6 +1,7 @@
 """Build a self-contained macOS App without private books, configuration or history."""
 
 import argparse
+import hashlib
 import importlib.metadata
 import json
 import platform
@@ -80,6 +81,14 @@ def build(demo=False):
         ("OCR.swift", "ocr-page"),
         ("Secrets.swift", "service-secrets"),
     ):
+        if binary == "service-secrets":
+            digest = hashlib.sha256((ROOT / "native" / source).read_bytes()).hexdigest()
+            installed = Path.home() / "Applications/页间.app/Contents/Helpers/native"
+            info_path = installed.parent.parent / "Info.plist"
+            installed_info = plistlib.loads(info_path.read_bytes()) if info_path.is_file() else {}
+            if installed_info.get("PageBetweenSecretsSourceSHA256") == digest:
+                shutil.copy2(installed / binary, native / binary)
+                continue
         run(
             [
                 tools["swiftc"],
@@ -178,8 +187,9 @@ def build(demo=False):
         "CFBundleExecutable": "page-between",
         "CFBundlePackageType": "APPL",
         "CFBundleIconFile": "App.icns",
-        "CFBundleShortVersionString": "0.5.26",
-        "CFBundleVersion": "250",
+        "CFBundleShortVersionString": "0.5.27",
+        "CFBundleVersion": "251",
+        "PageBetweenSecretsSourceSHA256": digest,
         "NSHighResolutionCapable": True,
         "PageBetweenDemo": demo,
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},

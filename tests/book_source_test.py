@@ -91,6 +91,9 @@ for line in sys.stdin:
                     self.assertEqual(client.call("search", {"query":"book"})["ref"], "same-process")
                     self.assertEqual(client.call("get_book", {"ref":"same-process"})["argument"], {"ref":"same-process"})
                     self.assertEqual(spawn.call_count, 1)
+                    (root/"settings.json").write_text(json.dumps({"email":"updated@example.invalid"}))
+                    self.assertEqual(client.call("get_limits", {})["ref"], "same-process")
+                    self.assertEqual(spawn.call_count, 2)
                 finally: client.close()
 
 

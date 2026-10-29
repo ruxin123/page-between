@@ -10,6 +10,7 @@ import {
 import { escapeHTML, icon } from "/ui/shared.mjs";
 import { createLibraryView } from "/ui/library.mjs";
 import { createBookSource } from "/ui/book-source.mjs";
+import { createBookSourceSettings } from "/ui/book-source-settings.mjs";
 import { createToasts } from "/ui/feedback.mjs";
 import { createTranslation } from "/ui/translation.mjs";
 import { createTutor } from "/ui/tutor.mjs";
@@ -40,7 +41,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.48";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.49";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
 
@@ -128,7 +129,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.48";
+document.body.dataset.readerBuild = "2.49";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -768,7 +769,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.48",
+        build: "2.49",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -3013,7 +3014,7 @@ function showRoute(sourcePosition) {
     ? "reader"
     : requested[0] === "read"
       ? "reader"
-      : ["library", "settings"].includes(requested[0])
+      : ["library", "settings", "source"].includes(requested[0])
         ? requested[0]
         : "library";
   if (route === "reader" && next !== "reader") {
@@ -3030,6 +3031,7 @@ function showRoute(sourcePosition) {
   $("reader").hidden = next !== "reader";
   for (const [id, name] of [
     ["library-view", "library"],
+    ["book-source-view", "source"],
     ["settings-view", "settings"],
   ])
     $(id).hidden = name !== next;
@@ -3047,13 +3049,16 @@ function showRoute(sourcePosition) {
       sourcePosition?.index ? sourcePosition : undefined,
     );
   } else {
-    document.title = (next === "settings" ? "设置" : "书库") + " · 页间";
+    document.title =
+      { settings: "设置", source: "找书", library: "书库" }[next] + " · 页间";
+    if (next === "source") bookSource.open();
     if (next === "library") renderLibrary();
     if (requested[0] === "imports") openJobs();
     if (next === "settings") {
       renderSettings();
       serviceSettings.show(requested[1]);
       if (requested[1] === "data") dataSettings.show();
+      if (requested[1] === "source") bookSourceSettings.show();
     }
   }
 }
@@ -3974,11 +3979,7 @@ if (palm && native)
   };
 window.addEventListener("app-import", openImport);
 const bookSource = createBookSource({ api, post, refresh: () => poll(true) });
-$("book-source-settings").onclick = () => bookSource.open(true);
-$("book-source-open").onclick = (event) => {
-  event.preventDefault();
-  bookSource.open();
-};
+const bookSourceSettings = createBookSourceSettings({ api, post, toast });
 window.addEventListener("app-library-refresh", () => poll(true));
 window.addEventListener("app-palm", () => openPalm(current?.id));
 window.addEventListener("native-file-saved", () =>

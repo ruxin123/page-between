@@ -3935,28 +3935,40 @@ body[data-mode="translation"] .translation-panel .aside-head > strong {
   margin: 8px 0 0;
 }
 
-/* Discovery shares the library's paper, ink and spacing tokens. */
-.book-source-dialog { width:min(1000px,94vw); max-height:90vh; padding:32px; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:16px; overflow:auto; }
-.book-source-dialog header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
-.book-source-dialog h1 { margin:4px 0 0; font-size:28px; }
-.book-source-dialog header small { color:var(--secondary); letter-spacing:.12em; }
-.book-source-dialog [data-close] { width:40px; height:40px; font-size:24px; }
-.book-source-dialog form { display:flex; gap:12px; align-items:end; margin:16px 0; }
-.book-source-dialog input:not([type=checkbox]), .book-source-dialog select { min-width:0; width:100%; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }
-.book-source-dialog [data-search] input { flex:1; }
-.book-source-dialog select { width:120px; }
-.book-source-dialog [data-search] button { white-space:nowrap; }
-.book-source-dialog [data-account] label { flex:1; }
-.book-source-dialog [data-status] { min-height:24px; color:var(--secondary); }
-.source-browser { display:grid; grid-template-columns:minmax(0,1fr) minmax(240px,36%); gap:32px; }
+/* Discovery shares the library palette; account setup remains in Settings. */
+.source-search { display:flex; align-items:center; gap:12px; padding:16px; background:var(--surface); border:1px solid var(--line); border-radius:12px; }
+.source-search label { display:flex; flex:1; gap:12px; align-items:center; min-width:0; }
+.source-search label svg { width:20px; height:20px; color:var(--secondary); flex-shrink:0; }
+.source-search input { border:0; outline:none; min-width:0; width:100%; background:transparent; color:var(--ink); font-size:16px; }
+.source-search label:focus-within { outline:2px solid var(--accent); outline-offset:8px; border-radius:4px; }
+.source-search select { padding:8px 12px; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:8px; }
+.source-results-heading { display:flex; justify-content:space-between; align-items:center; margin:20px 0; font-size:13px; color:var(--secondary); min-height:32px; }
+.source-results-heading p { margin:0; }
+.source-browser { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,36%); gap:32px; align-items:start; }
 .source-browser:has([data-detail][hidden]) { grid-template-columns:1fr; }
-.source-browser aside { border-left:1px solid var(--line); padding-left:24px; }
+.source-browser aside { position:sticky; top:24px; padding:24px; background:var(--paper); border:1px solid var(--line); border-radius:12px; }
+.source-browser aside h2 { font-family:ReaderHanSerif,Georgia,serif; font-size:24px; line-height:1.5; overflow-wrap:anywhere; }
 .source-browser aside label { display:block; margin:24px 0 16px; }
-.source-result { display:flex; width:100%; gap:16px; padding:20px 4px; border-bottom:1px solid var(--line); text-align:left; align-items:center; }
+.source-browser aside .primary-button { width:100%; }
+.source-result { display:flex; width:100%; gap:24px; padding:24px 8px; border-bottom:1px solid var(--line); text-align:left; align-items:center; transition:background .18s; }
+.source-result:hover, .source-result:focus-visible { background:var(--soft); border-radius:8px; }
 .source-result > span:nth-child(2) { flex:1; min-width:0; }
 .source-result strong, .source-result small { display:block; overflow-wrap:anywhere; }
-.source-result small { margin-top:8px; color:var(--secondary); }
-.source-format { display:inline-flex; min-width:56px; padding:16px 8px; justify-content:center; background:var(--soft); color:var(--accent); font-size:12px; text-transform:uppercase; border-radius:8px; }
-.source-invitation { padding:48px 0; color:var(--secondary); }
+.source-result strong { font-size:17px; font-weight:600; line-height:1.5; }
+.source-result small { margin-top:8px; color:var(--secondary); font-size:13px; }
+.source-cover { width:72px; height:96px; flex-shrink:0; padding:12px 8px 8px 12px; background:var(--cover-fiction); color:var(--cover-text); box-shadow:var(--spine-lighting),var(--shadow-card); display:flex; flex-direction:column; justify-content:space-between; border-radius:2px 6px 6px 2px; }
+.source-cover > span { font-family:ReaderHanSerif,Georgia,serif; font-size:12px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.source-cover small { color:inherit; font-size:10px; text-transform:uppercase; opacity:.7; }
+.source-format { display:inline-flex; padding:4px 8px; background:var(--soft); color:var(--accent); font-size:11px; text-transform:uppercase; border-radius:4px; }
+.source-invitation { padding:80px 24px; text-align:center; color:var(--secondary); }
+.source-invitation svg { width:48px; height:48px; opacity:.6; }
+.source-invitation h2 { font-size:20px; color:var(--ink); margin:20px 0 12px; font-weight:500; }
+.source-invitation p { font-size:14px; }
 .source-description { white-space:pre-wrap; font-size:14px; line-height:1.8; }
-@media(max-width:700px) { .book-source-dialog { padding:20px; } .source-browser { grid-template-columns:1fr; } .source-browser aside { border-left:0; padding-left:0; border-top:1px solid var(--line); padding-top:24px; } .book-source-dialog [data-account] { flex-direction:column; align-items:stretch; } }
+.source-component { margin-top:32px; padding-top:24px; border-top:1px solid var(--line); color:var(--secondary); font-size:14px; }
+.source-component h3 { font-size:15px; color:var(--ink); }
+@media(max-width:800px) { .source-browser { grid-template-columns:1fr; } .source-browser aside { position:static; } .source-search { flex-wrap:wrap; } .source-search label { flex-basis:100%; margin:8px; } .source-result { gap:16px; padding:20px 0; } }
+.source-result[aria-pressed="true"] { background:var(--soft); border-radius:8px; box-shadow:inset 3px 0 var(--accent); }
+@media(min-width:801px) { .source-browser aside { max-height:calc(100vh - 48px); overflow-y:auto; } }
+@media(max-width:800px) { .source-browser aside { grid-row:1; } }
+.source-invitation svg { display:block; margin:0 auto; }

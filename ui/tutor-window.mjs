@@ -5,7 +5,7 @@ import { icon } from "./shared.mjs";
 const $ = (id) => document.getElementById(id);
 const bridge = window.webkit?.messageHandlers?.tutorNative;
 document.body.dataset.mode = "tutor";
-document.body.dataset.readerBuild = "2.48";
+document.body.dataset.readerBuild = "2.49";
 document.title = "书内答疑 · 页间";
 document
   .querySelectorAll("[data-icon]")

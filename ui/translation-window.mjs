@@ -2,7 +2,7 @@ import { createTranslation } from "./translation.mjs";
 import { createToasts } from "./feedback.mjs";
 const bridge = window.webkit?.messageHandlers?.translationNative;
 document.body.dataset.mode = "translation";
-document.body.dataset.readerBuild = "2.48";
+document.body.dataset.readerBuild = "2.49";
 document.title = "划词翻译 · 页间";
 async function api(path, options) {
   const response = await fetch(path, options),

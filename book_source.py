@@ -77,6 +77,7 @@ class MCPClient:
         self.lock = threading.RLock()
         self.process = None
         self.sequence = 0
+        self.account = None
 
     def close(self):
         with self.lock:
@@ -124,14 +125,15 @@ class MCPClient:
             raise ValueError("书源响应超时或连接中断，请重试。") from None
 
     def connect(self):
-        if self.process and self.process.poll() is None:
+        config = load(SETTINGS, {})
+        account = (config.get("email", ""), config.get("keyRef", ""))
+        if self.process and self.process.poll() is None and self.account == account:
             return
         self.close()
         entry = RUNTIME / "dist/index.js"
         node = RUNTIME / "node"
         if not entry.is_file() or not node.exists():
             raise ValueError("请先安装书源组件。")
-        config = load(SETTINGS, {})
         secret = service_settings.keychain("get", config["keyRef"]) if config.get("keyRef") else ""
         DOWNLOADS.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "ZLIBRARY_EMAIL": config.get("email", ""), "ZLIBRARY_PASSWORD": secret or "",
@@ -139,6 +141,7 @@ class MCPClient:
         self.process = subprocess.Popen([str(node), str(entry)], cwd=RUNTIME, env=env,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, bufsize=1)
+        self.account = account
         self.replies = queue.Queue(maxsize=64)
         threading.Thread(target=self._read, args=(self.process, self.replies), daemon=True).start()
         try:
@@ -168,7 +171,11 @@ class MCPClient:
                 raise ValueError("书源返回格式无效。")
             if result.get("isError") or value.get("error"):
                 code = value.get("error", {}).get("code", "")
-                raise ValueError({"ref_unavailable":"搜索结果已过期，请重新搜索。", "credentials_missing":"请先配置书源账号。", "authentication_failed":"书源登录失败，请检查账号密码。"}.get(code, "书源暂时不可用，请检查账号或网络后重试。"))
+                messages = {"ref_unavailable":"搜索结果已过期，请重新搜索。", "credentials_missing":"请先配置书源账号。",
+                            "auth_failed":"书源登录失败，请检查账号密码。", "authentication_failed":"书源登录失败，请检查账号密码。",
+                            "quota_exhausted":"书源下载额度已用完。", "provider_unreachable":"无法连接书源，请检查网络。",
+                            "provider_timeout":"书源响应超时，请稍后重试。", "output_refused":"下载目录暂不可用，请检查本机存储。"}
+                raise ValueError(messages.get(code, "书源未完成此操作，请稍后重试或选择其他版本。"))
             return value
 
 

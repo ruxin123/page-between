@@ -41,7 +41,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.49";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.50";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
 
@@ -129,7 +129,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.49";
+document.body.dataset.readerBuild = "2.50";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -769,7 +769,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.49",
+        build: "2.50",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -3217,6 +3217,71 @@ function openBookOptions(id) {
   $("book-dialog").showModal();
 }
 let bookSaving = false;
+$("book-remove").onclick = () => {
+  if (bookSaving || !editingBook) return;
+  $("book-remove-title").textContent = editingBook.title;
+  $("book-remove-error").textContent = "";
+  $("book-remove-dialog").showModal();
+};
+$("book-remove-cancel").onclick = () => $("book-remove-dialog").close();
+async function restoreBook(id) {
+  await post("/api/books/" + id + "/restore", {});
+  await refreshLibrary();
+  renderLibrary();
+}
+$("book-remove-confirm").onclick = async () => {
+  if (bookSaving || !editingBook) return;
+  const source = editingBook;
+  bookSaving = true;
+  $("book-remove-confirm").disabled = true;
+  try {
+    await savePosition(true);
+    await post("/api/books/" + source.id + "/remove", {});
+    $("book-remove-dialog").close();
+    $("book-dialog").close();
+    if (current?.id === source.id) window.location.hash = "#/library";
+    await refreshLibrary();
+    renderLibrary();
+    toast("书籍已移至最近删除。", { undo: () => restoreBook(source.id) });
+  } catch (error) {
+    $("book-remove-error").textContent = error.message;
+  } finally {
+    bookSaving = false;
+    $("book-remove-confirm").disabled = false;
+  }
+};
+async function renderRemovedBooks() {
+  const data = await api("/api/books/removed");
+  $("removed-books-list").innerHTML = data.books.length
+    ? data.books
+        .map(
+          (book) =>
+            `<div class="removed-book-row"><span>${escapeHTML(book.title)}<small>${escapeHTML(book.format || "")}</small></span><button class="secondary-button" data-restore-book="${escapeHTML(book.id)}">恢复</button></div>`,
+        )
+        .join("")
+    : '<p class="setting-note">没有已删除的书籍</p>';
+}
+$("removed-books-open").onclick = async () => {
+  $("removed-books-dialog").showModal();
+  $("removed-books-status").textContent = "";
+  try {
+    await renderRemovedBooks();
+  } catch (error) {
+    $("removed-books-status").textContent = error.message;
+  }
+};
+$("removed-books-list").onclick = async (event) => {
+  const button = event.target.closest("[data-restore-book]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await restoreBook(button.dataset.restoreBook);
+    await renderRemovedBooks();
+  } catch (error) {
+    $("removed-books-status").textContent = error.message;
+    button.disabled = false;
+  }
+};
 async function saveBookOptions(forCloud = false) {
   if (bookSaving || !editingBook) return false;
   const source = editingBook;
@@ -3273,6 +3338,16 @@ async function refreshLibrary() {
         replacement.loaded = true;
       }
       current = replacement;
+    } else {
+      leavePdfPreparation();
+      clearSelection();
+      current = null;
+      readerReady = false;
+      if (palm && native)
+        window.webkit.messageHandlers.readerNative.postMessage({
+          action: "close",
+        });
+      else if (!palm && route === "reader") window.location.hash = "#/library";
     }
   }
   renderJobs();

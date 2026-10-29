@@ -21,7 +21,7 @@ from book_import import ROOT, path_for
 
 from paths import CACHE as CACHE_ROOT, RUNTIME
 from storage import save
-from pdf_selection import MATH, align_spans, standalone_math, utf16
+from pdf_selection import MATH, align_spans, standalone_math, utf16, split_continuation
 
 OCR = RUNTIME / "ocr-page"
 CACHE = CACHE_ROOT / "ocr-v4"
@@ -296,9 +296,30 @@ def enrichment_data(book):
 
 
 def page_enrichment(book, page, end_page=None):
-    data = enrichment_data(book)
+    data = reading_enrichment(book, range(page, (end_page or page) + 2))
     return [block for number in range(page, (end_page or page) + 1)
             for block in data.get(str(number), {}).get("blocks", [])]
+
+
+def reading_enrichment(book, pages=None):
+    data = enrichment_data(book)
+    numbers = sorted(int(key) for key in data if str(key).isdigit() and (pages is None or int(key) in pages))
+    for number in numbers:
+        previous = data.get(str(number - 1), {}).get("blocks", [])
+        for block in data[str(number)].get("blocks", []):
+            if block.get("type") != "text" or block.get("text", "").strip() or block["bbox"][1] > .3:
+                continue
+            source = next((item for item in reversed(previous) if item.get("type") == "text" and item.get("text") and item["bbox"][3] > .7), None)
+            if source is None or "\n" not in source["text"]:
+                continue
+            saved = saved_selection(book, number)
+            lines = [line["text"] for line in (saved or {}).get("lines", [])
+                     if block["bbox"][0] - .003 <= (line["bbox"][0] + line["bbox"][2]) / 2 <= block["bbox"][2] + .003
+                     and block["bbox"][1] - .003 <= (line["bbox"][1] + line["bbox"][3]) / 2 <= block["bbox"][3] + .003]
+            split = split_continuation("".join(lines), source["text"])
+            if split:
+                source["text"], block["text"] = split
+    return data
 
 
 def formula_image(book, page, formula):

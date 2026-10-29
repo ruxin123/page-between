@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.49" />
+    <link rel="stylesheet" href="/layout.css?v=2.50" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -63,6 +63,9 @@
           </header>
           <div id="continue-reading"></div>
           <div class="library-tools">
+            <button id="removed-books-open" class="secondary-button">
+              最近删除
+            </button>
             <div class="filter-chips" id="shelf-filters">
               <button data-filter="all" aria-pressed="true">全部</button
               ><button data-filter="pinned" aria-pressed="false">常读 ★</button
@@ -939,6 +942,9 @@
         </button>
       </form>
       <div id="book-form" class="book-form"></div>
+      <button id="book-remove" class="secondary-button danger-button">
+        删除书籍…
+      </button>
       <div class="dialog-footer">
         <span id="book-save-note"></span
         ><button id="book-cloud" class="secondary-button" hidden>
@@ -948,6 +954,33 @@
           调整章节…</button
         ><button id="book-save" class="primary-button">保存设置</button>
       </div>
+    </dialog>
+    <dialog
+      id="book-remove-dialog"
+      class="book-dialog"
+      aria-labelledby="book-remove-heading"
+    >
+      <h2 id="book-remove-heading">删除书籍？</h2>
+      <p id="book-remove-title"></p>
+      <p>将移至最近删除，阅读记录与解析结果保留。</p>
+      <div class="dialog-footer">
+        <button id="book-remove-cancel" class="secondary-button">取消</button
+        ><button id="book-remove-confirm" class="primary-button">删除</button>
+      </div>
+      <p id="book-remove-error" role="status"></p>
+    </dialog>
+    <dialog
+      id="removed-books-dialog"
+      class="book-dialog"
+      aria-labelledby="removed-books-heading"
+    >
+      <form method="dialog" class="dialog-heading">
+        <h2 id="removed-books-heading">最近删除</h2>
+        <button class="icon-button" aria-label="关闭最近删除">×</button>
+      </form>
+      <p class="setting-note">书籍文件与阅读记录保留，可随时恢复。</p>
+      <div id="removed-books-list"></div>
+      <p id="removed-books-status" role="status"></p>
     </dialog>
     <dialog
       id="chapters-dialog"
@@ -1192,6 +1225,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.49"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.50"></script>
   </body>
 </html>

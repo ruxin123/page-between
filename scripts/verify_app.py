@@ -654,6 +654,26 @@ def verify(app, epubcheck=None, samples=()):
                         "imageResources": image_resources,
                     }
                 )
+            removable = next(item for item in json.loads(request("/api/library")[2])["books"] if item["id"] == "demo-a")
+            original_url = removable["originalUrl"]
+            original_bytes = request(original_url)[2]
+            reading_records = request("/api/state")[2]
+            request("/api/books/demo-a/remove", b"{}", content_type="application/json")
+            assert not any(item["id"] == "demo-a" for item in json.loads(request("/api/library")[2])["books"])
+            assert any(item["id"] == "demo-a" for item in json.loads(request("/api/books/removed")[2])["books"])
+            assert request(original_url, expected_status=404)[0] == 404
+            assert request("/api/state")[2] == reading_records
+            deleted_backup = json.loads(request("/api/data/backup", b"{}", content_type="application/json")[2])
+            with zipfile.ZipFile(io.BytesIO(request(deleted_backup["download"])[2])) as archived:
+                saved_library = json.loads(archived.read("Library/library.json"))
+                assert next(item for item in saved_library["books"] if item["id"] == "demo-a")["deletedAt"]
+                assert any(name.startswith("Library/books/demo-a/") for name in archived.namelist())
+            process.terminate(); process.wait(timeout=10); base = start()
+            assert not any(item["id"] == "demo-a" for item in json.loads(request("/api/library")[2])["books"])
+            request("/api/books/demo-a/restore", b"{}", content_type="application/json")
+            assert any(item["id"] == "demo-a" for item in json.loads(request("/api/library")[2])["books"])
+            assert request(original_url)[2] == original_bytes
+            assert request("/api/state")[2] == reading_records
             subprocess.run(
                 ["codesign", "--verify", "--deep", "--strict", str(app)], check=True
             )
@@ -682,6 +702,8 @@ def verify(app, epubcheck=None, samples=()):
                 "selectionTranslation": True,
                 "translationFormulaWithoutAutomaticCache": True,
                 "translationFavoriteBackupRestore": True,
+                "recoverableBookRemoval": True,
+                "removedBookBackupAndRestart": True,
                 "signature": "ad-hoc verified",
                 "formatSamples": sample_results,
             }

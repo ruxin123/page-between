@@ -16,7 +16,7 @@ from pypdf import PdfReader
 from book_import import path_for, XML, text_chapter_index, flatten_toc, position_label
 from paths import CACHE
 from pdf_enhancement import (
-    enrichment_data,
+    reading_enrichment,
     prepared_pages,
     saved_selection,
     selection_directory,
@@ -82,7 +82,7 @@ def fingerprint(book):
     return hashlib.sha256(
         json.dumps(
             [
-                9,
+                10,
                 book.get("sourceHash"),
                 book.get("enhancementRevision"),
                 book.get("enrichmentUrl"),
@@ -189,7 +189,7 @@ def text_units(book):
                 }
                 yield index, anchor_number, text, position, "text"
     elif book["type"] == "pdf":
-        enhanced = enrichment_data(book)
+        enhanced = reading_enrichment(book)
         with path_for(book["url"]).open("rb") as stream:
             document = PdfReader(stream)
             for index in range(1, book["pages"] + 1):

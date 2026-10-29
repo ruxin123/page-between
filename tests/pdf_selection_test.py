@@ -7,10 +7,42 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pdf_selection import align_spans, character_map, standalone_math, utf16
+from pdf_selection import align_spans, character_map, standalone_math, utf16, MATH, split_continuation
 
 
 class Selection(unittest.TestCase):
+    def test_reading_view_recovers_both_pages_without_writing_canonical_data(self):
+        import copy
+        import pdf_enhancement as enhancement
+        tail = r"Each $T_x$ is a reflection about an axis, and every $U \in G$ is a bijection of the figure onto itself."
+        raw = {"1":{"blocks":[{"type":"text", "text":"A previous paragraph ends here.\n"+tail, "bbox":[.1,.8,.9,.95]}]}, "2":{"blocks":[{"type":"text", "text":"", "bbox":[.1,.1,.9,.3]}]}}
+        before = copy.deepcopy(raw)
+        data = {"lines":[{"text":"Each 7x is a reflection about an axis, and every UeG is a bijection of the figure onto itself.", "bbox":[.1,.1,.9,.3]}]}
+        with patch.object(enhancement,"enrichment_data", side_effect=lambda _:copy.deepcopy(raw)), patch.object(enhancement,"saved_selection", return_value=data), patch.object(enhancement,"save", side_effect=AssertionError("Canonical source must not be rewritten")):
+            result = enhancement.reading_enrichment({"id":"original"})
+        self.assertEqual(raw,before)
+        self.assertEqual(result['1']['blocks'][0]['text'],"A previous paragraph ends here.")
+        self.assertEqual(result['2']['blocks'][0]['text'],tail)
+
+    def test_adjacent_inline_formulas_are_both_recognized(self):
+        value = r"Value $x_1$$=y^2$ and $$z+1$$."
+        self.assertEqual([m.group() for m in MATH.finditer(value)], [r"$x_1$", r"$=y^2$", "$$z+1$$"])
+
+    def test_visible_math_matching_preserves_original_intervals_in_both_languages(self):
+        for raw, canonical, symbol in [("若 A∩B=∅，则两集合不相交。", r"若 $A\cap B=\varnothing$，则两集合不相交。", "∅"), ("Note that AX O@ = O© = O XB.", r"Note that $A\times\emptyset=\emptyset=\emptyset\times B$.", "@")]:
+            mapping = character_map(raw, canonical)
+            self.assertIsNotNone(mapping)
+            start,end = mapping[raw.index(symbol)]
+            self.assertEqual(canonical[start:end],next(MATH.finditer(canonical)).group())
+
+    def test_cross_page_continuation_requires_unique_text_match_and_keeps_raw_formula(self):
+        tail = r"Each $T_x$ is a reflection about an axis, and every $U \in G$ is a bijection of the figure onto itself."
+        raw = "Previous page finishes its discussion here.\n" + tail
+        split = split_continuation("Each 7x is a reflection about an axis, and every UeG is a bijection of the figure onto itself.", raw)
+        self.assertEqual(split, ("Previous page finishes its discussion here.", tail))
+        self.assertIsNone(split_continuation("This is a completely unrelated paragraph with different words and meaning.", raw))
+        self.assertIsNone(split_continuation("too short", raw))
+
     def test_damaged_formula_crop_uses_saved_character_geometry_and_never_recognizes_again(self):
         from reportlab.pdfgen import canvas
         from PIL import Image

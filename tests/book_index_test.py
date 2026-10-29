@@ -76,7 +76,7 @@ class BookIndex(unittest.TestCase):
                 ]
             }
         }
-        with patch.object(book_index, "enrichment_data", return_value=blocks):
+        with patch.object(book_index, "reading_enrichment", return_value=blocks):
             earlier = book_index.search(
                 book,
                 "Definition 2.1",
@@ -213,7 +213,7 @@ class BookIndex(unittest.TestCase):
         self.assertEqual(book_index.search(book, "Definition")["status"]["covered"], 0)
         with patch.object(
             book_index,
-            "enrichment_data",
+            "reading_enrichment",
             return_value={
                 "1": {
                     "blocks": [

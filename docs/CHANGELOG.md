@@ -2,6 +2,15 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.28 · 2026-10-29
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.28) · Build 252 · 前端 2.50。
+
+- 修复跨页合并段落导致下一页划词回退 OCR、丢失字母与公式下标的问题。
+- 改善公式较多的段落匹配，识别相邻行内公式；保留原始复制内容，不改写 MinerU 识别错误。
+- 补充书籍删除确认、撤销和最近删除恢复，保留阅读记录与正式解析结果。
+- 删除的书籍不再出现在书库与阅读入口；重新导入相同文件时恢复已有记录。
+
 ## 0.5.27 · 2026-10-29
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.27) · Build 251 · 前端 2.49。

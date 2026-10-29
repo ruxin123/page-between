@@ -3972,3 +3972,8 @@ body[data-mode="translation"] .translation-panel .aside-head > strong {
 @media(min-width:801px) { .source-browser aside { max-height:calc(100vh - 48px); overflow-y:auto; } }
 @media(max-width:800px) { .source-browser aside { grid-row:1; } }
 .source-invitation svg { display:block; margin:0 auto; }
+.danger-button { color:#a64437; margin:0 24px 16px; }
+.removed-book-row { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:16px 0; border-bottom:1px solid var(--line); }
+.removed-book-row span { overflow-wrap:anywhere; }
+.removed-book-row small { display:block; margin-top:4px; color:var(--secondary); }
+body[data-theme="night"] .danger-button { color:#e89c8e; }

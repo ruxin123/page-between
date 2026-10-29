@@ -20,7 +20,7 @@ from pypdf import PdfReader
 from book_import import BOOK_ROOT, CONVERT, ROOT, convert_document, flatten_toc, path_for, load_html
 from book_index import REFERENCE, references
 from paths import CACHE
-from pdf_enhancement import enrichment_data, PDF_LOCK, open_pdf
+from pdf_enhancement import reading_enrichment, PDF_LOCK, open_pdf
 from storage import load
 from cache_policy import prune_exports
 
@@ -395,7 +395,7 @@ def build(book, pages=None):
         fragments, block_fragments = [], {}
         if book["type"] == "pdf":
             pages = pages or list(range(1, book["pages"] + 1))
-            enhanced = enrichment_data(book)
+            enhanced = reading_enrichment(book)
             targets = {}
             for page in pages:
                 for number, block in enumerate(

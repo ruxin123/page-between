@@ -3,10 +3,11 @@
 import math
 import re
 import unicodedata
+from functools import lru_cache
 from difflib import SequenceMatcher
 
 MATH_PATTERN = (
-    r"(?<!\\)(?:\$\$(?:(?!\$\$)[\s\S])+?\$\$|\$(?!\$)(?:\\[\s\S]|[^$\\])+\$(?!\$)|"
+    r"(?<!\\)(?:\$\$(?:(?!\$\$)[\s\S])+?\$\$|\$(?!\$)(?:\\[\s\S]|[^$\\])+\$|"
     r"\\\[(?:(?!\\\])[\s\S])+?\\\]|\\\((?:(?!\\\))[\s\S])+?\\\))"
 )
 MATH = re.compile(MATH_PATTERN)
@@ -32,15 +33,16 @@ def standalone_math(value):
 
 def normalized(value, *, canonical=False):
     text, offsets, position = [], [], 0
-    # Compare rendered content, not the spelling of TeX commands. An inline
-    # formula is already an indivisible selection unit; keep its exact source
-    # interval while giving it one comparison token, even when OCR read it as @.
+    # Match visible symbols without using TeX command lengths; each symbol maps
+    # back to the entire original formula, preserving complete-object selection.
     tokens = ((match.group(), match.group("math") is not None) for match in TOKENS.finditer(value)) if canonical else ((char, False) for char in value)
     for char, formula in tokens:
         end = position + utf16(char)
         if formula:
-            text.append("\ufffc")
-            offsets.append((position, end))
+            for part in unicodedata.normalize("NFKC", math_comparison(char)).casefold():
+                if not part.isspace():
+                    text.append(part)
+                    offsets.append((position, end))
             position = end
             continue
         normalized_char = unicodedata.normalize("NFKC", char).casefold()
@@ -51,6 +53,18 @@ def normalized(value, *, canonical=False):
                 offsets.append((position, end))
         position = end
     return "".join(text), offsets
+
+
+@lru_cache(maxsize=8192)
+def math_comparison(value):
+    """Compare visible symbols while every matched symbol still selects the full original formula."""
+    body = standalone_math(value) or ""
+    body = re.sub(r"\\(?:begin|end)\s*\{[^}]*\}", "", body)
+    symbols = {"emptyset":"∅", "varnothing":"∅", "in":"∈", "notin":"∉", "times":"×", "circ":"∘", "sim":"∼", "subset":"⊂", "subseteq":"⊆", "cup":"∪", "cap":"∩", "to":"→", "mapsto":"↦", "leq":"≤", "geq":"≥", "neq":"≠", "alpha":"α", "beta":"β", "gamma":"γ", "sigma":"σ", "tau":"τ", "pi":"π", "infty":"∞"}
+    decoration = {"bar", "overline", "underline", "hat", "tilde", "mathbf", "mathbb", "mathrm", "mathcal", "text", "operatorname", "left", "right", "displaystyle", "quad", "qquad"}
+    body = re.sub(r"\\([A-Za-z]+)", lambda m: symbols.get(m[1], "" if m[1] in decoration else m[1] if m[1] in {"sin","cos","tan","log","lim","det","exp"} else "\ufffc"), body)
+    body = re.sub(r"\\[,;! ]", "", body)
+    return re.sub(r"[{}_^\\]", "", body) or "\ufffc"
 
 
 def character_map(original, canonical):
@@ -84,6 +98,34 @@ def character_map(original, canonical):
                     else [start, end]
                 )
     return result
+
+
+@lru_cache(maxsize=512)
+def split_continuation(original, canonical):
+    """Recover an adjacent-page continuation without rewriting any source characters."""
+    left, _ = normalized(original)
+    if len(left) < 30:
+        return None
+    formulas = list(MATH.finditer(canonical))
+    choices = []
+    for match in re.finditer(r"\n", canonical):
+        boundary = match.end()
+        if any(part.start() < boundary < part.end() for part in formulas):
+            continue
+        right, _ = normalized(canonical[boundary:], canonical=True)
+        if not right or max(len(left), len(right)) > 16000:
+            continue
+        anchors = SequenceMatcher(None, left[:64], right[:64], autojunk=False).get_matching_blocks()
+        if not any(item.size >= 8 and item.a <= 8 and item.b <= 8 for item in anchors):
+            continue
+        ratio = SequenceMatcher(None, left, right, autojunk=False).ratio()
+        if ratio >= .8:
+            choices.append((ratio, boundary))
+    choices.sort(reverse=True)
+    if not choices or (len(choices) > 1 and choices[0][0] - choices[1][0] < .05):
+        return None
+    boundary = choices[0][1]
+    return canonical[:boundary].rstrip("\n"), canonical[boundary:]
 
 
 def align_spans(spans, blocks):

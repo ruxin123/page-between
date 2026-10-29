@@ -78,6 +78,8 @@ def source_download(payload):
             with IMPORT_LOCKS[digest]:
                 book = next((b for b in library()["books"] if b.get("sourceHash") == digest), None)
                 duplicate = book is not None
+                if book and book.get("deletedAt"):
+                    book = set_book_deleted(book["id"], False)
                 if book is None:
                     book = import_book(source, enabled=enabled)
                     with MUTEX:
@@ -119,7 +121,30 @@ def library():
 
 
 def book_for(ident):
-    return next((book for book in library()["books"] if book["id"] == ident), None)
+    return next((book for book in library()["books"] if book["id"] == ident and not book.get("deletedAt")), None)
+
+
+def set_book_deleted(ident, deleted):
+    with MUTEX, PDF_PREPARATION.condition:
+        book = next((book for book in library()["books"] if book["id"] == ident), None)
+        if not book:
+            raise ValueError("找不到这本书。")
+        if ident in RUNNING:
+            raise ValueError("请先暂停文档处理，再删除书籍。")
+        if deleted and book.get("type") == "pdf":
+            try:
+                PDF_PREPARATION.pause(book)
+            except (OSError, ValueError):
+                pass  # A missing original must not prevent removal from the library.
+        updated = update_book(ident, {"deletedAt": time.time() if deleted else None})
+        if deleted:
+            for key, control in list(ai_tutor.CANCELLATIONS.items()):
+                if control.get("book") == ident:
+                    ai_tutor.cancel(key, ident)
+            for key, job in list(translation.JOBS.items()):
+                if job.get("book") == ident and job.get("status") == "running":
+                    translation.cancel(book, key)
+        return updated
 
 
 def same_bookmark_place(left, right, book_types):
@@ -593,6 +618,8 @@ class Handler(SimpleHTTPRequestHandler):
                 )
             if route.path == "/api/library":
                 data = library()
+                data["books"] = [book for book in data["books"] if not book.get("deletedAt")]
+                data["jobs"] = [job for job in data.get("jobs", []) if any(book["id"] == job.get("book") for book in data["books"])]
                 for book in data["books"]:
                     if book.get("type") == "pdf":
                         try:
@@ -607,6 +634,8 @@ class Handler(SimpleHTTPRequestHandler):
                                 "error": "暂时无法读取本机文字准备进度，请检查书籍文件。",
                             }
                 return self.json(data)
+            if route.path == "/api/books/removed":
+                return self.json({"books":[{key:book.get(key) for key in ["id", "title", "author", "format", "deletedAt"]} for book in library()["books"] if book.get("deletedAt")]})
             if route.path == "/api/data/info":
                 with RECOVERY_LOCK:
                     return self.json(library_data.information())
@@ -789,6 +818,8 @@ class Handler(SimpleHTTPRequestHandler):
                             None,
                         )
                         if duplicate:
+                            if duplicate.get("deletedAt"):
+                                duplicate = set_book_deleted(duplicate["id"], False)
                             return self.json({"book": duplicate, "duplicate": True})
                         book = import_book(
                             source,
@@ -816,6 +847,8 @@ class Handler(SimpleHTTPRequestHandler):
             )
             if route.path == "/api/book-source/settings":
                 return self.json(book_source.configure(payload))
+            if re.fullmatch(r"/api/books/[A-Za-z0-9][A-Za-z0-9_-]{0,80}/(?:remove|restore)", route.path):
+                return self.json({"book":set_book_deleted(route.path.split("/")[-2], route.path.endswith("/remove"))})
             if route.path == "/api/book-source/install":
                 return self.json(book_source.install_component())
             if route.path == "/api/book-source/query":

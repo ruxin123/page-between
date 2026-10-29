@@ -66,6 +66,7 @@
 !/tests/feedback.test.mjs
 !/tests/translation_test.py
 !/tests/book_source_test.py
+!/tests/book_removal_test.py
 !/tests/cache_policy_test.py
 !/tests/ai_tutor_test.py
 !/tests/settings_test.py

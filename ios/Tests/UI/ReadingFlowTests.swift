@@ -30,7 +30,7 @@ final class ReadingFlowTests: XCTestCase {
         book.tap()
         XCTAssertTrue(paragraph.waitForExistence(timeout: 15), "Reading progress did not survive reopening")
         app.buttons["目录"].tap()
-        app.buttons["书签"].tap()
+        app.segmentedControls.buttons["书签"].tap()
         XCTAssertTrue(app.buttons["第二章 继续"].waitForExistence(timeout: 5), app.debugDescription)
     }
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {

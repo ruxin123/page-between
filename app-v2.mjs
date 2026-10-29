@@ -41,8 +41,9 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.50";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.51";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
+import { PdfPreviewCache } from "/ui/pdf-preview.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
@@ -129,7 +130,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.50";
+document.body.dataset.readerBuild = "2.51";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -769,7 +770,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.50",
+        build: "2.51",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1779,7 +1780,13 @@ let pdfDocument,
 const pdfTasks = new Map();
 const pdfQueued = new Set();
 const pdfPageDimensions = new WeakMap();
+const pdfPreviews = new PdfPreviewCache();
 function releasePdfPage(root) {
+  clearTimeout(root._textTimer);
+  delete root._textTimer;
+  delete root._startText;
+  delete root._textPreparing;
+  root.onpointerenter = root.onpointerdown = null;
   root.querySelectorAll("canvas").forEach((canvas) => {
     canvas.width = 0;
     canvas.height = 0;
@@ -1831,6 +1838,7 @@ async function paintPdfPage(index, revision) {
   )
     return;
   root.dataset.rendered = "loading";
+  pdfPreviews.show(index, root);
   root.removeAttribute("aria-hidden");
   root.setAttribute("aria-busy", "true");
   const pdf = pdfDocument;
@@ -1853,6 +1861,7 @@ async function paintPdfPage(index, revision) {
       );
     root.style.height = `${viewport.height}px`;
     canvas = document.createElement("canvas");
+    canvas.className = "pdf-bitmap";
     canvas.setAttribute("aria-label", `PDF 第 ${index} 页`);
     canvas.width = Math.floor(viewport.width * density);
     canvas.height = Math.floor(viewport.height * density);
@@ -1872,15 +1881,21 @@ async function paintPdfPage(index, revision) {
     // Publish the finished bitmap; a retry keeps the existing selection layer intact.
     canvas.addEventListener("contextlost", (event) => {
       event.preventDefault();
-      if (!active() || root.querySelector("canvas") !== canvas) return;
+      if (!active() || root.querySelector(".pdf-bitmap") !== canvas) return;
       root.dataset.rendered = "lost";
       ensurePdfPages();
     });
-    const previous = root.querySelector("canvas");
+    const previous = root.querySelector(".pdf-bitmap");
     if (previous) {
       previous.replaceWith(canvas);
       previous.width = previous.height = 0;
     } else root.prepend(canvas);
+    const preview = root.querySelector(".pdf-preview");
+    if (preview) {
+      preview.remove();
+      preview.width = preview.height = 0;
+    }
+    pdfPreviews.remember(index, canvas);
     root.querySelector(".pdf-page-error")?.remove();
     let text = root.querySelector(".textLayer");
     if (text) {
@@ -1896,12 +1911,21 @@ async function paintPdfPage(index, revision) {
     // Selection metadata is independent of the successfully drawn page image.
     root.dataset.rendered = "ready";
     // Text extraction/alignment must not hold up the next page's bitmap.
-    preparePdfText(page, text, root, viewport, index, revision);
+    root._startText = () =>
+      preparePdfText(page, text, root, viewport, index, revision);
+    root.onpointerenter = root.onpointerdown = () =>
+      schedulePdfText(root, true);
+    schedulePdfText(root);
   } catch (error) {
     if (!active()) return;
     if (error.name === "RenderingCancelledException") {
-      if (root.querySelector("canvas")) root.dataset.rendered = "lost";
+      if (root.querySelector(".pdf-bitmap")) root.dataset.rendered = "lost";
       else {
+        const preview = root.querySelector(".pdf-preview");
+        if (preview) {
+          preview.remove();
+          preview.width = preview.height = 0;
+        }
         delete root.dataset.rendered;
         root._pageProxy?.cleanup();
         delete root._pageProxy;
@@ -1925,10 +1949,49 @@ async function paintPdfPage(index, revision) {
     root.append(message);
   } finally {
     if (pdfTasks.get(index) === task) pdfTasks.delete(index);
-    if (canvas && canvas !== root.querySelector("canvas"))
+    if (canvas && canvas !== root.querySelector(".pdf-bitmap"))
       canvas.width = canvas.height = 0;
     if (active()) root.setAttribute("aria-busy", "false");
   }
+}
+function visiblePdfPages() {
+  const view = $("reading-viewport").getBoundingClientRect(),
+    pages = new Set();
+  // Use the reading viewport, not the entire window (toolbars and sidebars are outside it).
+  for (const page of wantedPdfPages()) {
+    const root = pdfPageElement(page);
+    if (!root) continue;
+    const rectangle = root.getBoundingClientRect();
+    if (
+      rectangle.bottom > view.top &&
+      rectangle.top < view.bottom &&
+      rectangle.right > view.left &&
+      rectangle.left < view.right
+    )
+      pages.add(page);
+  }
+  return pages;
+}
+function schedulePdfText(root, immediate = false) {
+  if (!root._startText || root._textReady || root._textPreparing) return;
+  if (
+    !immediate &&
+    (root._textTimer || !visiblePdfPages().has(Number(root.dataset.page)))
+  )
+    return;
+  clearTimeout(root._textTimer);
+  const start = () => {
+    root._textTimer = null;
+    if (
+      !root.isConnected ||
+      (!immediate && !visiblePdfPages().has(Number(root.dataset.page)))
+    )
+      return;
+    root._textPreparing = true;
+    root._startText?.();
+  };
+  if (immediate) start();
+  else root._textTimer = setTimeout(start, 180);
 }
 async function preparePdfText(page, text, root, viewport, index, revision) {
   const active = () =>
@@ -1936,6 +1999,7 @@ async function preparePdfText(page, text, root, viewport, index, revision) {
     root.isConnected &&
     root._viewport === viewport &&
     root.querySelector(".textLayer") === text;
+  if (!active()) return;
   try {
     const content = await page.getTextContent();
     if (!active()) return;
@@ -1991,11 +2055,13 @@ function ensurePdfPages() {
   const revision = renderRevision,
     index = location.index;
   const wanted = wantedPdfPages();
+  const visible = visiblePdfPages();
   // A fast jump takes priority over an obsolete, already running prefetch.
   for (const [page, task] of pdfTasks) if (!wanted.has(page)) task.cancel();
-  for (const page of wanted)
+  for (const page of new Set([...visible, ...wanted]))
     if (page >= 1 && page <= current.pages) {
       const root = pdfPageElement(page);
+      if (root && visible.has(page)) schedulePdfText(root);
       if (root) root._lastUsed = ++pdfUse;
       const canvas = root?.querySelector("canvas");
       if (
@@ -2132,6 +2198,7 @@ async function renderPdf(position, revision) {
     );
   const pdf = await pdfs.get(book.id);
   if (revision !== renderRevision) return;
+  pdfPreviews.use(pdf);
   const page = await pdf.getPage(position.index);
   if (revision !== renderRevision) return;
   if (!pdfPageDimensions.has(pdf)) {
@@ -2237,6 +2304,11 @@ async function renderPdf(position, revision) {
     stack.append(root);
   }
   restorePosition(() => scrollPdfTo(position));
+  let showingPreview = false;
+  for (const index of visiblePdfPages())
+    showingPreview =
+      pdfPreviews.show(index, pdfPageElement(index)) || showingPreview;
+  if (showingPreview) $("reader-loading").hidden = true;
   await paintPdfPage(position.index, revision);
   if (revision !== renderRevision) return;
   $("reader-loading").hidden = true;
@@ -2768,6 +2840,10 @@ async function renderCurrent(position) {
   );
   $("epub-frame").hidden = current.type !== "epub";
   $("pdf-paper").hidden = current.type !== "pdf";
+  $("reading-viewport").classList.toggle(
+    "pdf-viewport",
+    current.type === "pdf",
+  );
   $("reader-process").hidden = current.type !== "pdf";
   $("reader-loading").hidden = false;
   $("reader-loading").dataset.state = "loading";
@@ -2813,6 +2889,7 @@ async function renderCurrent(position) {
       pdfQueued.clear();
       for (const root of $("pdf-paper").children) releasePdfPage(root);
       pdfDocument = null;
+      pdfPreviews.clear();
       renderTask?.cancel();
       textLayerTask?.cancel();
       if (current.type === "epub") await renderEpub(position, revision);

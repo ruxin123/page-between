@@ -2,6 +2,15 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.29 · 2026-10-29
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.29) · Build 253 · 前端 2.51。
+
+- PDF 快速滚动时优先绘制可见页，延后途经页的文字层处理，指针进入则立即准备。
+- 缩放和页面重绘时复用轻量底图，高清完成后替换，减少阅读中的白闪。
+- 稳定 PDF 滚动条槽，改用细边框减少整页模糊阴影开销。
+- 延续 PDF.js 与已有 OCR／MinerU 结果；本轮仅改善现有阅读链路。
+
 ## 0.5.28 · 2026-10-29
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.28) · Build 252 · 前端 2.50。

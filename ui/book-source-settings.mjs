@@ -8,11 +8,11 @@ export function createBookSourceSettings({ api, post, toast }) {
     loading = true;
     try {
       const config = await api("/api/book-source/settings");
-      panel.innerHTML = `<form class="service-form"><div class="service-heading"><span class="service-symbol">${icon("search")}</span><div><h2>Z-Library</h2><span class="service-badge" data-ready="${config.hasPassword}">${config.hasPassword ? "已配置" : "尚未配置"}</span></div></div><fieldset><legend class="visually-hidden">书源账号</legend>
+      panel.innerHTML = `<form class="service-form"><div class="service-heading"><span class="service-symbol">${icon("search")}</span><div><h2>Z-Library</h2></div></div><fieldset><legend class="visually-hidden">书源账号</legend>
         <label class="service-field">账号邮箱<input name="email" type="email" required maxlength="320" autocomplete="username" value="${escapeHTML(config.email)}"></label>
-        <label class="service-field">密码<input name="password" type="password" maxlength="4096" autocomplete="new-password" placeholder="${config.hasPassword ? "已保存，留空保持现有密码" : "填写账号密码"}"><small>保存在 macOS 钥匙串。</small></label>
+        <label class="service-field">密码<input name="password" type="password" maxlength="4096" autocomplete="new-password" placeholder="${config.hasPassword ? "已保存，留空保持现有密码" : "填写账号密码"}"></label>
         <div class="service-actions"><button class="primary-button" type="submit">保存设置</button><button class="secondary-button" type="button" data-test ${config.hasPassword ? "" : "disabled"}>测试连接</button><a href="#/source">去找书</a></div></fieldset><p class="service-result" data-result role="status" aria-live="polite"></p></form>
-        <div class="source-component"><h3>搜索组件</h3><p data-component-state>${config.installed ? "已安装" : "首次安装需要 Node.js 22+、npm、uv 与 Git。"}</p><button class="secondary-button" data-install ${config.installed ? "hidden" : ""}>安装组件</button></div>`;
+        <div class="source-component" ${config.installed ? "hidden" : ""}><p data-component-state>搜索组件未安装</p><button class="secondary-button" data-install ${config.installed ? "hidden" : ""}>安装组件</button></div>`;
       const form = panel.querySelector("form"),
         result = panel.querySelector("[data-result]");
       const message = (text, kind = "") => {
@@ -70,7 +70,7 @@ export function createBookSourceSettings({ api, post, toast }) {
           if (task.status !== "ready")
             throw Error(task.error || "组件安装未完成。");
           button.hidden = true;
-          panel.querySelector("[data-component-state]").textContent = "已安装";
+          panel.querySelector(".source-component").hidden = true;
         } catch (error) {
           message(error.message, "error");
         } finally {

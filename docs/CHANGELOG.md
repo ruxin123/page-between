@@ -2,6 +2,15 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.30 · 2026-10-30
+
+[下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.30) · Build 254 · 前端 2.52。
+
+- 精简书库、阅读、找书、设置、导入、翻译、答疑和文档处理界面的重复标签与说明。
+- 移除装饰性英文眉题、常驻本机保存说明、重复格式状态及冗余配置徽标。
+- 保留必要字段、来源、页码、错误与处理状态；答疑设置收至标题栏图标。
+- 将简洁界面原则写入 `AGENTS.md`，适用于网页与原生客户端后续开发。
+
 ## 0.5.29 · 2026-10-29
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.29) · Build 253 · 前端 2.51。

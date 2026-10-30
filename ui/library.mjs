@@ -60,7 +60,7 @@ export function createLibraryView(doc) {
   function createCard() {
     const card = doc.createElement("article");
     card.className = "library-book";
-    card.innerHTML = `<button class="cover-open"></button><button class="book-more icon-button">${icon("more")}</button><div class="book-card-foot"><div class="book-card-copy"><h3></h3><p></p><div class="book-tags"><span class="book-format"></span><span aria-hidden="true">·</span><span class="book-status"></span></div><button class="book-process" hidden>文档处理</button></div><button class="shelf-star">${icon("star")}</button></div>`;
+    card.innerHTML = `<button class="cover-open"></button><button class="book-more icon-button">${icon("more")}</button><div class="book-card-foot"><div class="book-card-copy"><h3></h3><p></p><div class="book-tags"><span class="book-format"></span><span class="book-tag-separator" aria-hidden="true">·</span><span class="book-status"></span></div><button class="book-process" hidden>文档处理</button></div><button class="shelf-star">${icon("star")}</button></div>`;
     return card;
   }
   function updateCard(card, book) {
@@ -82,7 +82,7 @@ export function createLibraryView(doc) {
     options.dataset.options = book.id;
     options.setAttribute("aria-label", `${book.title}的设置`);
     const processing = card.querySelector(".book-process");
-    processing.hidden = book.type !== "pdf";
+    processing.hidden = book.type !== "pdf" || book.localPreparation?.status !== "running";
     processing.dataset.process = book.id;
     processing.setAttribute("aria-label", `处理 PDF 文档 ${book.title}`);
     processing.textContent =
@@ -98,16 +98,13 @@ export function createLibraryView(doc) {
       book.processing === "pending"
         ? book.type === "pdf"
           ? book.processingKind === "mineru"
-            ? "云端内容增强中"
-            : "目录准备中"
-          : "文字与目录准备中"
+            ? "解析中"
+            : "准备目录…"
+          : "处理中…"
         : book.processing === "error"
-          ? "处理待重试"
-          : book.type === "epub"
-            ? "原书排版"
-            : book.type === "pdf"
-              ? "原书版面"
-              : `${book.chapters.length} 章`;
+          ? "待重试"
+          : "";
+    card.querySelector(".book-tag-separator").hidden = !card.querySelector(".book-status").textContent;
     card.dataset.processing = book.processing || "ready";
     const star = card.querySelector(".shelf-star");
     star.dataset.star = book.id;
@@ -124,8 +121,8 @@ export function createLibraryView(doc) {
       );
       const selected = filterBooks(books, filter, query);
       $("library-summary").textContent = query.trim()
-        ? `找到 ${selected.length} 本 · 共 ${books.length} 本书籍`
-        : `${books.length} 本书籍 · 原文件保存在本机`;
+        ? `${selected.length} 本`
+        : "";
       reconcileCards(
         $("library-grid"),
         books,
@@ -136,18 +133,13 @@ export function createLibraryView(doc) {
       );
       $("library-empty").hidden = selected.length > 0;
       $("empty-title").textContent = !books.length
-        ? "从一本书开始"
+        ? "暂无书籍"
         : filter === "pinned" && !query
-          ? "给常读的书留个位置"
-          : "还没有找到这本书";
-      $("empty-description").textContent = !books.length
-        ? "导入 EPUB、PDF 或其他电子书，继续阅读的地方会为你保留。"
-        : filter === "pinned" && !query
-          ? "点击书籍旁的星标，下次在「常读」中就能找到。"
-          : "试试其他关键词，或回到全部书籍。";
+          ? "暂无常读书籍"
+          : "未找到书籍";
       $("empty-action").textContent = books.length
         ? "查看全部书籍"
-        : "导入第一本书";
+        : "导入书籍";
       $("empty-action").dataset.emptyAction = books.length ? "clear" : "import";
       if (focusedCard?.hidden)
         (
@@ -177,7 +169,7 @@ export function createLibraryView(doc) {
             last.type !== "pdf" &&
             !["comic", "pre-paginated"].includes(last.layout);
           $("continue-reading").innerHTML =
-            `<article class="continue-card">${cover(last, true)}<div class="continue-copy"><small>继续阅读</small><h2>${escapeHTML(last.title)}</h2><p>${escapeHTML(description)}${fraction ? ` · ${Math.round(fraction * 100)}%` : ""}</p></div><div class="continue-actions"><button class="primary-button" data-read="${escapeHTML(last.id)}">翻开书页 ${icon("forward")}</button>${canPalm ? `<button class="secondary-button palm-action" data-palm="${escapeHTML(last.id)}">${icon("palm")}掌上阅读</button>` : ""}</div><div class="continue-progress" style="width:${Math.max(1, fraction * 100)}%"></div></article>`;
+            `<article class="continue-card">${cover(last, true)}<div class="continue-copy"><h2>${escapeHTML(last.title)}</h2><p>${escapeHTML(description)}${fraction ? ` · ${Math.round(fraction * 100)}%` : ""}</p></div><div class="continue-actions"><button class="primary-button" data-read="${escapeHTML(last.id)}">继续阅读 ${icon("forward")}</button>${canPalm ? `<button class="secondary-button palm-action" data-palm="${escapeHTML(last.id)}">${icon("palm")}掌上阅读</button>` : ""}</div><div class="continue-progress" style="width:${Math.max(1, fraction * 100)}%"></div></article>`;
           continueSignature = signature;
         }
       }

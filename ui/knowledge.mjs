@@ -50,7 +50,7 @@ export function createBookSearch({ post, toast, getContext, openSource }) {
     resultBook = null;
     $("knowledge-results").replaceChildren();
     $("knowledge-results").setAttribute("aria-busy", "true");
-    $("knowledge-status").textContent = "正在准备本书索引…";
+    $("knowledge-status").textContent = "搜索中…";
     try {
       const data = await post("/api/index/search", {
         book: context.book,
@@ -64,7 +64,7 @@ export function createBookSearch({ post, toast, getContext, openSource }) {
       resultRevision = version;
       const { covered, total, unit, partial } = data.status;
       $("knowledge-status").textContent =
-        `可检索 ${covered} / ${total} ${unit}${partial ? (context.type === "pdf" ? " · 尚无文字的扫描页可通过精细解析补充" : " · 无文字的封面和图像页不参与检索") : " · 索引保存在本机"}`;
+        partial ? `仅覆盖 ${covered} / ${total} ${unit}` : "";
       $("knowledge-results").innerHTML = results.length
         ? results
             .map(
@@ -72,7 +72,7 @@ export function createBookSearch({ post, toast, getContext, openSource }) {
                 `<article class="knowledge-result"><button data-knowledge-preview="${index}" aria-expanded="false"><strong>${escapeHTML(entry.label || entry.citation)}</strong><span>${escapeHTML(entry.text.slice(0, 140))}</span><small>${escapeHTML(entry.citation)}</small></button><div class="knowledge-preview" hidden><p>${escapeHTML(entry.text)}</p><button class="secondary-button" data-knowledge-jump="${index}">前往原文</button></div></article>`,
             )
             .join("")
-        : '<div class="empty-state">没有找到匹配内容。可换一个术语、定理编号，或调整检索范围。</div>';
+        : '<div class="empty-state">未找到相关内容</div>';
     } catch (error) {
       if (version === revision) {
         $("knowledge-status").textContent = error.message;

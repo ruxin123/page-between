@@ -25,7 +25,7 @@ export function createDataSettings({ api, post, toast }) {
       $("data-reveal").hidden = !bridge;
       $("data-restore-review").hidden = !data.pendingRestore;
       $("data-restore-summary").textContent = data.pendingRestore
-        ? `${data.restoreBooks} 本备份已校验。确认后将在下次启动替换当前 ${data.books} 本书的书库；当前书库另行保留，服务配置和凭据保持。`
+        ? `${data.restoreBooks} 本书将替换当前 ${data.books} 本书，当前书库会保留为恢复点。`
         : "";
       $("data-confirm-restore").textContent = data.restoreApproved
         ? "已确认 · 立即重启"
@@ -60,24 +60,24 @@ export function createDataSettings({ api, post, toast }) {
     else $("data-status").textContent = "已准备，重新启动应用后生效。";
   }
   $("data-backup").onclick = () =>
-    run("正在打包并校验书库，可继续阅读…", async () => {
+    run("正在生成备份…", async () => {
       const result = await post("/api/data/backup", {});
       downloadFile(result);
       $("data-status").textContent =
-        `已准备 ${result.books} 本书及阅读记录的备份，请选择保存位置。`;
+        "备份已生成。";
     });
   $("data-restore").onclick = () => $("data-restore-file").click();
   $("data-restore-file").onchange = (event) => {
     const file = event.target.files[0];
     event.target.value = "";
     if (!file) return;
-    run("正在检查备份，当前书库保持可用…", async () => {
+    run("正在检查备份…", async () => {
       await api("/api/data/restore", {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: file,
       });
-      $("data-status").textContent = "校验完成，请查看恢复说明后确认。";
+      $("data-status").textContent = "请选择是否恢复。";
     });
   };
   $("data-confirm-restore").onclick = () =>
@@ -86,20 +86,20 @@ export function createDataSettings({ api, post, toast }) {
       restart();
     });
   $("data-cancel-restore").onclick = () =>
-    run("正在取消准备的恢复…", async () => {
+    run("正在取消…", async () => {
       await post("/api/data/cancel-restore", {});
-      $("data-status").textContent = "已取消，当前书库保持。";
+      $("data-status").textContent = "已取消。";
     });
   $("data-previous").onclick = () =>
-    run("正在校验恢复前保留的书库…", async () => {
+    run("正在检查恢复点…", async () => {
       await post("/api/data/previous", {});
-      $("data-status").textContent = "已准备恢复前的书库，请确认。";
+      $("data-status").textContent = "请选择是否恢复。";
     });
   $("data-clear-cache").onclick = () =>
     run("正在准备清理…", async () => {
       await post("/api/data/clear-cache", {});
       $("data-status").textContent =
-        "重启时清理可重新生成的缓存，书籍、阅读记录和服务设置保留。";
+        "重启后清理缓存，书籍与记录保留。";
     });
   $("data-restart").onclick = restart;
   $("data-reveal").onclick = () =>

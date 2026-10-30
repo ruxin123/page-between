@@ -391,13 +391,8 @@ kbd {
   color: var(--accent);
   letter-spacing: 0;
 }
-.rail-caption {
-  font-size: 10px;
-  color: var(--secondary);
-  letter-spacing: 2px;
-  margin: 19px 0 48px 12px;
-}
 .app-rail nav {
+  margin-top: 32px;
   display: grid;
   gap: 7px;
 }
@@ -430,20 +425,6 @@ kbd {
 .rail-foot {
   margin-top: auto;
 }
-.local-note {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 25px 8px 0;
-  font-size: 10px;
-  color: var(--secondary);
-}
-.local-note b {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--accent);
-}
 .workspace-main {
   overflow: auto;
   min-width: 0;
@@ -472,11 +453,6 @@ kbd {
   color: var(--secondary);
   line-height: 1.8;
   margin: 7px 0;
-}
-.eyebrow {
-  font-size: 9px;
-  color: var(--secondary);
-  letter-spacing: 2.5px;
 }
 .continue-card {
   display: flex;
@@ -870,19 +846,6 @@ kbd {
   font-weight: 500;
   margin: 0 0 4px;
 }
-.service-badge {
-  font-size: 11px;
-  color: var(--secondary);
-}
-.service-badge[data-ready="true"] {
-  color: var(--accent);
-}
-.service-description {
-  color: var(--secondary);
-  font-size: 12px;
-  line-height: 1.9;
-  margin: 20px 0 24px;
-}
 .service-form fieldset {
   padding: 0;
   border: 0;
@@ -987,12 +950,6 @@ kbd {
 .service-note strong {
   font-size: 12px;
   font-weight: 500;
-}
-.ai-settings-link {
-  display: inline-block;
-  color: var(--accent);
-  font-size: 11px;
-  margin: 4px 0 16px;
 }
 @media (max-width: 1100px) {
   .service-layout {
@@ -1246,15 +1203,6 @@ kbd {
   font-family: var(--en-font), var(--zh-font), serif;
   border-radius: 2px;
   box-shadow: var(--shadow-card);
-}
-.chapter-eyebrow {
-  text-align: center;
-  font:
-    10px -apple-system,
-    sans-serif;
-  color: var(--secondary);
-  letter-spacing: 2px;
-  margin-bottom: 20px;
 }
 .text-paper h1 {
   font-size: 26px;
@@ -2033,12 +1981,6 @@ dialog::backdrop {
   color: var(--secondary);
   margin-top: 9px;
 }
-.import-policy {
-  font-size: 11px;
-  line-height: 1.9;
-  color: var(--secondary);
-  margin: 18px 0 0;
-}
 .import-files {
   display: grid;
   gap: 12px;
@@ -2339,11 +2281,6 @@ body[data-mode="palm"] .text-paper {
   min-height: 100%;
   box-shadow: none;
 }
-body[data-mode="palm"] .chapter-eyebrow {
-  font-size: 8px;
-  letter-spacing: 1px;
-  margin-bottom: 10px;
-}
 body[data-mode="palm"] .text-paper h1 {
   font-size: calc(var(--reading-size) * 1.15);
   letter-spacing: 0;
@@ -2390,11 +2327,6 @@ body[data-mode="palm"] .chapter-next {
   padding: 7px 12px;
 }
 /* Library controls share the same surface and focus treatment in every theme. */
-.eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  font-weight: 600;
-}
 .page-heading h1 {
   letter-spacing: -0.015em;
 }
@@ -2717,11 +2649,8 @@ body[data-mode="palm"] .chapter-next {
     height: 28px;
     font-size: 18px;
   }
-  .rail-caption,
-  .local-note {
-    display: none;
-  }
   .app-rail nav {
+    margin-top: 0;
     display: flex;
     gap: 1px;
     margin-left: auto;
@@ -2762,9 +2691,6 @@ body[data-mode="palm"] .chapter-next {
   }
   .page-heading p {
     font-size: 11px;
-  }
-  .eyebrow {
-    font-size: 8px;
   }
   .continue-card {
     padding: 18px;
@@ -3199,15 +3125,11 @@ body[data-mode="palm"] .text-host {
 .question-source:hover {
   outline: 1px solid var(--accent);
 }
-.ai-model-status,
-.ai-service-details {
+.ai-model-status {
   color: var(--secondary);
   font-size: 11px;
   line-height: 1.8;
   margin-top: 8px;
-}
-.ai-service-details span {
-  overflow-wrap: anywhere;
 }
 .ai-history-list {
   padding-top: 16px;
@@ -3231,7 +3153,6 @@ body[data-mode="palm"] .text-host {
   margin-top: 0;
 }
 body[data-mode="palm"] .question-panel .ai-settings-link,
-body[data-mode="palm"] .question-panel .ai-service-details,
 body[data-mode="palm"] #ai-question-form > p:last-child {
   display: none;
 }
@@ -3678,10 +3599,6 @@ body[data-mode="tutor"] .question-panel .aside-head {
   flex: 1;
   font-weight: 500;
 }
-.translation-label {
-  font-size: 12px;
-  color: var(--secondary);
-}
 .translation-original-preview,
 .translation-output,
 .translation-panel textarea {
@@ -3883,16 +3800,18 @@ body[data-mode="translation"] .translation-panel .aside-head > strong {
 .service-layout {
   grid-template-columns: minmax(0, 720px);
 }
-.service-help,
 .inline-help {
   font-size: 12px;
   color: var(--secondary);
 }
-.service-help summary,
 .inline-help summary {
   cursor: pointer;
   padding: 8px 0;
 }
+#library-summary:empty,
+.toc-source:empty,
+.service-storage-note:empty,
+.book-card-copy p:empty,
 .ai-model-status:empty,
 .setting-note:empty {
   display: none;
@@ -3971,8 +3890,6 @@ body[data-mode="translation"] .translation-panel .aside-head > strong {
 .source-cover > span { font-family:ReaderHanSerif,Georgia,serif; font-size:12px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .source-cover small { color:inherit; font-size:10px; text-transform:uppercase; opacity:.7; }
 .source-format { display:inline-flex; padding:4px 8px; background:var(--soft); color:var(--accent); font-size:11px; text-transform:uppercase; border-radius:4px; }
-.source-invitation { padding:80px 24px; text-align:center; color:var(--secondary); }
-.source-invitation svg { width:48px; height:48px; opacity:.6; }
 .source-invitation h2 { font-size:20px; color:var(--ink); margin:20px 0 12px; font-weight:500; }
 .source-invitation p { font-size:14px; }
 .source-description { white-space:pre-wrap; font-size:14px; line-height:1.8; }
@@ -3982,7 +3899,6 @@ body[data-mode="translation"] .translation-panel .aside-head > strong {
 .source-result[aria-pressed="true"] { background:var(--soft); border-radius:8px; box-shadow:inset 3px 0 var(--accent); }
 @media(min-width:801px) { .source-browser aside { max-height:calc(100vh - 48px); overflow-y:auto; } }
 @media(max-width:800px) { .source-browser aside { grid-row:1; } }
-.source-invitation svg { display:block; margin:0 auto; }
 .danger-button { color:#a64437; margin:0 24px 16px; }
 .removed-book-row { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:16px 0; border-bottom:1px solid var(--line); }
 .removed-book-row span { overflow-wrap:anywhere; }

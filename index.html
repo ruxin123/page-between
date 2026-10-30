@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.51" />
+    <link rel="stylesheet" href="/layout.css?v=2.52" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -24,7 +24,6 @@
     <div id="workspace" class="workspace" hidden>
       <aside class="app-rail" aria-label="应用导航">
         <a class="wordmark" href="#/library"><span>间</span>页间</a>
-        <div class="rail-caption">自己的阅读空间</div>
         <nav>
           <a href="#/library" data-nav="library"
             ><i data-icon="library"></i>书库</a
@@ -45,7 +44,7 @@
           </button>
           <a href="#/settings" data-nav="settings"
             ><i data-icon="settings"></i>设置</a
-          ><span class="local-note"><b></b>保存在这台 Mac</span>
+          >
         </div>
       </aside>
       <main class="workspace-main">
@@ -53,9 +52,8 @@
         <section id="library-view" class="app-view">
           <header class="page-heading">
             <div>
-              <div class="eyebrow" id="library-eyebrow">LIBRARY</div>
               <h1 id="library-title">书库</h1>
-              <p id="library-summary"></p>
+              <p id="library-summary" role="status"></p>
             </div>
             <button class="primary-button" id="import-open">
               <i data-icon="plus"></i>导入书籍
@@ -86,22 +84,20 @@
             <span class="empty-art" aria-hidden="true"
               ><i data-icon="pages"></i
             ></span>
-            <h2 id="empty-title">从一本书开始</h2>
-            <p id="empty-description"></p>
+            <h2 id="empty-title">暂无书籍</h2>
             <button
               id="empty-action"
               class="primary-button"
               data-empty-action="import"
             >
-              导入第一本书
+              导入书籍
             </button>
           </div>
         </section>
         <section id="settings-view" class="app-view" hidden>
           <header class="page-heading">
             <div>
-              <div class="eyebrow">PREFERENCES</div>
-              <h1>让阅读合你心意</h1>
+              <h1>设置</h1>
             </div>
           </header>
           <div class="settings-tabs" role="tablist" aria-label="设置分类">
@@ -195,7 +191,6 @@
               </details>
             </div>
             <article class="type-sample">
-              <small>阅读预览</small>
               <h2>留一点时间给书</h2>
               <p>
                 书页在眼前展开，窗外的声音渐渐远了。沿着文字往前走，偶尔停下来，想一想刚刚读到的那句话。
@@ -246,11 +241,7 @@
               </div>
             </div>
             <fieldset id="data-actions">
-              <h2>把书和阅读积累带在身边</h2>
-              <p class="setting-note">
-                备份包含原书、目录、进度、书签、解析结果与对话。模型和 MinerU
-                的凭据留在本机钥匙串中。
-              </p>
+              <h2>备份与恢复</h2>
               <div class="service-actions">
                 <button id="data-backup" class="primary-button">
                   保存完整备份</button
@@ -284,7 +275,6 @@
               <hr />
               <h2>清理缓存</h2>
               <p id="data-cache-details" class="setting-note"></p>
-              <p class="setting-note">仅清理临时文件，书籍与记录保留。</p>
               <div class="service-actions">
                 <button id="data-clear-cache" class="secondary-button">
                   准备清理缓存</button
@@ -319,7 +309,7 @@
             <i data-icon="back"></i>
           </button>
           <div class="reader-heading">
-            <strong id="book-title"></strong><small id="book-subtitle"></small>
+            <strong id="book-title"></strong>
           </div>
         </div>
         <div class="reader-actions">
@@ -442,7 +432,6 @@
         >
           <div id="text-host" class="text-host" hidden>
             <article id="text-paper" class="text-paper" hidden>
-              <div id="chapter-eyebrow" class="chapter-eyebrow"></div>
               <h1 id="chapter-title"></h1>
               <div class="chapter-rule">❦</div>
               <div id="chapter-body" class="chapter-body"></div>
@@ -527,7 +516,7 @@
         >
         <div id="toc-list" class="toc-list"></div>
         <div id="bookmarks-list" class="bookmarks-list" hidden></div>
-        <div id="toc-source" class="toc-source"></div>
+        <div id="toc-source" class="toc-source" role="status"></div>
         <button id="toc-edit" class="toc-edit" hidden>调整章节…</button>
       </aside>
       <aside
@@ -673,11 +662,6 @@
               >
                 <i data-icon="edit"></i>
               </button>
-              <span
-                id="translation-detected"
-                class="translation-label"
-                hidden
-              ></span>
               <button
                 id="translation-submit"
                 class="primary-button"
@@ -783,20 +767,20 @@
         </button>
       </header>
       <form id="knowledge-form" class="knowledge-form">
-        <label for="knowledge-query">查找术语、原文或定理编号</label>
+        <label for="knowledge-query" class="visually-hidden">书内搜索</label>
         <div>
           <input
             id="knowledge-query"
             type="search"
             maxlength="6000"
-            placeholder="例如：Definition 1.1、连续函数"
+            placeholder="术语、原文或定理编号"
           /><button class="primary-button" type="submit">查找</button>
         </div>
         <label class="knowledge-scope"
           ><input
             id="knowledge-previous"
             type="checkbox"
-          />只看当前位置之前的内容</label
+          />仅限前文</label
         >
       </form>
       <p id="knowledge-status" class="setting-note" role="status"></p>
@@ -817,7 +801,7 @@
           >书内答疑</strong
         ><button id="ai-history-toggle" class="secondary-button">
           本书记录</button
-        ><button
+        ><a class="ai-settings-link icon-button" href="#/settings/ai" aria-label="模型设置" title="模型设置"><i data-icon="settings"></i></a><button
           id="question-close"
           class="icon-button"
           aria-label="关闭书内答疑"
@@ -826,11 +810,6 @@
         </button>
       </div>
       <div id="ai-model-status" class="ai-model-status" role="status"></div>
-      <a class="ai-settings-link" href="#/settings/ai">模型设置</a>
-      <details id="ai-service-details" class="ai-service-details" hidden>
-        <summary>模型</summary>
-        <span id="ai-service"></span>
-      </details>
       <div id="ai-history-list" class="ai-history-list" hidden></div>
       <div id="ai-conversation">
         <div class="ai-thread">
@@ -858,7 +837,7 @@
               checked
             />引用前文</label
           >
-          <label for="question-input">问题</label
+          <label for="question-input" class="visually-hidden">问题</label
           ><textarea
             id="question-input"
             rows="3"
@@ -900,7 +879,6 @@
           ><small>EPUB · PDF · TXT · Kindle 等</small></label
         >
         <div id="import-files" class="import-files"></div>
-        <p id="import-policy" class="import-policy">PDF、TXT 默认开启解析。</p>
         <div id="import-result" class="import-result" role="status"></div>
       </div>
       <div class="dialog-footer">
@@ -920,7 +898,6 @@
         </button>
       </form>
       <div class="jobs-body">
-        <p class="setting-note">正在后台处理，可关闭窗口。</p>
         <div id="import-jobs" class="job-list"></div>
         <details class="inline-help">
           <summary>支持的格式</summary>
@@ -962,10 +939,9 @@
     >
       <h2 id="book-remove-heading">删除书籍？</h2>
       <p id="book-remove-title"></p>
-      <p>将移至最近删除，阅读记录与解析结果保留。</p>
       <div class="dialog-footer">
         <button id="book-remove-cancel" class="secondary-button">取消</button
-        ><button id="book-remove-confirm" class="primary-button">删除</button>
+        ><button id="book-remove-confirm" class="primary-button">移至最近删除</button>
       </div>
       <p id="book-remove-error" role="status"></p>
     </dialog>
@@ -978,7 +954,6 @@
         <h2 id="removed-books-heading">最近删除</h2>
         <button class="icon-button" aria-label="关闭最近删除">×</button>
       </form>
-      <p class="setting-note">书籍文件与阅读记录保留，可随时恢复。</p>
       <div id="removed-books-list"></div>
       <p id="removed-books-status" role="status"></p>
     </dialog>
@@ -995,7 +970,6 @@
       </form>
       <div class="chapters-intro">
         <strong id="chapters-book"></strong>
-        <p id="chapters-note" class="setting-note"></p>
       </div>
       <div class="chapters-editor">
         <nav id="chapters-browser" aria-label="选择要调整的章节">
@@ -1038,7 +1012,7 @@
         <details id="chapters-reset">
           <summary>重新识别目录</summary>
           <p class="setting-note">
-            重新使用通用章节规则生成目录，会替换当前调整；完成后仍可恢复上一版。
+            将替换当前目录，可恢复上一版。
           </p>
           <button id="chapters-auto" class="secondary-button">
             重新识别目录
@@ -1079,7 +1053,7 @@
         </div>
         <p id="export-status" class="setting-note" role="status"></p>
         <button id="export-submit" class="primary-button" type="submit">
-          准备并保存 EPUB
+          保存 EPUB
         </button>
       </form>
     </dialog>
@@ -1108,7 +1082,6 @@
         <p id="local-preparation-status" class="setting-note" role="status">
           正在读取准备进度…
         </p>
-        <p class="setting-note">自动预备附近页面，结果随书保存。</p>
         <div class="document-process-actions">
           <button type="button" id="local-prepare-all" class="secondary-button">
             提前准备整本</button
@@ -1156,17 +1129,14 @@
             暂停云解析
           </button>
         </div>
-        <p class="setting-note">所选页面将上传至 MinerU，使用解析额度。</p>
+        <p class="setting-note">所选页将上传至 MinerU。</p>
         <form id="cloud-form" class="cloud-form">
           <label class="service-field"
             >PDF 文件页序<input
               id="cloud-pages"
               required
               maxlength="2000"
-              placeholder="例如 29-34 或 2,5-8" /><small
-              id="cloud-page-count"
-            ></small
-          ></label>
+              placeholder="例如 29-34 或 2,5-8" /></label>
           <div class="cloud-range-actions">
             <button type="button" id="cloud-current" class="secondary-button">
               当前页附近</button
@@ -1177,7 +1147,6 @@
           <label class="setting-check"
             >重新提交解析<input id="cloud-fresh" type="checkbox"
           /></label>
-          <p class="setting-note">已完成页面会复用。</p>
           <p id="cloud-status" class="setting-note" role="status"></p>
           <a id="cloud-settings" href="#/settings/mineru">管理 MinerU 服务</a>
           <div class="cloud-footer">
@@ -1225,6 +1194,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.51"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.52"></script>
   </body>
 </html>

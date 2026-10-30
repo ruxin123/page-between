@@ -39,10 +39,8 @@ export function createBookExport({ post, getBook, toast }) {
         )
       : "";
     $("export-policy").textContent = pdf
-      ? "已解析页使用可重排文字、公式和表格；尚无文字的页保留原图。导入导出后的 EPUB 时，如果原 PDF 仍在书库，可一键查看原页。"
-      : book.format === "EPUB"
-        ? "保留原书目录、插图与样式，导出完整 EPUB 副本。"
-        : "按章节生成 EPUB。";
+      ? "未解析页保留原图。"
+      : "";
     $("export-status").textContent = "";
     $("export-dialog").showModal();
   }

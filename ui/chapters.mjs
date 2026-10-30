@@ -47,9 +47,6 @@ export function createChapterEditor({
     $("chapters-preview").textContent = split?.text || "";
     $("chapters-browser").hidden = !!split;
     $("chapters-restore").hidden = !!split;
-    $("chapters-note").textContent = book.parseEnabled
-      ? "改标题或合并相邻章节；在正文选中起点，还可以拆分章节。原文件与阅读记录保留。"
-      : "当前使用全文阅读。可以先识别章节并启用导航，再调整目录。";
     list();
   }
 

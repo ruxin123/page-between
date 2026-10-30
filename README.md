@@ -4,17 +4,17 @@
 
 [下载最新版本](https://github.com/ruxin123/page-between/releases/latest) · [全部版本](https://github.com/ruxin123/page-between/releases) · [更新日志](docs/CHANGELOG.md)
 
-iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcode 工程见 [iPhone 版](ios/README.md)。手机安装方式稍后确定，目前的 Releases 安装包适用于 macOS。
+iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcode 工程见 [iPhone 版](ios/README.md)。手机先通过连接 Mac 安装，设备与签名准备稍后进行；目前的 Releases 安装包适用于 macOS。
 
 ![页间书库](docs/screenshots/library.png)
 
 ## 下载与安装
 
-当前发布版本 **0.5.29**，提供 Apple Silicon（arm64）安装包。
+当前发布版本 **0.5.30**，提供 Apple Silicon（arm64）安装包。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.29/page-between-0.5.29-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
+| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.30/page-between-0.5.30-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
 
 1. 下载 ZIP 并解压，将「页间.app」拖入应用程序文件夹。
 2. 打开应用，在书库点击「导入书籍」，选择文件并设置是否启用文档解析。
@@ -28,7 +28,7 @@ iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcod
 
 ### 找到书，直接加入书库
 
-侧栏「找书」进入独立页面，提供搜索、格式筛选、书籍列表、版本详情和下载导入。选择版本后点击「下载并加入书库」，可调整解析开关；重复文件自动去重，完成后可直接阅读。账号与组件直接在「设置 → 书源账号」中配置。
+侧栏「找书」进入独立页面，提供搜索、格式筛选、书籍列表、版本详情和下载导入。选择版本后点击「下载导入」，可调整解析开关；重复文件自动去重，完成后可直接阅读。账号与组件直接在「设置 → 书源账号」中配置。
 
 此功能使用可选的 [zlibrary-mcp](https://github.com/rookslog/zlibrary-mcp) 本机组件。首次安装需 Node.js 22+、npm、uv 与 Git；在书源设置中安装组件并保存自己的 Z-Library 邮箱、密码。密码保存在 macOS 钥匙串。原网页浏览窗口继续作为网站入口保留。
 

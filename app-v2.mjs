@@ -41,7 +41,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.51";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.52";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { PdfPreviewCache } from "/ui/pdf-preview.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
@@ -130,7 +130,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.51";
+document.body.dataset.readerBuild = "2.52";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -416,10 +416,10 @@ function renderJobs() {
     entries
       .map(
         (job) =>
-          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "处理中" : job.status === "error" ? "待处理" : job.status === "paused" ? "已暂停" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong><p>${escapeHTML(job.phase)}</p></div><div class="job-actions">${job.kind === "mineru" && job.status === "running" ? `<button class="secondary-button" data-pause-job="${escapeHTML(job.book)}">暂停</button>` : job.kind === "mineru" && ["paused", "error"].includes(job.status) ? `<button class="secondary-button" data-cloud="${escapeHTML(job.book)}" data-pages="${escapeHTML(formatPages(job.pages))}">继续任务</button>` : job.status === "error" && job.kind !== "selection" ? `<button class="secondary-button" data-retry="${escapeHTML(job.book)}">重新解析</button><button class="secondary-button" data-options="${escapeHTML(job.book)}">书籍设置</button>` : ""}${books.find((book) => book.id === job.book)?.type === "pdf" ? `<button class="secondary-button" data-process="${escapeHTML(job.book)}">文档处理</button>` : ""}<button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></div></article>`,
+          `<article class="job-row"><span class="job-label ${escapeHTML(job.status)}">${job.status === "running" ? "处理中" : job.status === "error" ? "待处理" : job.status === "paused" ? "已暂停" : "可阅读"}</span><div class="job-copy"><strong>${escapeHTML(job.title)}</strong>${job.status === "ready" || !job.phase ? "" : `<p>${escapeHTML(job.phase)}</p>`}</div><div class="job-actions">${job.kind === "mineru" && job.status === "running" ? `<button class="secondary-button" data-pause-job="${escapeHTML(job.book)}">暂停</button>` : job.kind === "mineru" && ["paused", "error"].includes(job.status) ? `<button class="secondary-button" data-cloud="${escapeHTML(job.book)}" data-pages="${escapeHTML(formatPages(job.pages))}">继续任务</button>` : job.status === "error" && job.kind !== "selection" ? `<button class="secondary-button" data-retry="${escapeHTML(job.book)}">重新解析</button><button class="secondary-button" data-options="${escapeHTML(job.book)}">书籍设置</button>` : ""}${books.find((book) => book.id === job.book)?.type === "pdf" ? `<button class="secondary-button" data-process="${escapeHTML(job.book)}">文档处理</button>` : ""}<button class="secondary-button" data-read="${escapeHTML(job.book)}">阅读</button></div></article>`,
       )
       .join("") ||
-    '<div class="empty-state">还没有处理任务，导入一本书即可开始。</div>';
+    '<div class="empty-state">暂无处理任务</div>';
 }
 function openJobs() {
   renderJobs();
@@ -461,10 +461,10 @@ function settingsMarkup() {
           ["scroll", "连续滚动"],
         ])
       : ""
-  }<p class="setting-note">${pdf ? "保留原书页面，目录和文字选择随页可用。" : "翻页时可使用左右方向键、空格、触控板，或底部翻页按钮。"}</p></section><section class="settings-section"><h2>阅读主题</h2><div class="theme-choices">${themes.map(([theme, title, color]) => `<button data-theme="${theme}" aria-pressed="${prefs.theme === theme}"><span class="theme-circle" style="background:${color}"></span>${title}</button>`).join("")}</div></section>${
+  }</section><section class="settings-section"><h2>阅读主题</h2><div class="theme-choices">${themes.map(([theme, title, color]) => `<button data-theme="${theme}" aria-pressed="${prefs.theme === theme}"><span class="theme-circle" style="background:${color}"></span>${title}</button>`).join("")}</div></section>${
     pdf
-      ? `<section class="settings-section"><h2>原书版面</h2><p class="setting-note">保留原书字体和排版，通过缩放调整大小。</p>${range("页面缩放", "pdfZoom", 25, 400, 5, `${Math.round(currentZoom())}%`, currentZoom())}<button class="secondary-button" data-fit style="margin-top:15px">适合页面宽度</button><label class="setting-check">随主题柔化页面<input data-pref="pdfTint" type="checkbox" ${prefs.pdfTint ? "checked" : ""}></label></section>`
-      : `<section class="settings-section"><h2>字里行间</h2>${select(
+      ? `<section class="settings-section"><h2>原书版面</h2>${range("页面缩放", "pdfZoom", 25, 400, 5, `${Math.round(currentZoom())}%`, currentZoom())}<button class="secondary-button" data-fit style="margin-top:16px">适合页面宽度</button><label class="setting-check">随主题柔化页面<input data-pref="pdfTint" type="checkbox" ${prefs.pdfTint ? "checked" : ""}></label></section>`
+      : `<section class="settings-section"><h2>排版</h2>${select(
           "中文字体",
           "zhFont",
           [
@@ -478,8 +478,8 @@ function settingsMarkup() {
           ["source-serif", "Source Serif 4"],
           ["georgia", "Georgia"],
           ["system", "系统字体"],
-        ])}${palm ? range("字号偏好", "palmScale", 0.5, 2, 0.05, `${Math.round(prefs.palmScale * 100)}%`) : range("字号", "fontSize", 10.5, 42, 0.5, `${Number(prefs.fontSize.toFixed(1))} px`)}${!palm ? range("行距", "lineHeight", 1.5, 2.4, 0.05, prefs.lineHeight.toFixed(2)) + range("正文宽度", "textWidth", 480, 860, 20, `${prefs.textWidth} px`) : `<p class="setting-note adaptive-size-note">随窗口调整，当前 ${actualSize().toFixed(1)} px。</p>`}</section>`
-  }<section class="settings-section"><h2>掌上阅读</h2>${palm && native ? '<div class="window-sizes"><button class="secondary-button" data-window-size="compact">小巧</button><button class="secondary-button" data-window-size="standard">标准</button></div>' : ""}<p class="setting-note">独立小窗，默认置顶。窗口缩小时，字号会同步调整；阅读位置与主阅读器共享。</p>${
+        ])}${palm ? range("字号偏好", "palmScale", 0.5, 2, 0.05, `${Math.round(prefs.palmScale * 100)}%`) : range("字号", "fontSize", 10.5, 42, 0.5, `${Number(prefs.fontSize.toFixed(1))} px`)}${!palm ? range("行距", "lineHeight", 1.5, 2.4, 0.05, prefs.lineHeight.toFixed(2)) + range("正文宽度", "textWidth", 480, 860, 20, `${prefs.textWidth} px`) : ""}</section>`
+  }${desktop || (palm && native) ? `<section class="settings-section"><h2>掌上阅读</h2>${palm && native ? '<div class="window-sizes"><button class="secondary-button" data-window-size="compact">小巧</button><button class="secondary-button" data-window-size="standard">标准</button></div>' : ""}${
     desktop
       ? select("后台翻页", "palmKeys", [
           ["arrows", "⌃⌥⌘ ← / →"],
@@ -487,7 +487,7 @@ function settingsMarkup() {
           ["off", "关闭后台快捷键"],
         ])
       : ""
-  }<p class="setting-note">聚焦小窗：← / → / 空格<br>${desktop ? (prefs.palmKeys === "off" ? "后台快捷键已关闭。" : `后台：Control + Option + Command + ${prefs.palmKeys === "letters" ? "P（上一页） / N（下一页）" : "← / →"}。小窗打开且正文就绪时生效。`) : "后台快捷键由 macOS 桌面窗口提供，可在掌上窗口的阅读设置中调整。"}</p></section>`;
+  }</section>` : ""}`;
 }
 function renderSettings() {
   $("global-settings").innerHTML = settingsMarkup();
@@ -770,7 +770,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.51",
+        build: "2.52",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -926,26 +926,10 @@ function renderToc() {
   $("toc-list").innerHTML =
     (current.toc || []).map((item) => node(item)).join("") ||
     `<div class="empty-state">${current.processing === "pending" ? "正在建立原书目录，可先按页阅读。" : text ? "没有找到这个章节。" : "暂无可用目录。"}</div>`;
-  const sourceLabels = {
-    "epub-nav": "原书 EPUB 目录",
-    "epub-ncx": "原书 EPUB 目录",
-    spine: "原书阅读顺序",
-    "pdf-outline": "PDF 原有书签",
-    "ocr-contents": "从扫描目录识别",
-    "txt-rules": "从章节标题识别",
-    "txt-manual": "已调整的章节目录",
-    text: "纯文本阅读",
-    "html-headings": "文档原有标题",
-    "image-order": "图像页序",
-  };
   $("toc-source").textContent =
-    (sourceLabels[current.tocSource] || "目录准备中") +
-    (current.type === "pdf" && current.pageOffset !== null
-      ? ` · 书页 + ${current.pageOffset} = PDF 页序`
-      : "") +
-    (current.tocSource === "ocr-contents" && current.pageOffset === null
-      ? " · 请在书籍设置中校正页码"
-      : "");
+    current.tocSource === "ocr-contents" && current.pageOffset === null
+      ? "请在书籍设置中校正页码"
+      : "";
   $("toc-edit").hidden = current.type !== "txt";
   renderBookmarks();
 }
@@ -2754,7 +2738,6 @@ async function renderText(position, revision) {
   if (revision !== renderRevision) return;
   const chapter = book.chapters[position.index - 1];
   $("chapter-title").textContent = chapter.title;
-  $("chapter-eyebrow").textContent = chapter.volume || book.title;
   $("text-paper").lang = book.language;
   let offset = 0;
   $("chapter-body").replaceChildren(
@@ -2860,9 +2843,6 @@ async function renderCurrent(position) {
       (book) =>
         book.type === "pdf" && book.sourceHash === current.sourcePdfHash,
     );
-  $("book-subtitle").textContent = position.resource
-    ? "原书附加内容 · 返回后继续阅读"
-    : current.author;
   $("palm-book-title").textContent = current.title;
   document.title = current.title + " · 页间";
   $("palm-open").hidden =
@@ -3228,7 +3208,7 @@ function renderImportFiles() {
   $("import-files").innerHTML = importFiles
     .map(
       (item, index) =>
-        `<div class="import-file"><div class="import-file-name"><strong>${escapeHTML(item.file.name)}</strong><small>${(item.file.size / 1024 / 1024).toFixed(1)} MB</small><select aria-label="${escapeHTML(item.file.name)}的书籍类别" data-file-shelf="${index}"><option ${item.shelf === "小说" ? "selected" : ""}>小说</option><option ${item.shelf === "学习" ? "selected" : ""}>学习</option></select></div><label class="parse-toggle"><span>文档解析<small>${item.file.name.toLowerCase().endsWith(".pdf") ? "补充扫描文字选择与原书目录" : item.file.name.toLowerCase().endsWith(".txt") ? "识别章节标题，建立导航" : "原书目录、插图和脚注直接保留；按需补充结构索引"}</small></span><input type="checkbox" data-file-parse="${index}" ${item.parse ? "checked" : ""}></label></div>`,
+        `<div class="import-file"><div class="import-file-name"><strong>${escapeHTML(item.file.name)}</strong><small>${(item.file.size / 1024 / 1024).toFixed(1)} MB</small><select aria-label="${escapeHTML(item.file.name)}的书籍类别" data-file-shelf="${index}"><option ${item.shelf === "小说" ? "selected" : ""}>小说</option><option ${item.shelf === "学习" ? "selected" : ""}>学习</option></select></div><label class="parse-toggle"><span>文档解析</span><input type="checkbox" data-file-parse="${index}" ${item.parse ? "checked" : ""}></label></div>`,
     )
     .join("");
   updateImportControls();
@@ -3287,8 +3267,8 @@ function openBookOptions(id) {
   if (!editingBook) return;
   const book = editingBook;
   $("book-form").innerHTML =
-    `<label>书名<input id="book-name" type="text" value="${escapeHTML(book.title)}" maxlength="240"></label><label>书籍类别<select id="book-shelf"><option ${book.shelf === "小说" ? "selected" : ""}>小说</option><option ${book.shelf === "学习" ? "selected" : ""}>学习</option></select></label><label class="parse-toggle"><span>文档解析<small>${book.type === "pdf" ? "扫描文字按页准备，可补充原书目录" : book.type === "txt" ? "识别章、回、卷，建立章节导航" : "沿用原书内容，可额外补充结构索引"}</small></span><input id="book-parse" type="checkbox" ${book.parseEnabled ? "checked" : ""}></label>${book.type === "pdf" ? `<label>印刷书页到 PDF 页序的偏移<input id="book-offset" type="number" value="${book.pageOffset ?? ""}" placeholder="自动识别中；也可手动校正"></label><p class="setting-note">例如书页 3 位于 PDF 第 5 页，偏移填写 2。</p>` : ""}<div class="book-details">${escapeHTML(book.format)} · ${book.type === "pdf" ? book.pages + " 页" : book.chapters.length + " 个阅读单元"}<br>${escapeHTML(book.processingNote || "原文件保留在本机。")}</div>`;
-  $("book-save-note").textContent = "更改不会修改原文件";
+    `<label>书名<input id="book-name" type="text" value="${escapeHTML(book.title)}" maxlength="240"></label><label>书籍类别<select id="book-shelf"><option ${book.shelf === "小说" ? "selected" : ""}>小说</option><option ${book.shelf === "学习" ? "selected" : ""}>学习</option></select></label><label class="parse-toggle"><span>文档解析</span><input id="book-parse" type="checkbox" ${book.parseEnabled ? "checked" : ""}></label>${book.type === "pdf" ? `<label>PDF 页码偏移<input id="book-offset" type="number" value="${book.pageOffset ?? ""}" placeholder="自动" title="PDF 页序减去印刷页码。例如印刷第 3 页在 PDF 第 5 页，填写 2。"></label>` : ""}<div class="book-details">${escapeHTML(book.format)} · ${book.type === "pdf" ? book.pages + " 页" : book.chapters.length + " 章"}</div>`;
+  $("book-save-note").textContent = "";
   $("book-cloud").hidden = book.type !== "pdf";
   $("book-chapters").hidden = book.type !== "txt";
   $("book-dialog").showModal();
@@ -4398,7 +4378,7 @@ try {
     formatInfo
       .map((info) => info.extension.slice(1).toUpperCase())
       .join(" · ") +
-    "。EPUB 直接使用原书内容，其他格式先通过对应的本地适配器读取。";
+    "";
   const state = rawState;
   prefs = validatePreferences(state.prefs || {});
   positions = state.positions || {};

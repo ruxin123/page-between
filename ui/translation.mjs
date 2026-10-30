@@ -129,9 +129,6 @@ export function createTranslation({
     $("translation-explanation").innerHTML = item.explanationHtml || "";
     $("translation-star").setAttribute("aria-pressed", String(item.favorite));
     $("translation-star").disabled = !!item.storageWarning;
-    $("translation-detected").textContent =
-      languages[item.detectedLanguage] || "";
-    $("translation-detected").hidden = !languages[item.detectedLanguage];
     $("translation-provider").title = item.model || "";
     $("translation-star").innerHTML =
       `${item.favorite ? "取消收藏" : "收藏"}<kbd>⌘S</kbd>`;

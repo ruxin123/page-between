@@ -2,7 +2,7 @@ import {
   translationSettingsMarkup,
   updateTranslationFields,
 } from "./translation-settings.mjs";
-import { escapeHTML, icon } from "/ui/shared.mjs";
+import { escapeHTML } from "/ui/shared.mjs";
 
 export function createServiceSettings({ document, api, post, toast }) {
   const $ = (id) => document.getElementById(id);
@@ -37,18 +37,15 @@ export function createServiceSettings({ document, api, post, toast }) {
       service === "translation"
         ? translationSettingsMarkup(config, saved)
         : `<form class="service-form" data-service="${service}">
-      <div class="service-heading"><span class="service-symbol">${icon(ai ? "ask" : "pages")}</span><div><h2>${ai ? "模型服务" : "MinerU 云解析"}</h2><span class="service-badge" data-ready="${config.ready}">${ai ? (config.ready ? "已配置" : "尚未配置") : config.ready ? "按需启用" : "尚未配置"}</span></div></div>
-
       <fieldset><legend class="visually-hidden">${ai ? "模型服务配置" : "MinerU 服务配置"}</legend>
-        <label class="service-field">服务地址<input name="baseUrl" type="url" maxlength="2048" required spellcheck="false" autocomplete="off" placeholder="${ai ? "https://…/v1" : "https://mineru.net/api/v4"}" value="${escapeHTML(config.baseUrl)}"><small>${ai ? "兼容 Chat Completions；本机可用 HTTP。" : "MinerU API v4 地址。"}</small></label>
-        <label class="service-field">${ai ? "模型名称" : "解析模型"}${ai ? `<input name="model" type="text" maxlength="200" required spellcheck="false" autocomplete="off" placeholder="填写服务商提供的模型 ID" value="${escapeHTML(config.model)}">` : `<select name="model"><option value="vlm" ${config.model === "vlm" ? "selected" : ""}>VLM · 复杂版面</option><option value="pipeline" ${config.model === "pipeline" ? "selected" : ""}>Pipeline · 通用解析</option></select>`}</label>
-        ${ai ? `<label class="setting-check">此模型支持图像输入<input name="supportsImages" type="checkbox" ${config.supportsImages ? "checked" : ""}></label><p class="setting-note">提问时可附带原图。</p>` : ""}
-        <label class="service-field">${ai ? "API Key" : "API Token"}<input name="key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="${config.hasKey ? "已保存，留空保持现有凭据" : ai ? "填写 Key；本机模型可留空" : "填写 MinerU Token"}" aria-describedby="${service}-key-note"><small id="${service}-key-note">${config.hasKey ? (config.source === "environment" ? "沿用现有凭据。" : "保存在 macOS 钥匙串。") : "保存在 macOS 钥匙串。"}</small></label>
+        <label class="service-field">服务地址<input name="baseUrl" type="url" maxlength="2048" required spellcheck="false" autocomplete="off" placeholder="${ai ? "https://…/v1" : "https://mineru.net/api/v4"}" value="${escapeHTML(config.baseUrl)}"></label>
+        <label class="service-field">${ai ? "模型名称" : "解析模型"}${ai ? `<input name="model" type="text" maxlength="200" required spellcheck="false" autocomplete="off" placeholder="模型 ID" value="${escapeHTML(config.model)}">` : `<select name="model"><option value="vlm" ${config.model === "vlm" ? "selected" : ""}>VLM</option><option value="pipeline" ${config.model === "pipeline" ? "selected" : ""}>Pipeline</option></select>`}</label>
+        ${ai ? `<label class="setting-check">支持图像输入<input name="supportsImages" type="checkbox" ${config.supportsImages ? "checked" : ""}></label>` : ""}
+        <label class="service-field">${ai ? "API Key" : "API Token"}<input name="key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="${config.hasKey ? "已保存，留空保持现有凭据" : ai ? "填写 Key；本机模型可留空" : "填写 MinerU Token"}"></label>
         ${config.hasKey ? '<label class="setting-check remove-key">移除已保存的凭据<input type="checkbox" name="removeKey"></label>' : ""}
-        <p class="service-storage-note">${saved.keychainAvailable ? "" : "钥匙串组件当前不可用，含凭据的配置暂时不能保存。"}${config.source === "environment" ? "" : ""}</p>
+        <p class="service-storage-note">${saved.keychainAvailable ? "" : "钥匙串不可用，暂时无法保存凭据。"}</p>
         <div class="service-actions"><button type="submit" class="primary-button">保存设置</button><button type="button" class="secondary-button" data-test>${ai ? "测试连接" : "检查配置"}</button><button type="button" class="service-reset" data-reset>还原修改</button></div>
-      </fieldset><p class="service-result" data-result role="status" aria-live="polite"></p></form>
-      <details class="service-help"><summary>使用说明</summary>${ai ? "<p>兼容 Chat Completions 接口。提问时会发送选段、附近文字与本次对话。</p>" : "<p>使用 MinerU API v4。所选 PDF 页面将上传至配置的服务并使用解析额度。</p>"}</details>`;
+      </fieldset><p class="service-result" data-result role="status" aria-live="polite"></p></form>`;
     const form = container.querySelector("form");
     form.onsubmit = (event) => {
       event.preventDefault();
@@ -139,8 +136,7 @@ export function createServiceSettings({ document, api, post, toast }) {
           render("ai");
           render("mineru");
           render("translation");
-          $("settings-load-status").textContent =
-            saved.profile === "demo" ? "演示模式的应用设置独立保存。" : "";
+          $("settings-load-status").textContent = "";
         } catch (error) {
           $("settings-load-status").textContent = error.message;
           toast(error.message, { kind: "error" });

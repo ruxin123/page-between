@@ -121,12 +121,12 @@ export function createTutor({
       (active?.messages || [])
         .map((message, index) => {
           if (message.role === "user")
-            return `<article class="ai-message ai-user"><small>你${message.imageAttached ? " · 已附原图" : ""}</small><div>${escapeHTML(message.content)}</div></article>`;
+            return `<article class="ai-message ai-user" aria-label="提问">${message.imageAttached ? '<small>已附原图</small>' : ""}<div>${escapeHTML(message.content)}</div></article>`;
           if (message.status === "generating")
-            return `<article class="ai-message"><small>AI · 正在生成</small>${references(message, index)}<div class="ai-stream">${escapeHTML(message.content || "正在生成…")}</div></article>`;
+            return `<article class="ai-message" aria-label="回答">${references(message, index)}<div class="ai-stream">${escapeHTML(message.content || "生成中…")}</div></article>`;
           if (message.status === "error" || message.status === "stopped")
             return `<article class="ai-message ai-error"><small>${message.status === "stopped" ? "已停止" : "本次未完成"}</small><p>${escapeHTML(message.error)}</p><div class="ai-answer">${message.html || escapeHTML(message.content)}</div>${references(message, index)}${index === active.messages.length - 1 ? '<button class="secondary-button" data-ai-retry>重新生成</button>' : ""}</article>`;
-          return `<article class="ai-message"><small>AI</small><div class="ai-answer">${message.html || escapeHTML(message.content)}</div>${references(message, index)}</article>`;
+          return `<article class="ai-message" aria-label="回答"><div class="ai-answer">${message.html || escapeHTML(message.content)}</div>${references(message, index)}</article>`;
         })
         .join("");
     $("ai-submit").disabled =
@@ -175,7 +175,7 @@ export function createTutor({
   function imageControls() {
     const original = active?.source || source;
     $("ai-image-option").hidden = !original?.image;
-    $("ai-image-status").hidden = !original?.image;
+    $("ai-image-status").hidden = !original?.image || supportsImages;
     $("ai-send-image").disabled =
       !supportsImages ||
       pending ||
@@ -197,8 +197,8 @@ export function createTutor({
         : "") +
       (message.indexWarning
         ? `<p class="setting-note">${escapeHTML(message.indexWarning)}</p>`
-        : status
-          ? `<p class="setting-note">本书索引 · 可检索 ${status.covered} / ${status.total} ${escapeHTML(status.unit)}${status.partial ? "，未解析页未纳入" : ""}</p>`
+        : status?.partial
+          ? `<p class="setting-note">仅覆盖 ${status.covered} / ${status.total} ${escapeHTML(status.unit)}</p>`
           : "") +
       (message.references || [])
         .map(
@@ -233,10 +233,9 @@ export function createTutor({
       $("ai-model-status").textContent = config.configured
         ? ""
         : config.message;
-      $("ai-service-details").hidden = !config.configured;
-      $("ai-service").textContent = config.configured
+      document.querySelector(".ai-settings-link").title = config.configured
         ? config.host + " · " + config.model
-        : "";
+        : "模型设置";
     } catch {
       $("ai-model-status").textContent = "暂时无法检查模型配置。";
     }
@@ -277,7 +276,7 @@ export function createTutor({
         ? data.conversations
             .map(
               (item) =>
-                `<button class="ai-history-item" data-ai-conversation="${escapeHTML(item.id)}"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.citation)}</span><small>${item.status === "generating" ? "生成中" : item.status === "error" ? "可重新生成" : item.status === "stopped" ? "已停止" : "已保存"}</small></button>`,
+                `<button class="ai-history-item" data-ai-conversation="${escapeHTML(item.id)}"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.citation)}</span>${["generating", "error", "stopped"].includes(item.status) ? `<small>${item.status === "generating" ? "生成中" : item.status === "error" ? "未完成" : "已停止"}</small>` : ""}</button>`,
             )
             .join("")
         : '<div class="empty-state">暂无对话</div>';

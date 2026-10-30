@@ -48,7 +48,7 @@ export function createDocumentParsing({
     text(
       "local-preparation-status",
       local.status === "ready"
-        ? "已全部准备。"
+        ? ""
         : local.status === "paused"
           ? "已暂停。"
           : local.status === "error"
@@ -59,9 +59,7 @@ export function createDocumentParsing({
               ? `正在准备第 ${local.activePage} 页。`
               : local.status === "running"
                 ? "准备中…"
-                : local.completed
-                  ? "已保存识别结果。"
-                  : "尚未准备。",
+                : "",
     );
     text(
       "local-prepare-all",
@@ -88,9 +86,7 @@ export function createDocumentParsing({
           ? `已暂停。${cloud.phase}`
           : cloud.status === "error"
             ? cloud.phase
-            : cloud.completed === cloud.total
-              ? "已全部解析。"
-              : `还有 ${cloud.total - cloud.completed} 页未通过 MinerU 增强，可补全或选择页段。`,
+            : "",
     );
     const running = cloud.status === "running";
     $("cloud-fill").disabled =
@@ -140,7 +136,6 @@ export function createDocumentParsing({
     $("book-dialog").close();
     $("jobs-dialog").close();
     text("cloud-book-title", book.title);
-    text("cloud-page-count", `本书共 ${book.pages} 页，使用 PDF 文件页序。`);
     if (pages?.length) $("cloud-pages").value = formatPages(pages);
     else nearby();
     $("cloud-fresh").checked = false;
@@ -157,7 +152,7 @@ export function createDocumentParsing({
       configured = settings.services.mineru.ready;
       text(
         "cloud-status",
-        configured ? "使用当前 MinerU 配置。" : "请先配置 MinerU。",
+        configured ? "" : "请先配置 MinerU。",
       );
       render();
     } catch (error) {
@@ -192,7 +187,7 @@ export function createDocumentParsing({
       await loadStatus();
       toast(
         action === "pause"
-          ? "整本划词准备已暂停，已完成页保留。"
+          ? "已暂停。"
           : "已开始准备。",
         { kind: "success" },
       );
@@ -220,7 +215,7 @@ export function createDocumentParsing({
       resumeMode = false;
       await refresh();
       await loadStatus();
-      toast("云解析已在后台开始，成功的页段会逐批生效。", { kind: "success" });
+      toast("已开始解析。", { kind: "success" });
     } catch (error) {
       text("cloud-status", error.message);
     } finally {

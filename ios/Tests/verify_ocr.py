@@ -6,7 +6,7 @@ root = Path(__file__).resolve().parents[1]
 scratch = Path.home() / "Library/Caches/Page Between/iOS/OCRTests"
 sources = scratch / "Sources/Fixture"
 sources.mkdir(parents=True, exist_ok=True)
-files = [*(root / "PageBetween/Core").glob("*.swift"), root / "PageBetween/App/PDFTextPreparation.swift", root / "Tests/PDFOCRFixture.swift"]
+files = [*(root / "PageBetween/Core").glob("*.swift"), root / "PageBetween/App/PDFTextPreparation.swift", root / "PageBetween/App/PDFSourceContent.swift", root / "Tests/PDFOCRFixture.swift"]
 for source in files:
     if source.name.startswith("._"):
         continue

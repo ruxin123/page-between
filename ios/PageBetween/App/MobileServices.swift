@@ -5,6 +5,7 @@ import SwiftUI
 struct ServiceProfile: Codable, Equatable {
     var baseURL = "https://api.openai.com/v1"
     var model = ""
+    var supportsImages: Bool?
 }
 
 enum SecureKeys {
@@ -41,6 +42,9 @@ private let readingNetwork: URLSession = {
     configuration.urlCache = nil
     configuration.httpCookieStorage = nil
     configuration.urlCredentialStorage = nil
+    #if DEBUG
+    if AIUITestProtocol.enabled { configuration.protocolClasses = [AIUITestProtocol.self] }
+    #endif
     return URLSession(configuration: configuration, delegate: ReadingNetworkPolicy(), delegateQueue: nil)
 }()
 
@@ -58,6 +62,9 @@ private let readingNetwork: URLSession = {
         separateTranslation = defaults.bool(forKey: "services.separateTranslation")
         provider = defaults.string(forKey: "services.provider") ?? "google"
         mineru = defaults.data(forKey: "services.mineru").flatMap { try? JSONDecoder().decode(MinerUProfile.self, from: $0) } ?? MinerUProfile()
+        #if DEBUG
+        if AIUITestProtocol.enabled { ai = ServiceProfile(baseURL: "https://stream.example.invalid/v1", model: "original-fixture", supportsImages: true) }
+        #endif
     }
     func save(aiKey: String, translationKey: String, mineruKey: String) throws {
         _ = try Self.endpoint(ai.baseURL)
@@ -74,10 +81,24 @@ private let readingNetwork: URLSession = {
         defaults.set(try JSONEncoder().encode(mineru), forKey: "services.mineru")
     }
     static func endpoint(_ value: String) throws -> URL { try ServiceRequests.endpoint(value) }
-    func complete(quote: String, question: String, translate: Bool, history: [MobileTurn] = []) async throws -> String {
+    private func request(quote: String, question: String, translate: Bool, history: [MobileTurn], images: [Data], stream: Bool) throws -> URLRequest {
         let dedicated = translate && separateTranslation && !translation.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let profile = dedicated ? translation : ai
-        let request = try ServiceRequests.ai(base: profile.baseURL, model: profile.model, key: SecureKeys.read(dedicated ? "translation" : "ai"), quote: quote, question: question, translate: translate, history: history)
+        guard images.isEmpty || !translate && profile.supportsImages == true else { throw ServiceError.message("请配置支持图像的答疑模型。") }
+        let key: String
+        #if DEBUG
+        key = AIUITestProtocol.enabled ? "" : SecureKeys.read(dedicated ? "translation" : "ai")
+        #else
+        key = SecureKeys.read(dedicated ? "translation" : "ai")
+        #endif
+        return try ServiceRequests.ai(base: profile.baseURL, model: profile.model, key: key, quote: quote, question: question, translate: translate, history: history, images: images, stream: stream)
+    }
+    func stream(quote: String, question: String, history: [MobileTurn], images: [Data], onDelta: @escaping @MainActor @Sendable (String) async -> Void) async throws -> String {
+        let request = try request(quote: quote, question: question, translate: false, history: history, images: images, stream: true)
+        return try await AITransport.stream(request, session: readingNetwork, onDelta: onDelta)
+    }
+    func complete(quote: String, question: String, translate: Bool, history: [MobileTurn] = [], images: [Data] = []) async throws -> String {
+        let request = try request(quote: quote, question: question, translate: translate, history: history, images: images, stream: false)
         let (data, response) = try await readingNetwork.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw ServiceError.message("AI 请求未完成，请检查服务配置或稍后重试。") }
         return try ServiceRequests.answer(data)

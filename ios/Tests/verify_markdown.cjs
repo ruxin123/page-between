@@ -35,6 +35,14 @@ const { webkit } = require('playwright');
    return window.pageBetweenSelectedSource();
   });
   assert.equal(source,String.raw`$$\begin{pmatrix}1&2\\3&4\end{pmatrix}$$`);
+  const fallback=await page.evaluate(async()=>{
+   const data='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jfQAAAABJRU5ErkJggg==';
+   await window.renderMarkdown(String.raw`$$\overline{a$$`,[{raw:String.raw`\overline{a`,src:data}]);
+   const image=document.querySelector('#content img'),range=document.createRange();range.selectNode(image);getSelection().removeAllRanges();getSelection().addRange(range);
+   const transfer=new DataTransfer();document.dispatchEvent(new ClipboardEvent('copy',{clipboardData:transfer,bubbles:true,cancelable:true}));
+   return {image:!!image,copy:transfer.getData('text/plain'),errors:document.querySelectorAll('.katex-error').length};
+  });
+  assert.deepEqual(fallback,{image:true,copy:String.raw`$$\overline{a$$`,errors:0});
   assert.equal(await page.evaluate(async()=>{await window.renderMarkdown('Prices range from $50 to $70.');return document.querySelectorAll('.katex').length}),0);
   const sizes=await page.evaluate(async()=>{const long=await window.renderMarkdown('Long paragraph. '.repeat(300));const short=await window.renderMarkdown('Short.');return {long,short}});
   assert(sizes.short<sizes.long/4,JSON.stringify(sizes));

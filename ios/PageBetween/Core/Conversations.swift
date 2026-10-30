@@ -3,7 +3,10 @@ import Foundation
 public struct MobileTurn: Codable, Identifiable, Equatable, Sendable {
     public var id = UUID()
     public let role: String
-    public let content: String
+    public var content: String
+    public var status: String?
+    public var error: String?
+    public var imageAttached: Bool?
     public init(role: String, content: String) { self.role = role; self.content = content }
 }
 
@@ -15,14 +18,16 @@ public struct MobileConversation: Codable, Identifiable, Equatable, Sendable {
     public var turns: [MobileTurn] = []
     public var createdAt = Date()
     public var updatedAt = Date()
+    public var previewQuote: String?
+    public var sourceObjects: [PDFSourceObject]?
     public init(book: UUID, quote: String, locator: String) { self.book = book; self.quote = quote; self.locator = locator }
 }
 
 extension LibraryRepository {
     public func saveConversation(_ conversation: MobileConversation) throws {
         guard let book = books(includingDeleted: true).first(where: { $0.id == conversation.book }), book.deletedAt == nil else { throw LibraryFailure.missingBook }
-        guard conversation.quote.count <= 12000, conversation.locator.utf8.count <= 30000, conversation.turns.count <= 40,
-              conversation.turns.allSatisfy({ ["user", "assistant"].contains($0.role) && $0.content.count <= 50000 }) else { throw ServiceRequestFailure.selectionTooLong }
+        guard conversation.quote.count <= 12000, (conversation.previewQuote?.count ?? 0) <= 16000, (conversation.sourceObjects?.count ?? 0) <= 32, conversation.sourceObjects?.allSatisfy(\.isValid) != false, conversation.locator.utf8.count <= 30000, conversation.turns.count <= 40,
+              conversation.turns.allSatisfy({ ["user", "assistant"].contains($0.role) && $0.content.count <= 50000 && ($0.status == nil || ["generating", "complete", "stopped", "error"].contains($0.status!)) && ($0.error?.count ?? 0) <= 2000 }) else { throw ServiceRequestFailure.selectionTooLong }
         let directory = try file(book, name: "conversations")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(conversation).write(to: directory.appendingPathComponent(conversation.id.uuidString + ".json"), options: .atomic)
@@ -36,8 +41,9 @@ extension LibraryRepository {
             ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
         }
         return try sorted.dropFirst(max(0, offset)).prefix(30).map { url in
-            let item = try JSONDecoder().decode(MobileConversation.self, from: Data(contentsOf: url))
+            var item = try JSONDecoder().decode(MobileConversation.self, from: Data(contentsOf: url))
             guard item.book == id else { throw LibraryFailure.invalidFile }
+            for index in item.turns.indices where item.turns[index].status == "generating" { item.turns[index].status = "stopped" }
             return item
         }
     }

@@ -11,7 +11,10 @@ actor PDFTextPreparation {
         try Task.checkCancellation()
         if !fresh, let cached = try await repository.pdfPage(book.id, page: number), cached.ocrCompleted {
             let file = try await repository.file(book, name: "selection/page-\(number).pdf")
-            if cached.hasNativeText || cached.words.isEmpty || FileManager.default.fileExists(atPath: file.path) { return cached }
+            if cached.hasNativeText {
+                let original = try await repository.file(book, name: book.originalName)
+                if let document = CGPDFDocument(original as CFURL), let page = document.page(at: number), Self.hasEmbeddedText(page) { return cached }
+            } else if cached.words.isEmpty || FileManager.default.fileExists(atPath: file.path) { return cached }
         }
         let original = try await repository.file(book, name: book.originalName)
         guard let source = CGPDFDocument(original as CFURL), number >= 1, number <= source.numberOfPages, let page = source.page(at: number) else { throw LibraryFailure.invalidFile }
@@ -20,7 +23,7 @@ actor PDFTextPreparation {
         let size = CGSize(width: rotated ? crop.height : crop.width, height: rotated ? crop.width : crop.height)
         var result = PDFPreparedPage(page: number, sourceHash: book.sourceHash, width: size.width, height: size.height)
         try result.validate()
-        if let document = PDFDocument(url: original), let native = document.page(at: number - 1), let text = native.string, text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {
+        if Self.hasEmbeddedText(page), let document = PDFDocument(url: original), let native = document.page(at: number - 1), let text = native.string, text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {
             result.hasNativeText = true
             let transform = page.getDrawingTransform(.cropBox, rect: CGRect(origin: .zero, size: size), rotate: 0, preserveAspectRatio: true)
             for (line, selection) in (native.selection(for: NSRange(location: 0, length: native.numberOfCharacters))?.selectionsByLine() ?? []).enumerated() {
@@ -65,6 +68,46 @@ actor PDFTextPreparation {
         result.ocrRevision = UUID()
         try await repository.savePDFPage(book.id, page: result)
         return result
+    }
+
+    // PDFKit may expose system Live Text for an image-only page; it is not a saved PDF text layer.
+    static func hasEmbeddedText(_ page: CGPDFPage) -> Bool {
+        final class Scan {
+            var found = false
+            var depth = 0
+            var objects = 0
+            let table: CGPDFOperatorTableRef
+            init(_ table: CGPDFOperatorTableRef) { self.table = table }
+        }
+        guard let table = CGPDFOperatorTableCreate() else { return false }
+        for name in ["Tj", "TJ", "'", "\""] {
+            CGPDFOperatorTableSetCallback(table, name) { _, context in
+                guard let context else { return }
+                Unmanaged<Scan>.fromOpaque(context).takeUnretainedValue().found = true
+            }
+        }
+        CGPDFOperatorTableSetCallback(table, "Do") { scanner, context in
+            guard let context else { return }
+            let state = Unmanaged<Scan>.fromOpaque(context).takeUnretainedValue()
+            guard !state.found, state.depth < 16, state.objects < 10000 else { return }
+            var name: UnsafePointer<CChar>?
+            let parent = CGPDFScannerGetContentStream(scanner)
+            guard CGPDFScannerPopName(scanner, &name), let name,
+                  let object = CGPDFContentStreamGetResource(parent, "XObject", name) else { return }
+            var value: CGPDFStreamRef?
+            guard CGPDFObjectGetValue(object, .stream, &value), let value else { return }
+            var type: UnsafePointer<CChar>?
+            guard let dictionary = CGPDFStreamGetDictionary(value), CGPDFDictionaryGetName(dictionary, "Subtype", &type), let type, String(cString: type) == "Form" else { return }
+            state.depth += 1; state.objects += 1
+            var resources: CGPDFDictionaryRef?
+            CGPDFDictionaryGetDictionary(dictionary, "Resources", &resources)
+            let stream = CGPDFContentStreamCreateWithStream(value, resources ?? dictionary, parent)
+            CGPDFScannerScan(CGPDFScannerCreate(stream, state.table, context))
+            state.depth -= 1
+        }
+        let state = Scan(table), stream = CGPDFContentStreamCreateWithPage(page)
+        CGPDFScannerScan(CGPDFScannerCreate(stream, table, Unmanaged.passUnretained(state).toOpaque()))
+        return state.found
     }
 
     static func box(_ rectangle: CGRect, size: CGSize, bottomOrigin: Bool) -> PDFBox? {

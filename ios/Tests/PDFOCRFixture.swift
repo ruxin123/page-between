@@ -25,12 +25,15 @@ import ImageIO
         let context = CGContext(consumer: consumer, mediaBox: &bounds, nil)!
         context.beginPDFPage(nil); context.draw(bitmap.makeImage()!, in: bounds); context.endPDFPage(); context.closePDF()
         try (data as Data).write(to: original)
-        verify(PDFDocument(url: original)?.page(at: 0)?.numberOfCharacters == 0, "Fixture must contain only a scanned image")
+        verify(!PDFTextPreparation.hasEmbeddedText(CGPDFDocument(original as CFURL)!.page(at: 1)!), "Fixture must contain only a scanned image")
         let repo = try LibraryRepository(root: root)
         let book = try await repo.importFile(original)
+        var oldCache = PDFPreparedPage(page: 1, sourceHash: book.sourceHash, width: 600, height: 800)
+        oldCache.ocrCompleted = true; oldCache.hasNativeText = true
+        try await repo.savePDFPage(book.id, page: oldCache)
         let worker = PDFTextPreparation(repository: repo)
         let prepared = try await worker.prepare(book, page: 1)
-        verify(prepared.ocrCompleted && !prepared.hasNativeText && prepared.text.contains("Original"), "OCR did not recognize original text")
+        verify(prepared.ocrCompleted && !prepared.hasNativeText && prepared.text.contains("Original"), "OCR did not repair the old image-only native-text cache")
         let selectionPDF = try await repo.file(book, name: "selection/page-1.pdf")
         let recognized = PDFDocument(url: selectionPDF)!.page(at: 0)!
         let text = recognized.string! as NSString
@@ -54,6 +57,30 @@ import ImageIO
         _ = try await worker.prepare(book, page: 1)
         let reusedDate = try selectionPDF.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         verify(reusedDate == modified, "Prepared page was unnecessarily regenerated")
+        let selection = recognized.selection(for: range)!
+        let glyphs = PDFSourceContent.glyphs(selection, page: recognized)!
+        let block = PDFContentBlock(id: "original", type: "text", text: #"Original $\mathrm{mathematics}$ paragraph."#, box: PDFBox(0,0,1,0.17), order: 0)
+        let resolved = PDFSelectionAssembler.assemble(glyphs, blocks: [block], page: 1)
+        verify(resolved.raw == #"$\mathrm{mathematics}$"#, "Native PDF range was not mapped to the exact original formula")
+        let object = PDFSourceObject(page: 1, box: PDFBox(0.07,0.08,0.7,0.16), type: "equation", text: #"\overline{a"#)
+        let image = try PDFSourceContent.image(object, original: original)
+        let imageSource = CGImageSourceCreateWithData(image as CFData, nil)!
+        let cropped = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)!
+        verify(cropped.width > 200 && cropped.height > 40 && cropped.height < 200, "Formula original image crop is not bounded")
+        try image.write(to: folder.appendingPathComponent("source-formula.png"))
+        let embedded = folder.appendingPathComponent("embedded.pdf")
+        let textContext = CGContext(consumer: CGDataConsumer(url: embedded as CFURL)!, mediaBox: &bounds, nil)!
+        textContext.beginPDFPage(nil)
+        textContext.textPosition = CGPoint(x: 50, y: 700)
+        CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: "Original native text", attributes: [NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("TimesNewRomanPSMT" as CFString, 24, nil)])), textContext)
+        textContext.endPDFPage(); textContext.closePDF()
+        let textPage = CGPDFDocument(embedded as CFURL)!.page(at: 1)!
+        verify(PDFTextPreparation.hasEmbeddedText(textPage), "Embedded PDF text was mistaken for an image")
+        let wrapped = folder.appendingPathComponent("wrapped.pdf")
+        let wrapper = CGContext(consumer: CGDataConsumer(url: wrapped as CFURL)!, mediaBox: &bounds, nil)!
+        wrapper.beginPDFPage(nil); wrapper.drawPDFPage(textPage); wrapper.endPDFPage(); wrapper.closePDF()
+        verify(PDFTextPreparation.hasEmbeddedText(CGPDFDocument(wrapped as CFURL)!.page(at: 1)!), "Embedded text in a Form XObject was not detected")
         print("Production OCR passed: scanned image → persistent words → searchable PDF; selection geometry, identical page pixels, and cache reuse verified.")
+        print("Production PDF source passed: native UTF-16 selection → canonical formula; bounded original PNG crop; embedded text and Form XObject detection.")
     }
 }

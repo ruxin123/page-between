@@ -18,7 +18,7 @@ private final class ReadingPDFView: PDFView {
     }
 }
 
-@MainActor final class MobilePDFNavigator: UIViewController, @preconcurrency Navigator, PDFViewDelegate, UIGestureRecognizerDelegate {
+@MainActor final class MobilePDFNavigator: UIViewController, @preconcurrency Navigator, PDFViewDelegate, UIGestureRecognizerDelegate, @preconcurrency UIEditMenuInteractionDelegate {
     let publication: Publication
     let book: MobileBook
     let preparation: PDFPreparationStore
@@ -26,6 +26,7 @@ private final class ReadingPDFView: PDFView {
     var onTap: (() -> Void)?
     var onJump: ((Locator) -> Void)?
     var onCopy: (() -> Void)?
+    var onCopyImage: (() -> Void)?
     var onAsk: ((Bool) -> Void)?
     private let pdf = ReadingPDFView()
     private let document: PDFKit.PDFDocument
@@ -40,6 +41,9 @@ private final class ReadingPDFView: PDFView {
     private var revisions: AnyCancellable?
     private var observers: [NSObjectProtocol] = []
     private var headings: [(Int, String)] = []
+    private var canonicalPages: [Int: PDFPreparedPage] = [:]
+    private var selectedObject: (index: Int, object: PDFSourceObject, page: PDFPage, annotation: PDFAnnotation)?
+    private lazy var objectMenu = UIEditMenuInteraction(delegate: self)
 
     init(publication: Publication, book: MobileBook, source: URL, location: Locator?, continuous: Bool, preparation: PDFPreparationStore, delegate: NavigatorDelegate) throws {
         guard let document = PDFKit.PDFDocument(url: source), document.pageCount > 0, document.pageCount <= 100000, !document.isLocked else { throw LibraryFailure.invalidFile }
@@ -58,6 +62,8 @@ private final class ReadingPDFView: PDFView {
         super.viewDidLoad()
         pdf.frame = view.bounds; pdf.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         pdf.document = document; pdf.delegate = self; view.addSubview(pdf)
+        pdf.accessibilityIdentifier = "reader.pdf"
+        pdf.addInteraction(objectMenu)
         pdf.backgroundColor = .secondarySystemBackground
         pdf.minScaleFactor = 0.25; pdf.maxScaleFactor = 4
         pdf.copySource = { [weak self] in self?.onCopy?() }
@@ -65,11 +71,14 @@ private final class ReadingPDFView: PDFView {
         pdf.translateSource = { [weak self] in self?.onAsk?(true) }
         pdf.resolveDestination = { [weak self] in self?.destination($0) ?? $0 }
         applyScroll(continuous)
-        let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
+        let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         tap.cancelsTouchesInView = false; tap.delegate = self; pdf.addGestureRecognizer(tap)
         for name in [Notification.Name.PDFViewPageChanged, .PDFViewVisiblePagesChanged] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: pdf, queue: .main) { [weak self] _ in Task { @MainActor in self?.changed() } })
         }
+        observers.append(NotificationCenter.default.addObserver(forName: .PDFViewSelectionChanged, object: pdf, queue: .main) { [weak self] _ in
+            Task { @MainActor in if self?.pdf.currentSelection != nil { self?.clearObject() } }
+        })
         revisions = preparation.$revision.dropFirst().sink { [weak self] _ in self?.refreshPreparedPages() }
     }
     override func viewDidAppear(_ animated: Bool) {
@@ -92,13 +101,36 @@ private final class ReadingPDFView: PDFView {
         guard let data = try? JSONSerialization.data(withJSONObject: value), let raw = String(data: data, encoding: .utf8) else { return nil }
         return try? Locator(jsonString: raw)
     }
-    func selectedSource(translate: Bool) throws -> AssistantSelection {
-        guard let selection = pdf.currentSelection, let text = selection.string, !text.isEmpty, let page = selection.pages.first else { throw ServiceError.message("请先长按选择一段文字。") }
-        let index = document.index(for: page), bounds = page.bounds(for: .cropBox), rectangle = selection.bounds(for: page)
-        guard index != NSNotFound, let locator = location(page: index, quote: text, y: Double((bounds.maxY - rectangle.maxY) / bounds.height)) else { throw LibraryFailure.invalidFile }
-        return AssistantSelection(book: book.id, quote: text, locator: try locator.jsonString(), translate: translate)
+    func selectedSource(translate: Bool) async throws -> AssistantSelection {
+        if let selectedObject {
+            let object = selectedObject.object
+            guard object.text.count <= 12000 else { throw ServiceRequestFailure.selectionTooLong }
+            guard let locator = location(page: selectedObject.index, quote: object.text, y: object.box.top) else { throw LibraryFailure.invalidFile }
+            return AssistantSelection(book: book.id, quote: object.text, locator: try locator.jsonString(), translate: translate, markdown: object.markdown, objects: [object])
+        }
+        guard let selection = pdf.currentSelection?.copy() as? PDFSelection, let native = selection.string, !native.isEmpty else { throw ServiceError.message("请先长按选择一段文字。") }
+        guard native.count <= 12000 else { throw ServiceRequestFailure.selectionTooLong }
+        let pages = selection.pages.map { (document.index(for: $0), $0) }.filter { $0.0 != NSNotFound }.sorted { $0.0 < $1.0 }
+        guard let first = pages.first else { throw LibraryFailure.invalidFile }
+        var pieces: [PDFSelectedSource] = []
+        for (index, page) in pages {
+            var data = canonicalPages[index]
+            if data == nil { data = try? await preparation.repository.pdfPage(book.id, page: index + 1) }
+            if let data, data.mineruCompleted, let glyphs = PDFSourceContent.glyphs(selection, page: page) {
+                let result = await Task.detached { PDFSelectionAssembler.assemble(glyphs, blocks: data.blocks, page: index + 1) }.value
+                pieces.append(result)
+            } else {
+                let raw = (0..<selection.numberOfTextRanges(on: page)).compactMap { page.selection(for: selection.range(at: $0, on: page))?.string }.joined(separator: "\n")
+                pieces.append(PDFSelectedSource(raw: raw, markdown: raw))
+            }
+        }
+        let raw = pieces.map(\.raw).joined(separator: "\n\n"), markdown = pieces.map(\.markdown).joined(separator: "\n\n")
+        guard raw.count <= 12000, pieces.reduce(0, { $0 + $1.objects.count }) <= 32 else { throw ServiceRequestFailure.selectionTooLong }
+        let box = PDFSourceContent.box(first.1, rectangle: selection.bounds(for: first.1))
+        guard let locator = location(page: first.0, quote: raw, y: box?.top) else { throw LibraryFailure.invalidFile }
+        return AssistantSelection(book: book.id, quote: raw, locator: try locator.jsonString(), translate: translate, markdown: markdown, objects: pieces.flatMap(\.objects))
     }
-    var hasSelection: Bool { !(pdf.currentSelection?.string ?? "").isEmpty }
+    var hasSelection: Bool { selectedObject != nil || !(pdf.currentSelection?.string ?? "").isEmpty }
     func applyScroll(_ continuous: Bool) {
         self.continuous = continuous
         let page = pdf.currentPage
@@ -143,10 +175,46 @@ private final class ReadingPDFView: PDFView {
         }
         return target
     }
-    @objc private func tapped() { if !hasSelection { onTap?() } }
+    @objc private func tapped(_ gesture: UITapGestureRecognizer) {
+        let point = gesture.location(in: pdf)
+        if let page = pdf.page(for: point, nearest: false) {
+            let index = document.index(for: page), local = pdf.convert(point, to: page)
+            let pixel = CGRect(x: local.x - 0.5, y: local.y - 0.5, width: 1, height: 1)
+            if let box = PDFSourceContent.box(page, rectangle: pixel), let prepared = canonicalPages[index] {
+                let x = (box.left + box.right) / 2, y = (box.top + box.bottom) / 2
+                let candidates = prepared.blocks.compactMap { PDFSelectionAssembler.object($0, page: index + 1) }.filter { $0.box.left <= x && x <= $0.box.right && $0.box.top <= y && y <= $0.box.bottom }
+                if let object = candidates.min(by: { ($0.box.right - $0.box.left) * ($0.box.bottom - $0.box.top) < ($1.box.right - $1.box.left) * ($1.box.bottom - $1.box.top) }), let rectangle = PDFSourceContent.rectangle(object.box, on: page) {
+                    clearObject(); pdf.clearSelection()
+                    let annotation = PDFAnnotation(bounds: rectangle, forType: .square, withProperties: nil)
+                    annotation.color = UIColor(red: 0.29, green: 0.45, blue: 0.37, alpha: 1)
+                    annotation.border = PDFBorder(); annotation.border?.lineWidth = 1.5
+                    page.addAnnotation(annotation); selectedObject = (index, object, page, annotation)
+                    objectMenu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: point))
+                    return
+                }
+            }
+        }
+        if selectedObject != nil { clearObject(); objectMenu.dismissMenu(); return }
+        if !hasSelection { onTap?() }
+    }
+    private func clearObject() { if let selectedObject { selectedObject.page.removeAnnotation(selectedObject.annotation) }; selectedObject = nil }
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let selectedObject else { return nil }
+        var actions: [UIMenuElement] = []
+        if !selectedObject.object.text.isEmpty { actions.append(UIAction(title: selectedObject.object.type == "equation" ? "复制 LaTeX" : "复制", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in self?.onCopy?() }) }
+        actions.append(UIAction(title: "复制原图", image: UIImage(systemName: "photo")) { [weak self] _ in self?.onCopyImage?() })
+        actions.append(UIAction(title: "提问", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.onAsk?(false) })
+        if selectedObject.object.type != "equation", !selectedObject.object.text.isEmpty { actions.append(UIAction(title: "翻译", image: UIImage(systemName: "character.bubble")) { [weak self] _ in self?.onAsk?(true) }) }
+        return UIMenu(children: actions)
+    }
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {
+        guard let selectedObject, let rectangle = PDFSourceContent.rectangle(selectedObject.object.box, on: selectedObject.page) else { return .zero }
+        return pdf.convert(rectangle, from: selectedObject.page)
+    }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
     private func changed() {
         guard !replacing, let currentLocation else { return }
+        if let selectedObject, selectedObject.index != currentIndex { clearObject(); objectMenu.dismissMenu() }
         delegate?.navigator(self, locationDidChange: currentLocation)
         preparation.prepareNearby(book, page: currentIndex + 1, total: pageCount)
         refreshPreparedPages()
@@ -158,7 +226,9 @@ private final class ReadingPDFView: PDFView {
             let center = self.currentIndex
             for index in max(0, center - 1)...min(self.pageCount - 1, center + 2) {
                 guard !Task.isCancelled else { return }
-                guard let data = try? await self.preparation.repository.pdfPage(self.book.id, page: index + 1), data.ocrCompleted, !data.hasNativeText, !data.words.isEmpty,
+                guard let data = try? await self.preparation.repository.pdfPage(self.book.id, page: index + 1) else { continue }
+                self.canonicalPages[index] = data
+                guard data.ocrCompleted, !data.hasNativeText, !data.words.isEmpty,
                       self.preparedDocuments[index] == nil || self.preparedRevisions[index] != data.ocrRevision,
                       let file = try? await self.preparation.repository.file(self.book, name: "selection/page-\(index + 1).pdf"), let replacement = PDFKit.PDFDocument(url: file), let page = replacement.page(at: 0), let original = self.originals[index] ?? self.document.page(at: index) else { continue }
                 guard !Task.isCancelled, !self.hasSelection else { return }
@@ -181,6 +251,7 @@ private final class ReadingPDFView: PDFView {
                 guard let original = self.originals.removeValue(forKey: index) else { continue }
                 self.replacing = true; self.document.removePage(at: index); self.document.insert(original, at: index); self.preparedDocuments[index] = nil; self.preparedRevisions[index] = nil; self.replacing = false
             }
+            for index in Array(self.canonicalPages.keys) where abs(index - center) > 4 { self.canonicalPages[index] = nil }
         }
     }
 }

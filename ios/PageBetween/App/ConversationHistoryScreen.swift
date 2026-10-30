@@ -31,7 +31,7 @@ struct ConversationHistoryScreen: View {
             .toolbar { Button("完成") { dismiss() } }
             .task { await load() }
             .sheet(item: $selected) { conversation in
-                AssistantScreen(selection: AssistantSelection(book: book.id, quote: conversation.quote, locator: conversation.locator, translate: false), title: book.title, repository: repository, initialConversation: conversation, openSource: { raw in dismiss(); openSource(raw) })
+                AssistantScreen(selection: AssistantSelection(book: book.id, quote: conversation.quote, locator: conversation.locator, translate: false, markdown: conversation.previewQuote, objects: conversation.sourceObjects ?? []), title: book.title, repository: repository, initialConversation: conversation, openSource: { raw in dismiss(); openSource(raw) })
             }
         }.tint(MobilePalette.accent)
     }

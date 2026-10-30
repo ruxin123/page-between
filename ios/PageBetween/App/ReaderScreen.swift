@@ -9,6 +9,8 @@ struct AssistantSelection: Identifiable {
     let quote: String
     let locator: String
     let translate: Bool
+    var markdown: String? = nil
+    var objects: [PDFSourceObject] = []
 }
 
 @MainActor final class MobileReader: NSObject, ObservableObject, EPUBNavigatorDelegate, PDFNavigatorDelegate {
@@ -34,6 +36,7 @@ struct AssistantSelection: Identifiable {
     private var loaded = false
     private var directionalNavigation: DirectionalNavigationAdapter?
     private var chromeTask: Task<Void, Never>?
+    private var selectionMenuTask: Task<Void, Never>?
     private var lastContentTap = 0.0
 
     init(book: MobileBook, store: LibraryStore) {
@@ -60,6 +63,7 @@ struct AssistantSelection: Identifiable {
                 pdf.onTap = { [weak self] in self?.contentTapped() }
                 pdf.onJump = { [weak self] locator in self?.history.append(locator) }
                 pdf.onCopy = { [weak self] in self?.copySelection() }
+                pdf.onCopyImage = { [weak self] in self?.copySourceImage() }
                 pdf.onAsk = { [weak self] in self?.ask(translate: $0) }
                 view = pdf
             } else if publication.conforms(to: .epub) || publication.conforms(to: .divina) {
@@ -112,6 +116,17 @@ struct AssistantSelection: Identifiable {
         saveTask = Task { try? await Task.sleep(for: .milliseconds(350)); guard !Task.isCancelled else { return }; await flush() }
     }
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) { failure = error.localizedDescription }
+    func navigator(_ navigator: SelectableNavigator, shouldShowMenuForSelection selection: Selection) -> Bool {
+        chromeTask?.cancel()
+        selectionMenuTask?.cancel()
+        selectionMenuTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled, let self, self.hasContentSelection else { return }
+            if let source = try? await self.selectedSource(translate: false), !Task.isCancelled { self.lastSelection = source }
+            if !Task.isCancelled { (self.controller as? ReaderHost)?.showSelectionMenu() }
+        }
+        return false
+    }
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {
         if let url = Bundle.main.url(forResource: "selection", withExtension: "js", subdirectory: "Web"), let script = try? String(contentsOf: url, encoding: .utf8) {
             userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
@@ -144,7 +159,7 @@ struct AssistantSelection: Identifiable {
         catch { failure = error.localizedDescription }
     }
     private func selectedSource(translate: Bool) async throws -> AssistantSelection {
-        if let pdf = navigator as? MobilePDFNavigator { return try pdf.selectedSource(translate: translate) }
+        if let pdf = navigator as? MobilePDFNavigator { return try await pdf.selectedSource(translate: translate) }
         guard let selected = (navigator as? SelectableNavigator)?.currentSelection else { throw ServiceError.message("请先长按选择一段文字。") }
         let locator = try selected.locator.jsonString()
         var quote = selected.locator.text.highlight ?? ""
@@ -172,16 +187,62 @@ struct AssistantSelection: Identifiable {
             } catch { failure = error.localizedDescription }
         }
     }
+    func copySourceImage() {
+        Task {
+            do {
+                let source = try await selectedSource(translate: false)
+                guard let object = source.objects.first, await publication?.rights.copy(text: source.quote) == true else { throw ServiceError.message("本书不允许复制此选段。") }
+                let original = try await store.repository.file(book, name: book.originalName)
+                let data = try await Task.detached { try PDFSourceContent.image(object, original: original) }.value
+                UIPasteboard.general.setData(data, forPasteboardType: "public.png"); lastSelection = source
+            } catch { failure = error.localizedDescription }
+        }
+    }
 }
 
-@MainActor final class ReaderHost: UIViewController {
+@MainActor final class ReaderHost: UIViewController, @preconcurrency UIEditMenuInteractionDelegate {
     let navigator: UIViewController & Navigator
     weak var reader: MobileReader?
+    private lazy var selectionMenu = UIEditMenuInteraction(delegate: self)
     init(navigator: UIViewController & Navigator, reader: MobileReader) { self.navigator = navigator; self.reader = reader; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Storyboard is not used") }
     override func viewDidLoad() {
         super.viewDidLoad()
         addChild(navigator); navigator.view.frame = view.bounds; navigator.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]; view.addSubview(navigator.view); navigator.didMove(toParent: self)
+        view.addInteraction(selectionMenu)
+    }
+    private var selectionFrame: CGRect? {
+        guard let frame = (navigator as? SelectableNavigator)?.currentSelection?.frame else { return nil }
+        let visible = view.convert(frame, from: navigator.view).intersection(view.bounds)
+        return visible.isNull || visible.isEmpty ? nil : visible
+    }
+    func showSelectionMenu() {
+        guard let target = selectionFrame, view.window != nil else { return }
+        selectionMenu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: CGPoint(x: target.midX, y: target.midY)))
+    }
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard (navigator as? SelectableNavigator)?.currentSelection != nil else { return nil }
+        var actions: [UIMenuElement] = [
+            UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in self?.reader?.copySelection() },
+            UIAction(title: "提问", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.reader?.ask(translate: false) },
+            UIAction(title: "翻译", image: UIImage(systemName: "character.bubble")) { [weak self] _ in self?.reader?.ask(translate: true) }
+        ]
+        if let text = (navigator as? SelectableNavigator)?.currentSelection?.locator.text.highlight, text.count <= 100 {
+            actions.append(UIAction(title: "查询", image: UIImage(systemName: "book.closed")) { [weak self] _ in self?.present(UIReferenceLibraryViewController(term: text), animated: true) })
+        }
+        if reader?.publication?.isProtected == false {
+            actions.append(UIAction(title: "共享", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+                guard let self, let text = (self.navigator as? SelectableNavigator)?.currentSelection?.locator.text.highlight else { return }
+                let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+                activity.popoverPresentationController?.sourceView = self.view
+                activity.popoverPresentationController?.sourceRect = self.editMenuInteraction(interaction, targetRectFor: configuration)
+                self.present(activity, animated: true)
+            })
+        }
+        return UIMenu(children: actions)
+    }
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {
+        selectionFrame ?? .zero
     }
     @objc func askSelection() { reader?.ask(translate: false) }
     @objc func translateSelection() { reader?.ask(translate: true) }
@@ -224,8 +285,8 @@ struct ReaderScreen: View {
                         Button("答疑记录", systemImage: "text.bubble") { conversations = true }
                         if reader.book.format == "pdf" { Button("文档处理", systemImage: "doc.badge.gearshape") { processing = true } }
                         if let recent = reader.lastSelection {
-                            Button("提问最近选段", systemImage: "text.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: false) }
-                            Button("翻译最近选段", systemImage: "character.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: true) }
+                            Button("提问最近选段", systemImage: "text.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: false, markdown: recent.markdown, objects: recent.objects) }
+                            if !recent.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Button("翻译最近选段", systemImage: "character.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: true, markdown: recent.markdown, objects: recent.objects) } }
                         }
                     } label: { Image(systemName: "ellipsis") }.accessibilityIdentifier("reader.more")
                 }

@@ -52,4 +52,15 @@ final class ServicesTests: XCTestCase {
         XCTAssertEqual(ServiceRequests.translationChunks(""), [])
         XCTAssertEqual(ServiceRequests.targetLanguage("这是正文 $x$"), "en")
     }
+    func testImageInputUsesOnlyExplicitOriginalPNGAttachments() throws {
+        let image = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jfQAAAABJRU5ErkJggg==")!
+        let request = try ServiceRequests.ai(base: "https://example.org/v1", model: "image-model", key: "anonymous-test-key", quote: #"x^2=\emptyset"#, question: "Explain", translate: false, images: [image])
+        let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+        let messages = body["messages"] as! [[String: Any]], content = messages[1]["content"] as! [[String: Any]]
+        XCTAssertEqual(content[0]["text"] as? String, "原文：\nx^2=\\emptyset")
+        XCTAssertEqual((content[1]["image_url"] as? [String: String])?["url"], "data:image/png;base64," + image.base64EncodedString())
+        XCTAssertThrowsError(try ServiceRequests.ai(base: "https://example.org/v1", model: "image-model", key: "", quote: "", question: "", translate: true, images: [image]))
+        XCTAssertThrowsError(try ServiceRequests.ai(base: "https://example.org/v1", model: "image-model", key: "", quote: "", question: "", translate: false, images: [Data("Not a PNG".utf8)]))
+        XCTAssertThrowsError(try ServiceRequests.ai(base: "https://example.org/v1", model: "image-model", key: "", quote: "", question: "", translate: false, images: Array(repeating: image, count: 5)))
+    }
 }

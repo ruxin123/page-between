@@ -49,6 +49,8 @@ final class LibraryTests: XCTestCase {
         let repository = try LibraryRepository(root: root.appendingPathComponent("Library"))
         let book = try await repository.importFile(source)
         var conversation = MobileConversation(book: book.id, quote: #"A formula $x^2$."#, locator: #"{"href":"chapter-1.xhtml"}"#)
+        conversation.previewQuote = #"A formula $x^2$."#
+        conversation.sourceObjects = [PDFSourceObject(page: 3, box: PDFBox(0.1,0.2,0.3,0.4), type: "equation", text: #"$x^2$"#)]
         conversation.turns = [MobileTurn(role: "user", content: "Explain"), MobileTurn(role: "assistant", content: #"Use $x^2$."#)]
         try await repository.saveConversation(conversation)
         try await repository.markDeleted(book.id, deleted: true)
@@ -56,6 +58,13 @@ final class LibraryTests: XCTestCase {
         try await restarted.markDeleted(book.id, deleted: false)
         let saved = try await restarted.conversations(book.id)
         XCTAssertEqual(saved, [conversation])
+        var interrupted = conversation
+        interrupted.turns[1].status = "generating"
+        try await restarted.saveConversation(interrupted)
+        let recovered = try await LibraryRepository(root: root.appendingPathComponent("Library")).conversations(book.id)
+        XCTAssertEqual(recovered.first?.turns[1].status, "stopped")
+        XCTAssertEqual(recovered.first?.turns[1].content, conversation.turns[1].content)
+        XCTAssertEqual(recovered.first?.sourceObjects, conversation.sourceObjects)
     }
 
     func testChaptersAndLongNovelPreserveEveryCharacter() {

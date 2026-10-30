@@ -2,6 +2,15 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## iPhone 0.1.0 · 开发中
+
+手机端尚未发布安装包，完整移植进度见 [功能清单](../ios/PORTING.md)。
+
+- 扫描 PDF 本机 OCR、提前准备与长期保存；MinerU 分批解析和中断续作。
+- PDF 选段匹配解析原文，公式、表格与图片整对象取用，坏公式原页裁图回退，复制保留原始内容。
+- 原生选区菜单与最近选段重开，独立图像模型开关和提问时附图。
+- AI 答疑流式显示，停止后保留部分结果，按书保存出处与对话，支持重新生成。
+
 ## 0.5.30 · 2026-10-30
 
 [下载安装包](https://github.com/ruxin123/page-between/releases/tag/v0.5.30) · Build 254 · 前端 2.52。

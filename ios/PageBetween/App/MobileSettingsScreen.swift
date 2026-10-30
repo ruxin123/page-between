@@ -10,7 +10,10 @@ struct MobileSettingsScreen: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("AI 答疑") { profile($services.ai, key: $aiKey) }
+                Section("AI 答疑") {
+                    profile($services.ai, key: $aiKey)
+                    Toggle("支持图像输入", isOn: Binding(get: { services.ai.supportsImages == true }, set: { services.ai.supportsImages = $0 }))
+                }
                 Section("划词翻译") {
                     Picker("默认服务", selection: $services.provider) { Text("Google").tag("google"); Text("AI").tag("ai") }
                     Toggle("单独配置翻译模型", isOn: $services.separateTranslation)

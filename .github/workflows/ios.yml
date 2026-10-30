@@ -42,6 +42,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO | tee "$RUNNER_TEMP/iphone-build.log"
       - name: Check packaged offline resources
         run: |
+          python3 ios/Tests/verify_ocr.py
+          python3 ios/Tests/verify_mineru.py --zipfoundation "$RUNNER_TEMP/DerivedData/SourcePackages/checkouts/ZIPFoundation"
+      - name: Check App resources
+        run: |
           python3 - <<'PY'
           import os
           from pathlib import Path

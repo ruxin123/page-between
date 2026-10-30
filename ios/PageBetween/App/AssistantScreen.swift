@@ -34,7 +34,13 @@ struct AssistantScreen: View {
                     if let error { Text(error).font(.callout).foregroundStyle(.secondary) }
                     if formulaReview { Label("部分公式请对照原文", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary) }
                     if !answer.isEmpty { MarkdownView(text: answer) }
-                    ForEach(turns) { turn in VStack(alignment: .leading, spacing: 8) { Text(turn.role == "user" ? "你" : "AI").font(.caption).foregroundStyle(.secondary); MarkdownView(text: turn.content) } }
+                    ForEach(turns) { turn in
+                        HStack {
+                            if turn.role == "user" { Spacer(minLength: 32) }
+                            MarkdownView(text: turn.content).padding(12).background(turn.role == "user" ? MobilePalette.accent.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 12))
+                            if turn.role != "user" { Spacer(minLength: 0) }
+                        }
+                    }
                 }.padding(20)
             }
             .navigationTitle(selection.translate ? "翻译" : "书内答疑").navigationBarTitleDisplayMode(.inline)

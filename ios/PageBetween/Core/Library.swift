@@ -25,6 +25,8 @@ public struct MobileBook: Codable, Identifiable, Equatable, Sendable {
     public var pinned: Bool = false
     public var deletedAt: Date?
     public var bookmarks: [ReadingBookmark] = []
+    public var parseEnabled: Bool?
+    public var shouldPrepare: Bool { parseEnabled ?? ["pdf", "txt"].contains(format) }
 }
 
 public struct MobileCatalog: Codable, Sendable {
@@ -92,7 +94,7 @@ public actor LibraryRepository {
         do {
             let name = "original." + format
             try manager.copyItem(at: source, to: folder.appendingPathComponent(name))
-            let book = MobileBook(id: id, title: source.deletingPathExtension().lastPathComponent, author: "", format: format, sourceHash: digest, originalName: name, readingFile: name, importedAt: Date())
+            let book = MobileBook(id: id, title: source.deletingPathExtension().lastPathComponent, author: "", format: format, sourceHash: digest, originalName: name, readingFile: name, importedAt: Date(), parseEnabled: ["pdf", "txt"].contains(format))
             var next = catalog; next.books.append(book)
             try persist(next)
             return book
@@ -108,6 +110,11 @@ public actor LibraryRepository {
     public func markDeleted(_ id: UUID, deleted: Bool) throws {
         guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         book.deletedAt = deleted ? Date() : nil
+        try update(book)
+    }
+    public func setParsing(_ id: UUID, enabled: Bool) throws {
+        guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
+        book.parseEnabled = enabled
         try update(book)
     }
 

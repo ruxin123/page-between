@@ -14,7 +14,7 @@ struct ConversationHistoryScreen: View {
     var body: some View {
         NavigationStack {
             List {
-                if items.isEmpty && !loading { ContentUnavailableView("还没有答疑记录", systemImage: "text.bubble", description: Text("阅读时长按原文，选择“提问”。")) }
+                if items.isEmpty && !loading { ContentUnavailableView("暂无答疑记录", systemImage: "text.bubble") }
                 ForEach(items) { item in
                     Button { selected = item } label: {
                         VStack(alignment: .leading, spacing: 8) {

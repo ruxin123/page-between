@@ -56,7 +56,12 @@ struct AssistantSelection: Identifiable {
             let actions = [EditingAction.lookup, .share, EditingAction(title: "复制", action: #selector(ReaderHost.copySelection)), EditingAction(title: "提问", action: #selector(ReaderHost.askSelection)), EditingAction(title: "翻译", action: #selector(ReaderHost.translateSelection))]
             let view: UIViewController & Navigator
             if publication.conforms(to: .pdf) {
-                view = try PDFNavigatorViewController(publication: publication, initialLocation: locator, config: .init(preferences: PDFPreferences(scroll: scroll, spread: .never), editingActions: actions), delegate: self)
+                let pdf = try MobilePDFNavigator(publication: publication, book: book, source: await store.repository.file(book, name: book.originalName), location: locator, continuous: scroll, preparation: store.preparation, delegate: self)
+                pdf.onTap = { [weak self] in self?.contentTapped() }
+                pdf.onJump = { [weak self] locator in self?.history.append(locator) }
+                pdf.onCopy = { [weak self] in self?.copySelection() }
+                pdf.onAsk = { [weak self] in self?.ask(translate: $0) }
+                view = pdf
             } else if publication.conforms(to: .epub) || publication.conforms(to: .divina) {
                 let epub = try EPUBNavigatorViewController(publication: publication, initialLocation: locator, config: .init(preferences: preferences(), editingActions: actions))
                 epub.delegate = self; view = epub
@@ -78,16 +83,18 @@ struct AssistantSelection: Identifiable {
         } catch { failure = error.localizedDescription }
     }
     private func contentTapped() {
+        guard !hasContentSelection else { return }
         let now = ProcessInfo.processInfo.systemUptime
         chromeTask?.cancel()
         if now - lastContentTap < 0.4 { lastContentTap = 0; return }
         lastContentTap = now
         chromeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let self, self.selection == nil, (self.navigator as? SelectableNavigator)?.currentSelection == nil else { return }
+            guard !Task.isCancelled, let self, self.selection == nil, !self.hasContentSelection else { return }
             withAnimation(.easeOut(duration: 0.2)) { self.chromeVisible.toggle() }
         }
     }
+    private var hasContentSelection: Bool { (navigator as? SelectableNavigator)?.currentSelection != nil || (navigator as? MobilePDFNavigator)?.hasSelection == true }
     private func preferences() -> EPUBPreferences {
         EPUBPreferences(columnCount: .one, fontFamily: fontFamily.isEmpty ? nil : FontFamily(rawValue: fontFamily), fontSize: fontScale / 100, lineHeight: 1.85, pageMargins: 1.0, publisherStyles: fontFamily.isEmpty, scroll: scroll, theme: theme == "night" ? .dark : theme == "sepia" ? .sepia : .light)
     }
@@ -95,7 +102,7 @@ struct AssistantSelection: Identifiable {
         let defaults = UserDefaults.standard
         defaults.set(fontScale, forKey: "reading.fontScale"); defaults.set(fontFamily, forKey: "reading.fontFamily"); defaults.set(theme, forKey: "reading.theme"); defaults.set(scroll, forKey: book.format == "pdf" ? "reading.pdfScroll" : "reading.textScroll")
         (navigator as? EPUBNavigatorViewController)?.submitPreferences(preferences())
-        (navigator as? PDFNavigatorViewController)?.submitPreferences(PDFPreferences(scroll: scroll, spread: .never))
+        (navigator as? MobilePDFNavigator)?.applyScroll(scroll)
     }
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         chapter = locator.title ?? book.title
@@ -137,6 +144,7 @@ struct AssistantSelection: Identifiable {
         catch { failure = error.localizedDescription }
     }
     private func selectedSource(translate: Bool) async throws -> AssistantSelection {
+        if let pdf = navigator as? MobilePDFNavigator { return try pdf.selectedSource(translate: translate) }
         guard let selected = (navigator as? SelectableNavigator)?.currentSelection else { throw ServiceError.message("请先长按选择一段文字。") }
         let locator = try selected.locator.jsonString()
         var quote = selected.locator.text.highlight ?? ""
@@ -194,6 +202,7 @@ struct ReaderScreen: View {
     @State private var appearance = false
     @State private var bookmarkTab = false
     @State private var conversations = false
+    @State private var processing = false
     init(book: MobileBook, store: LibraryStore) { _reader = StateObject(wrappedValue: MobileReader(book: book, store: store)) }
     var body: some View {
         NavigationStack {
@@ -213,6 +222,7 @@ struct ReaderScreen: View {
                     Menu {
                         Button("阅读设置", systemImage: "textformat.size") { appearance = true }
                         Button("答疑记录", systemImage: "text.bubble") { conversations = true }
+                        if reader.book.format == "pdf" { Button("文档处理", systemImage: "doc.badge.gearshape") { processing = true } }
                         if let recent = reader.lastSelection {
                             Button("提问最近选段", systemImage: "text.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: false) }
                             Button("翻译最近选段", systemImage: "character.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: true) }
@@ -240,8 +250,9 @@ struct ReaderScreen: View {
             }.navigationTitle("阅读设置").navigationBarTitleDisplayMode(.inline).toolbar { Button("完成") { appearance = false } } }.presentationDetents([.medium]) }
             .sheet(item: $reader.selection) { selection in AssistantScreen(selection: selection, title: reader.book.title, repository: reader.store.repository, openSource: { raw in Task { await reader.goSource(raw) } }) }
             .sheet(isPresented: $conversations) { ConversationHistoryScreen(book: reader.book, repository: reader.store.repository, openSource: { raw in conversations = false; Task { await reader.goSource(raw) } }) }
+            .sheet(isPresented: $processing) { DocumentPreparationScreen(book: reader.book, store: reader.store) }
             .task { await reader.load() }
-            .onChange(of: phase) { if phase != .active { Task { await reader.flush() } } }
+            .onChange(of: phase) { if phase != .active { reader.store.preparation.pauseAll(); Task { await reader.flush() } } }
             .alert("操作未完成", isPresented: Binding(get: { reader.failure != nil && reader.controller != nil }, set: { if !$0 { reader.failure = nil } })) { Button("好") { reader.failure = nil } } message: { Text(reader.failure ?? "") }
         }.tint(MobilePalette.accent).preferredColorScheme(reader.theme == "night" ? .dark : .light)
     }
@@ -255,7 +266,6 @@ struct ReaderScreen: View {
                 if bookmarkTab { bookmarkRows }
                 else { chapterRows }
             }
-            .navigationTitle("导航")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("完成") { toc = false } }
         }

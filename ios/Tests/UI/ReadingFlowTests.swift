@@ -1,6 +1,40 @@
 import XCTest
 
 final class ReadingFlowTests: XCTestCase {
+    @MainActor func testScannedPDFPreparationNavigationAndSelection() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["PAGE_BETWEEN_PDF_UI_TEST"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let book = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original scan sample")).firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout: 30), app.debugDescription)
+        book.tap()
+        XCTAssertTrue(app.buttons["reader.more"].waitForExistence(timeout: 15))
+        app.buttons["reader.more"].tap(); app.buttons["文档处理"].tap()
+        XCTAssertTrue(app.buttons["准备整本"].waitForExistence(timeout: 5))
+        app.buttons["准备整本"].tap()
+        XCTAssertTrue(app.staticTexts["已完成"].waitForExistence(timeout: 60), app.debugDescription)
+        let range = app.textFields["页段，例如 1-20,35"]
+        range.tap(); range.typeText("2")
+        app.buttons["重新准备所选页"].tap()
+        XCTAssertTrue(app.staticTexts["已完成"].waitForExistence(timeout: 60), app.debugDescription)
+        capture(app, "pdf-preparation")
+        app.buttons["完成"].tap()
+        app.buttons["下一页"].tap()
+        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 10), app.debugDescription)
+        capture(app, "scanned-pdf")
+        app.buttons["书库"].tap(); XCTAssertTrue(book.waitForExistence(timeout: 5)); book.tap()
+        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 15), "Prepared page references changed the stored page number")
+        let text = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Read page two")).firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 15), app.debugDescription)
+        text.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).press(forDuration: 1.2)
+        let ask = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "提问")).firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 6), app.debugDescription)
+        ask.tap()
+        XCTAssertTrue(app.navigationBars["书内答疑"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.webViews["markdown.preview"].staticTexts.firstMatch.waitForExistence(timeout: 8))
+        capture(app, "scanned-selection")
+    }
     @MainActor func testImportSettingsChapterJumpAndProgress() throws {
         let app = XCUIApplication()
         app.launchEnvironment["PAGE_BETWEEN_UI_TEST"] = "1"

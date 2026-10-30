@@ -5,6 +5,7 @@ struct MobileSettingsScreen: View {
     @StateObject private var services = MobileServices()
     @State private var aiKey = SecureKeys.read("ai")
     @State private var translationKey = SecureKeys.read("translation")
+    @State private var mineruKey = SecureKeys.read("mineru")
     @State private var error: String?
     var body: some View {
         NavigationStack {
@@ -15,10 +16,16 @@ struct MobileSettingsScreen: View {
                     Toggle("单独配置翻译模型", isOn: $services.separateTranslation)
                     if services.separateTranslation { profile($services.translation, key: $translationKey) }
                 }
-                Section { LabeledContent("版本", value: "0.1.0"); Text("书籍和阅读进度保存在手机；服务密钥保存在本机钥匙串。").font(.footnote).foregroundStyle(.secondary) }
+                Section("MinerU") {
+                    TextField("解析服务地址", text: $services.mineru.baseURL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField("MinerU Token", text: $mineruKey).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Picker("解析模型", selection: $services.mineru.model) { Text("VLM").tag("vlm"); Text("Pipeline").tag("pipeline") }
+                    Picker("文档语言", selection: $services.mineru.language) { Text("中文").tag("ch"); Text("英文").tag("en"); Text("自动").tag("auto") }
+                }
+                Section { LabeledContent("版本", value: "0.1.0") }
             }
             .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("保存") { do { try services.save(aiKey: aiKey, translationKey: translationKey); dismiss() } catch { self.error = error.localizedDescription } } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("保存") { do { try services.save(aiKey: aiKey, translationKey: translationKey, mineruKey: mineruKey); dismiss() } catch { self.error = error.localizedDescription } } } }
             .alert("设置未保存", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("好") { error = nil } } message: { Text(error ?? "") }
         }.tint(MobilePalette.accent)
     }

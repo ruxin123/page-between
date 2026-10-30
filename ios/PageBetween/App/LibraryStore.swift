@@ -8,6 +8,7 @@ import ReadiumZIPFoundation
     @Published var error: String?
     @Published var importing = false
     let repository: LibraryRepository
+    let preparation: PDFPreparationStore
     private let retriever: AssetRetriever
     private let opener: PublicationOpener
     private var pendingImports: [URL] = []
@@ -15,6 +16,7 @@ import ReadiumZIPFoundation
     init() throws {
         let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("PageBetween", isDirectory: true)
         repository = try LibraryRepository(root: root)
+        preparation = PDFPreparationStore(repository: repository)
         let http = DefaultHTTPClient()
         retriever = AssetRetriever(httpClient: http)
         opener = PublicationOpener(parser: DefaultPublicationParser(httpClient: http, assetRetriever: retriever, pdfFactory: DefaultPDFDocumentFactory()))

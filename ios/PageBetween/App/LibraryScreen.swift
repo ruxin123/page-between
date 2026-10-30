@@ -8,6 +8,7 @@ enum MobilePalette {
 }
 
 struct LibraryScreen: View {
+    @Environment(\.scenePhase) private var phase
     @ObservedObject var store: LibraryStore
     @State private var search = ""
     @State private var importing = false
@@ -16,6 +17,7 @@ struct LibraryScreen: View {
     @State private var selected: MobileBook?
     @State private var deleting: MobileBook?
     @State private var pinnedOnly = false
+    @State private var processing: MobileBook?
     private var books: [MobileBook] {
         store.books.filter { ($0.deletedAt != nil) == removed && (!pinnedOnly || $0.pinned) && (search.isEmpty || ($0.title + $0.author).localizedCaseInsensitiveContains(search)) }.sorted { ($0.lastOpened ?? $0.importedAt) > ($1.lastOpened ?? $1.importedAt) }
     }
@@ -32,10 +34,10 @@ struct LibraryScreen: View {
                             }.padding(20).background(MobilePalette.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
                         }.buttonStyle(.plain)
                     }
-                    HStack { Text(removed ? "最近删除" : "我的书籍").font(.title3.bold()); Spacer(); if !removed { Toggle("常读", isOn: $pinnedOnly).toggleStyle(.button).font(.caption) } }
+                    if !removed { HStack { Spacer(); Toggle("常读", isOn: $pinnedOnly).toggleStyle(.button).font(.caption) } }
                     if books.isEmpty {
                         VStack(spacing: 16) {
-                            ContentUnavailableView(removed ? "没有已删除的书籍" : pinnedOnly ? "还没有常读书籍" : search.isEmpty ? "带一本书进来" : "没有找到书籍", systemImage: "books.vertical", description: Text(removed ? "删除的书籍会在这里保留。" : pinnedOnly ? "长按封面，加入常读。" : search.isEmpty ? "从“文件”导入 EPUB、PDF 或 TXT。" : "试试其他书名或作者。"))
+                            ContentUnavailableView(removed ? "暂无已删除书籍" : pinnedOnly ? "暂无常读书籍" : search.isEmpty ? "暂无书籍" : "未找到书籍", systemImage: "books.vertical")
                             if search.isEmpty && !removed && !pinnedOnly { Button("导入书籍") { importing = true }.buttonStyle(.borderedProminent) }
                         }.padding(.vertical, 32)
                     } else {
@@ -45,11 +47,12 @@ struct LibraryScreen: View {
                                     VStack(alignment: .leading, spacing: 10) {
                                         MobileBookCover(book: book, url: store.coverURL(book))
                                         Text(book.title).font(.subheadline.weight(.medium)).lineLimit(2)
-                                        HStack { Text(removed ? "点按恢复" : book.progress > 0 ? "\(Int(book.progress * 100))%" : book.format.uppercased()); Spacer(); if book.pinned { Image(systemName: "star.fill") } }.font(.caption).foregroundStyle(.secondary)
+                                        HStack { Text(book.progress > 0 ? "\(Int(book.progress * 100))%" : book.format.uppercased()); Spacer(); if book.pinned { Image(systemName: "star.fill") } }.font(.caption).foregroundStyle(.secondary)
                                     }
                                 }.buttonStyle(.plain).contextMenu {
                                     if removed { Button("恢复", systemImage: "arrow.uturn.backward") { Task { await store.remove(book, deleted: false) } } }
                                     else {
+                                        if book.format == "pdf" { Button("文档处理", systemImage: "doc.badge.gearshape") { processing = book } }
                                         Button(book.pinned ? "移出常读" : "加入常读", systemImage: "star") { var updated = book; updated.pinned.toggle(); Task { await store.save(updated) } }
                                         Button("删除书籍", systemImage: "trash", role: .destructive) { deleting = book }
                                     }
@@ -60,7 +63,7 @@ struct LibraryScreen: View {
                 }.padding(24)
             }
             .background(MobilePalette.paper)
-            .navigationTitle("页间")
+            .navigationTitle(removed ? "最近删除" : "页间")
             .searchable(text: $search, prompt: "书名、作者")
             .toolbar { ToolbarItemGroup(placement: .topBarTrailing) {
                 if store.importing { ProgressView() }
@@ -72,12 +75,14 @@ struct LibraryScreen: View {
             }
             .fullScreenCover(item: $selected) { book in ReaderScreen(book: book, store: store) }
             .sheet(isPresented: $settings) { MobileSettingsScreen() }
-            .confirmationDialog("删除这本书？可在“最近删除”恢复。", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            .sheet(item: $processing) { DocumentPreparationScreen(book: $0, store: store) }
+            .confirmationDialog("删除书籍？", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
                 Button("删除书籍", role: .destructive) { if let book = deleting { Task { await store.remove(book, deleted: true) } }; deleting = nil }
             }
             .alert("操作未完成", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("好") { store.error = nil } } message: { Text(store.error ?? "") }
             .task { await store.refresh() }
             .onOpenURL { url in Task { await store.importFiles([url]) } }
+            .onChange(of: phase) { if phase != .active { store.preparation.pauseAll() } }
         }.tint(MobilePalette.accent)
     }
 }

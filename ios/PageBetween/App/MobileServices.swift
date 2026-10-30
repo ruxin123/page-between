@@ -49,6 +49,7 @@ private let readingNetwork: URLSession = {
     @Published var translation = ServiceProfile()
     @Published var separateTranslation = false
     @Published var provider = "google"
+    @Published var mineru = MinerUProfile()
     init() { reload() }
     func reload() {
         let defaults = UserDefaults.standard
@@ -56,17 +57,21 @@ private let readingNetwork: URLSession = {
         translation = defaults.data(forKey: "services.translation").flatMap { try? JSONDecoder().decode(ServiceProfile.self, from: $0) } ?? ServiceProfile()
         separateTranslation = defaults.bool(forKey: "services.separateTranslation")
         provider = defaults.string(forKey: "services.provider") ?? "google"
+        mineru = defaults.data(forKey: "services.mineru").flatMap { try? JSONDecoder().decode(MinerUProfile.self, from: $0) } ?? MinerUProfile()
     }
-    func save(aiKey: String, translationKey: String) throws {
+    func save(aiKey: String, translationKey: String, mineruKey: String) throws {
         _ = try Self.endpoint(ai.baseURL)
         if separateTranslation { _ = try Self.endpoint(translation.baseURL) }
+        try mineru.validate()
         try SecureKeys.write("ai", value: aiKey)
         try SecureKeys.write("translation", value: translationKey)
+        try SecureKeys.write("mineru", value: mineruKey)
         let defaults = UserDefaults.standard
         defaults.set(try JSONEncoder().encode(ai), forKey: "services.ai")
         defaults.set(try JSONEncoder().encode(translation), forKey: "services.translation")
         defaults.set(separateTranslation, forKey: "services.separateTranslation")
         defaults.set(provider, forKey: "services.provider")
+        defaults.set(try JSONEncoder().encode(mineru), forKey: "services.mineru")
     }
     static func endpoint(_ value: String) throws -> URL { try ServiceRequests.endpoint(value) }
     func complete(quote: String, question: String, translate: Bool, history: [MobileTurn] = []) async throws -> String {

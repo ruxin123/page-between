@@ -22,6 +22,7 @@ private struct MarkdownWebView: UIViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         let view = WKWebView(frame: .zero, configuration: configuration)
+        view.accessibilityIdentifier = "markdown.preview"
         view.isOpaque = false; view.backgroundColor = .clear; view.scrollView.isScrollEnabled = false
         view.navigationDelegate = context.coordinator
         if let page = Bundle.main.url(forResource: "markdown", withExtension: "html", subdirectory: "Web") {

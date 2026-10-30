@@ -26,12 +26,15 @@ struct AssistantSelection: Identifiable {
     @Published var theme = "paper"
     @Published var history: [Locator] = []
     @Published var chromeVisible = true
+    @Published var bookmarked = false
     var navigator: Navigator?
     let store: LibraryStore
     let book: MobileBook
     private var saveTask: Task<Void, Never>?
     private var loaded = false
     private var directionalNavigation: DirectionalNavigationAdapter?
+    private var chromeTask: Task<Void, Never>?
+    private var lastContentTap = 0.0
 
     init(book: MobileBook, store: LibraryStore) {
         self.book = book; self.store = store
@@ -50,7 +53,7 @@ struct AssistantSelection: Identifiable {
             self.publication = publication
             contents = (try? await publication.tableOfContents().get()) ?? []
             let locator = try book.locator.flatMap { try Locator(jsonString: $0) }
-            let actions = EditingAction.defaultActions + [EditingAction(title: "提问", action: #selector(ReaderHost.askSelection)), EditingAction(title: "翻译", action: #selector(ReaderHost.translateSelection))]
+            let actions = [EditingAction.lookup, .share, EditingAction(title: "复制", action: #selector(ReaderHost.copySelection)), EditingAction(title: "提问", action: #selector(ReaderHost.askSelection)), EditingAction(title: "翻译", action: #selector(ReaderHost.translateSelection))]
             let view: UIViewController & Navigator
             if publication.conforms(to: .pdf) {
                 view = try PDFNavigatorViewController(publication: publication, initialLocation: locator, config: .init(preferences: PDFPreferences(scroll: scroll, spread: .never), editingActions: actions), delegate: self)
@@ -60,21 +63,33 @@ struct AssistantSelection: Identifiable {
             } else { throw LibraryFailure.unsupported }
             navigator = view
             if let visual = view as? VisualNavigator {
-                directionalNavigation = DirectionalNavigationAdapter(pointerPolicy: .init(types: [.touch]), animatedTransition: true)
+                directionalNavigation = DirectionalNavigationAdapter(pointerPolicy: .init(types: []), animatedTransition: true)
                 directionalNavigation?.bind(to: visual)
                 visual.addObserver(.tap { [weak self] _ in
                     guard let self, (self.navigator as? SelectableNavigator)?.currentSelection == nil else { return false }
-                    withAnimation(.easeOut(duration: 0.2)) { self.chromeVisible.toggle() }
-                    return true
+                    self.contentTapped()
+                    return false
                 })
             }
             controller = ReaderHost(navigator: view, reader: self)
             chapter = book.chapter
             progress = book.progress
+            updateBookmarkState()
         } catch { failure = error.localizedDescription }
     }
+    private func contentTapped() {
+        let now = ProcessInfo.processInfo.systemUptime
+        chromeTask?.cancel()
+        if now - lastContentTap < 0.4 { lastContentTap = 0; return }
+        lastContentTap = now
+        chromeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, let self, self.selection == nil, (self.navigator as? SelectableNavigator)?.currentSelection == nil else { return }
+            withAnimation(.easeOut(duration: 0.2)) { self.chromeVisible.toggle() }
+        }
+    }
     private func preferences() -> EPUBPreferences {
-        EPUBPreferences(columnCount: .one, fontFamily: fontFamily.isEmpty ? nil : FontFamily(rawValue: fontFamily), fontSize: fontScale, lineHeight: 1.85, pageMargins: 1.0, publisherStyles: true, scroll: scroll, theme: theme == "night" ? .dark : theme == "sepia" ? .sepia : .light)
+        EPUBPreferences(columnCount: .one, fontFamily: fontFamily.isEmpty ? nil : FontFamily(rawValue: fontFamily), fontSize: fontScale / 100, lineHeight: 1.85, pageMargins: 1.0, publisherStyles: fontFamily.isEmpty, scroll: scroll, theme: theme == "night" ? .dark : theme == "sepia" ? .sepia : .light)
     }
     func apply() {
         let defaults = UserDefaults.standard
@@ -85,6 +100,7 @@ struct AssistantSelection: Identifiable {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         chapter = locator.title ?? book.title
         progress = locator.locations.totalProgression ?? locator.locations.progression ?? 0
+        updateBookmarkState(locator)
         saveTask?.cancel()
         saveTask = Task { try? await Task.sleep(for: .milliseconds(350)); guard !Task.isCancelled else { return }; await flush() }
     }
@@ -108,23 +124,44 @@ struct AssistantSelection: Identifiable {
     }
     func bookmark() async {
         guard let locator = navigator?.currentLocation, let raw = try? locator.jsonString() else { return }
-        do { try await store.repository.toggleBookmark(book.id, title: chapter.isEmpty ? book.title : chapter, locator: raw); await store.refresh() }
+        do { try await store.repository.toggleBookmark(book.id, title: chapter.isEmpty ? book.title : chapter, locator: raw); await store.refresh(); updateBookmarkState() }
         catch { failure = error.localizedDescription }
+    }
+    private func updateBookmarkState(_ location: Locator? = nil) {
+        guard let locator = location ?? navigator?.currentLocation, let raw = try? locator.jsonString() else { bookmarked = false; return }
+        bookmarked = store.books.first(where: { $0.id == book.id })?.bookmarks.contains(where: { $0.locator == raw }) == true
     }
     func flush() async {
         guard let locator = navigator?.currentLocation, let raw = try? locator.jsonString() else { return }
         do { try await store.repository.saveLocation(book.id, locator: raw, progress: progress, chapter: chapter); await store.refresh() }
         catch { failure = error.localizedDescription }
     }
+    private func selectedSource(translate: Bool) async throws -> AssistantSelection {
+        guard let selected = (navigator as? SelectableNavigator)?.currentSelection else { throw ServiceError.message("请先长按选择一段文字。") }
+        let locator = try selected.locator.jsonString()
+        var quote = selected.locator.text.highlight ?? ""
+        if let epub = navigator as? EPUBNavigatorViewController,
+           case .success(let value) = await epub.evaluateJavaScript("window.pageBetweenSelectedSource?.()"), let source = value as? String, !source.isEmpty { quote = source }
+        guard !quote.isEmpty else { throw ServiceError.message("请先长按选择一段文字。") }
+        return AssistantSelection(book: book.id, quote: quote, locator: locator, translate: translate)
+    }
     func ask(translate: Bool) {
-        guard let selected = (navigator as? SelectableNavigator)?.currentSelection, let text = selected.locator.text.highlight, !text.isEmpty, let locator = try? selected.locator.jsonString() else { failure = "请先长按选择一段文字。"; return }
         Task {
-            var quote = text
-            if let epub = navigator as? EPUBNavigatorViewController,
-               case .success(let value) = await epub.evaluateJavaScript("window.pageBetweenSelectedSource?.()"), let source = value as? String, !source.isEmpty { quote = source }
-            guard quote.count <= 12000 else { failure = "选段过长，请缩小范围。"; return }
-            selection = AssistantSelection(book: book.id, quote: quote, locator: locator, translate: translate)
-            lastSelection = selection
+            do {
+                let source = try await selectedSource(translate: translate)
+                guard source.quote.count <= 12000 else { throw ServiceError.message("选段过长，请缩小范围。") }
+                selection = source; lastSelection = source
+            } catch { failure = error.localizedDescription }
+        }
+    }
+    func copySelection() {
+        Task {
+            do {
+                let source = try await selectedSource(translate: false)
+                guard await publication?.rights.copy(text: source.quote) == true else { throw ServiceError.message("本书不允许复制此选段。") }
+                UIPasteboard.general.string = source.quote
+                lastSelection = source
+            } catch { failure = error.localizedDescription }
         }
     }
 }
@@ -140,6 +177,7 @@ struct AssistantSelection: Identifiable {
     }
     @objc func askSelection() { reader?.ask(translate: false) }
     @objc func translateSelection() { reader?.ask(translate: true) }
+    @objc func copySelection() { reader?.copySelection() }
 }
 
 struct NavigatorHost: UIViewControllerRepresentable {
@@ -184,9 +222,9 @@ struct ReaderScreen: View {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button("上一页", systemImage: "chevron.left") { Task { _ = await reader.navigator?.goBackward(options: .animated) } }
                     Spacer()
-                    VStack(spacing: 3) { Text(reader.chapter).lineLimit(1).font(.caption); Text("\(Int(reader.progress * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
+                    VStack(spacing: 3) { Text(reader.chapter).lineLimit(1).font(.caption); Text("\(Int(reader.progress * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }.frame(width: 112)
                     Spacer()
-                    Button("书签", systemImage: "bookmark") { Task { await reader.bookmark() } }
+                    Button("书签", systemImage: reader.bookmarked ? "bookmark.fill" : "bookmark") { Task { await reader.bookmark() } }.accessibilityIdentifier("reader.bookmark").accessibilityLabel(reader.bookmarked ? "移除书签" : "添加书签")
                     Button("下一页", systemImage: "chevron.right") { Task { _ = await reader.navigator?.goForward(options: .animated) } }
                 }
             }

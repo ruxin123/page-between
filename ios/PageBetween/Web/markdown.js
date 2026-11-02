@@ -10,7 +10,11 @@ window.renderMarkdown = async (text, images = []) => {
     const item = formulas[Number(node.dataset.formula)];
     if (item) {
       node.dataset.display = String(item.display);
-      try { katex.render(item.tex, node, {displayMode:item.display,throwOnError:true,trust:false,strict:'ignore'}); }
+      try {
+        katex.render(item.tex, node, {displayMode:item.display,throwOnError:true,trust:false,strict:'ignore'});
+        node.setAttribute('role', 'math');
+        node.setAttribute('aria-label', item.tex.trim());
+      }
       catch {
         const source = images.find(image => image.raw.trim() === item.tex.trim() && /^data:image\/png;base64,/.test(image.src));
         if (source) {

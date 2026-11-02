@@ -28,6 +28,7 @@ const { webkit } = require('playwright');
    return data.getData('text/plain');
   });
   assert.equal(copied,String.raw`$\sigma\in S_n$`);
+  assert.equal(await page.locator('[role="math"]').first().getAttribute('aria-label'),String.raw`\sigma\in S_n`);
   await page.addScriptTag({url:pathToFileURL(path.resolve(__dirname,'../PageBetween/Web/selection.js')).href});
   const source=await page.evaluate(async()=>{
    await window.renderMarkdown(String.raw`$$\begin{pmatrix}1&2\\3&4\end{pmatrix}$$`);

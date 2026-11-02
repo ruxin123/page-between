@@ -51,8 +51,10 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription); copy.tap()
         app.buttons["reader.more"].tap(); app.buttons["提问最近选段"].tap()
         XCTAssertTrue(app.webViews["markdown.preview"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.webViews["markdown.preview"].staticTexts.firstMatch.waitForExistence(timeout: 15))
+        let renderedFormula = app.webViews["markdown.preview"].descendants(matching: .any).matching(NSPredicate(format: "label == %@", "g(x)=x^2")).firstMatch
+        let formulaReady = renderedFormula.waitForExistence(timeout: 15)
         capture(app, "complete-formula")
+        XCTAssertTrue(formulaReady, app.debugDescription)
         app.buttons["完成"].tap()
         let damaged = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "a + b")).firstMatch
         XCTAssertTrue(damaged.waitForExistence(timeout: 5), app.debugDescription); damaged.tap()

@@ -70,9 +70,10 @@ struct LibraryScreen: View {
                 else { Button("导入", systemImage: "plus") { importing = true } }
                 Menu { Button(removed ? "返回书库" : "最近删除", systemImage: "trash") { removed.toggle(); pinnedOnly = false; search = "" }; Button("设置", systemImage: "gearshape") { settings = true } } label: { Image(systemName: "ellipsis.circle") }.accessibilityIdentifier("library.more")
             } }
-            .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "epub")!, .pdf, .plainText, UTType(filenameExtension: "cbz") ?? .zip], allowsMultipleSelection: true) { result in
-                switch result { case .success(let urls): Task { await store.importFiles(urls) }; case .failure(let error): store.error = error.localizedDescription }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "epub")!, .pdf, .plainText, UTType(filenameExtension: "cbz") ?? .zip, UTType("local.pagebetween.fb2") ?? .xml], allowsMultipleSelection: true) { result in
+                switch result { case .success(let urls): store.reviewImport(urls); case .failure(let error): store.error = error.localizedDescription }
             }
+            .sheet(item: $store.importDraft) { draft in ImportScreen(draft: draft) { choices in Task { await store.importBooks(choices) } } }
             .fullScreenCover(item: $selected) { book in ReaderScreen(book: book, store: store) }
             .sheet(isPresented: $settings) { MobileSettingsScreen() }
             .sheet(item: $processing) { DocumentPreparationScreen(book: $0, store: store) }
@@ -81,7 +82,7 @@ struct LibraryScreen: View {
             }
             .alert("操作未完成", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("好") { store.error = nil } } message: { Text(store.error ?? "") }
             .task { await store.refresh() }
-            .onOpenURL { url in Task { await store.importFiles([url]) } }
+            .onOpenURL { url in store.reviewImport([url]) }
             .onChange(of: phase) { if phase != .active { store.preparation.pauseAll() } }
         }.tint(MobilePalette.accent)
     }

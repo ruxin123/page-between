@@ -7,11 +7,12 @@ import ReadiumZIPFoundation
     @Published var books: [MobileBook] = []
     @Published var error: String?
     @Published var importing = false
+    @Published var importDraft: ImportDraft?
     let repository: LibraryRepository
     let preparation: PDFPreparationStore
     private let retriever: AssetRetriever
     private let opener: PublicationOpener
-    private var pendingImports: [URL] = []
+    private var pendingImports: [BookImport] = []
 
     init() throws {
         let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("PageBetween", isDirectory: true)
@@ -30,26 +31,39 @@ import ReadiumZIPFoundation
         return try await opener.open(asset: asset, allowUserInteraction: false).get()
     }
 
-    func importFiles(_ urls: [URL]) async {
-        pendingImports.append(contentsOf: urls)
+    func reviewImport(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        if let importDraft { importDraft.items += urls.map(BookImport.init) }
+        else { importDraft = ImportDraft(urls) }
+    }
+    func importFiles(_ urls: [URL]) async { await importBooks(urls.map(BookImport.init)) }
+    func importBooks(_ choices: [BookImport]) async {
+        pendingImports.append(contentsOf: choices)
         guard !importing else { return }
         importing = true
         defer { importing = false }
         while !pendingImports.isEmpty {
-            let url = pendingImports.removeFirst()
+            let choice = pendingImports.removeFirst(), url = choice.url
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             let previousIDs = Set(await repository.books(includingDeleted: true).map(\.id))
             var newImport: UUID?
             do {
                 if ["epub", "cbz"].contains(url.pathExtension.lowercased()) { try await Self.checkArchive(url) }
-                var book = try await repository.importFile(url)
+                var book = try await repository.importFile(url, parseEnabled: choice.parseEnabled)
                 if !previousIDs.contains(book.id) { newImport = book.id }
-                if book.format == "txt", book.readingFile == book.originalName {
+                if ["txt", "fb2"].contains(book.format), book.readingFile == book.originalName {
                     let original = try await repository.file(book, name: book.originalName)
                     let destination = try await repository.file(book, name: "reading.epub")
                     let title = book.title
-                    try await Task.detached(priority: .userInitiated) { try await TextEPUB.create(original: original, title: title, destination: destination) }.value
+                    let parse = book.shouldPrepare
+                    let format = book.format
+                    try await Task.detached(priority: .userInitiated) {
+                        if format == "fb2" {
+                            guard (try original.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 50 * 1024 * 1024 else { throw LibraryFailure.tooLarge }
+                            try await TextEPUB.create(content: FB2Parser.parse(Data(contentsOf: original), fallbackTitle: title), destination: destination)
+                        } else { try await TextEPUB.create(original: original, title: title, destination: destination, parseEnabled: parse) }
+                    }.value
                     book.readingFile = "reading.epub"
                 }
                 let publication = try await open(book)

@@ -21,6 +21,7 @@
 				<string>com.adobe.pdf</string>
 				<string>public.plain-text</string>
 				<string>public.zip-archive</string>
+				<string>local.pagebetween.fb2</string>
 			</array>
 		</dict>
 	</array>
@@ -49,6 +50,15 @@
 	</dict>
 	<key>UIFileSharingEnabled</key>
 	<true/>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key><string>local.pagebetween.fb2</string>
+			<key>UTTypeDescription</key><string>FictionBook</string>
+			<key>UTTypeConformsTo</key><array><string>public.xml</string></array>
+			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>fb2</string></array></dict>
+		</dict>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

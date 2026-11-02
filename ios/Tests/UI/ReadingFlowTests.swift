@@ -2,6 +2,36 @@ import XCTest
 
 final class ReadingFlowTests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
+    @MainActor func testImportOptionsAndIllustratedFB2() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["PAGE_BETWEEN_IMPORT_UI_TEST"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let textToggle = app.switches["import.parse.Import options sample.txt"]
+        XCTAssertTrue(textToggle.waitForExistence(timeout: 30)); XCTAssertEqual(textToggle.value as? String, "1")
+        XCTAssertEqual(app.switches["import.parse.Original FB2 sample.fb2"].value as? String, "0")
+        textToggle.switches.firstMatch.tap()
+        let switchedOff = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "0"), object: textToggle)
+        let result = XCTWaiter.wait(for: [switchedOff], timeout: 5)
+        capture(app, "import-toggle-result")
+        XCTAssertEqual(result, .completed, "Toggle value: \(String(describing: textToggle.value)); " + app.debugDescription)
+        capture(app, "import-options"); app.navigationBars["导入书籍"].buttons["导入"].tap()
+        let fb2 = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original FB2 sample")).firstMatch
+        XCTAssertTrue(fb2.waitForExistence(timeout: 30), app.debugDescription); openBook(fb2, in: app)
+        XCTAssertTrue(app.buttons["目录"].waitForExistence(timeout: 20)); app.buttons["目录"].tap()
+        XCTAssertTrue(app.buttons["第一章 FB2 开篇"].waitForExistence(timeout: 10)); app.buttons["第一章 FB2 开篇"].tap()
+        let paragraph = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original illustrated FB2 paragraph")).firstMatch
+        XCTAssertTrue(paragraph.waitForExistence(timeout: 20)); assertReadable(paragraph, in: app); capture(app, "fb2-reader")
+        app.buttons["目录"].tap()
+        XCTAssertTrue(app.buttons["Nested FB2 section"].waitForExistence(timeout: 10))
+        app.buttons["Second FB2 chapter"].tap()
+        XCTAssertTrue(app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Second original FB2 paragraph")).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["书库"].tap()
+        let plain = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Import options sample")).firstMatch
+        XCTAssertTrue(plain.waitForExistence(timeout: 10)); openBook(plain, in: app)
+        XCTAssertTrue(app.buttons["目录"].waitForExistence(timeout: 20)); app.buttons["目录"].tap()
+        XCTAssertTrue(app.buttons["全文"].waitForExistence(timeout: 10)); XCTAssertFalse(app.buttons["第二章 继续"].exists)
+    }
     @MainActor func testAIStreamingStopReopenAndRetry() throws {
         let app = XCUIApplication()
         app.launchEnvironment["PAGE_BETWEEN_UI_TEST"] = "1"

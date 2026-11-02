@@ -16,9 +16,10 @@ public enum TextChapters {
         throw LibraryFailure.invalidFile
     }
 
-    public static func parse(_ input: String) -> [TextChapter] {
+    public static func parse(_ input: String, detectHeadings: Bool = true) -> [TextChapter] {
         let clean = input.hasPrefix("\u{feff}") ? String(input.dropFirst()) : input
         let text = clean.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        guard detectHeadings else { return split(title: "全文", body: text, offset: 0) }
         let pattern = #"(?im)^\s*(第\s*[零〇一二三四五六七八九十百千万两\d]+\s*[章节回卷部篇][^\n]{0,65}|(?:chapter|part|book)\s+(?:\d+|[ivxlcdm]+)[^\n]{0,65}|(?:序章|序言|前言|引子|楔子|尾声|后记|终章))\s*$"#
         let expression = try! NSRegularExpression(pattern: pattern)
         let source = text as NSString

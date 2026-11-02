@@ -40,7 +40,7 @@ public enum LibraryFailure: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalidFile: return "文件无法读取，请重新选择。"
-        case .unsupported: return "请选择 EPUB、PDF、TXT 或 CBZ 文件。"
+        case .unsupported: return "暂不支持这种文件格式。"
         case .tooLarge: return "文件超过 300 MB，请先缩小文件。"
         case .missingBook: return "找不到这本书。"
         case .invalidPath: return "书籍资源路径无效。"
@@ -74,9 +74,9 @@ public actor LibraryRepository {
         return path
     }
 
-    public func importFile(_ source: URL) throws -> MobileBook {
+    public func importFile(_ source: URL, parseEnabled: Bool? = nil) throws -> MobileBook {
         let format = source.pathExtension.lowercased()
-        guard ["epub", "pdf", "txt", "cbz"].contains(format) else { throw LibraryFailure.unsupported }
+        guard ["epub", "pdf", "txt", "cbz", "fb2"].contains(format) else { throw LibraryFailure.unsupported }
         let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values.isRegularFile == true, let size = values.fileSize, size > 0 else { throw LibraryFailure.invalidFile }
         guard size <= 300 * 1024 * 1024 else { throw LibraryFailure.tooLarge }
@@ -94,7 +94,7 @@ public actor LibraryRepository {
         do {
             let name = "original." + format
             try manager.copyItem(at: source, to: folder.appendingPathComponent(name))
-            let book = MobileBook(id: id, title: source.deletingPathExtension().lastPathComponent, author: "", format: format, sourceHash: digest, originalName: name, readingFile: name, importedAt: Date(), parseEnabled: ["pdf", "txt"].contains(format))
+            let book = MobileBook(id: id, title: source.deletingPathExtension().lastPathComponent, author: "", format: format, sourceHash: digest, originalName: name, readingFile: name, importedAt: Date(), parseEnabled: parseEnabled ?? ["pdf", "txt"].contains(format))
             var next = catalog; next.books.append(book)
             try persist(next)
             return book

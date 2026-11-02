@@ -5,6 +5,18 @@ import PDFKit
 enum UITestFixtures {
     @MainActor static func prepare(_ store: LibraryStore) async {
         let environment = ProcessInfo.processInfo.environment
+        if environment["PAGE_BETWEEN_IMPORT_UI_TEST"] == "1" {
+            do {
+                let folder = FileManager.default.temporaryDirectory
+                let text = folder.appendingPathComponent("Import options sample.txt"), fb2 = folder.appendingPathComponent("Original FB2 sample.fb2")
+                try Data(("第一章 开篇\n\nOriginal unparsed text.\n第二章 继续\n\nAnother original paragraph.\n" + UUID().uuidString).utf8).write(to: text)
+                let svg = ##"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><rect width="160" height="80" fill="#537d68"/></svg>"##
+                let image = Data(svg.utf8).base64EncodedString()
+                let xml = ##"<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink"><description><title-info><book-title>Original FB2 sample</book-title><lang>en</lang></title-info></description><body><section id="first"><title><p>第一章 FB2 开篇</p></title><p>Original illustrated FB2 paragraph.</p><image l:href="#picture"/><p><a l:href="#second">Next chapter link</a></p><section><title><p>Nested FB2 section</p></title><p>Nested original content.</p></section></section><section id="second"><title><p>Second FB2 chapter</p></title><p>Second original FB2 paragraph.</p></section></body><binary id="picture" content-type="image/svg+xml">"## + image + "</binary></FictionBook>"
+                try Data(xml.utf8).write(to: fb2)
+                store.reviewImport([text, fb2])
+            } catch { store.error = error.localizedDescription }
+        }
         if environment["PAGE_BETWEEN_PDF_OBJECT_UI_TEST"] == "1" { await objects(store) }
         if environment["PAGE_BETWEEN_UI_TEST"] == "1" {
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("Mobile reading sample.txt")

@@ -30,9 +30,11 @@ xcodebuild test -project ios/PageBetween.xcodeproj -scheme PageBetween \
 
 Markdown 检查依赖 Playwright WebKit。更新排版资源运行 `python3 ios/scripts/prepare_web.py`，下载前验证 npm 元数据的 SHA-512 完整性。
 
-UI 测试仅在 Debug 且设置 `PAGE_BETWEEN_UI_TEST=1`、`PAGE_BETWEEN_PDF_UI_TEST=1` 或 `PAGE_BETWEEN_PDF_OBJECT_UI_TEST=1` 时生成原创 TXT 或 PDF，经生产导入链路进入书库；不会删除现有书库，不读取本机个人数据。对象示例用显式原创数据生成解析区块，不伪称云端结果。`PAGE_BETWEEN_AI_UI_TEST=1` 仅在 Debug 接入内存 URLProtocol 示例服务，不读取服务密钥、不修改保存的配置。正常启动和 Release 不创建示例，截图为原创内容。测试不会发送真实模型或翻译请求。
+UI 测试仅在 Debug 且设置 `PAGE_BETWEEN_UI_TEST=1`、`PAGE_BETWEEN_PDF_UI_TEST=1`、`PAGE_BETWEEN_PDF_OBJECT_UI_TEST=1` 或 `PAGE_BETWEEN_IMPORT_UI_TEST=1` 时生成原创 TXT、FB2 或 PDF，经生产导入链路进入书库；不会删除现有书库，不读取本机个人数据。对象示例用显式原创数据生成解析区块，不伪称云端结果。`PAGE_BETWEEN_AI_UI_TEST=1` 仅在 Debug 接入内存 URLProtocol 示例服务，不读取服务密钥、不修改保存的配置。正常启动和 Release 不创建示例，截图为原创内容。测试不会发送真实模型或翻译请求。
 
 ## 功能边界
+
+- 导入确认逐本调整解析开关，重复导入保留已有设置和原件；TXT 关闭分章仍完整保留正文。原创 FB2 的章节层级、注释链接、PNG／JPEG／GIF／自包含 SVG 资源通过核心检查，生产转换文件通过 EPUBCheck。原生流程覆盖开关操作、批量导入、插图正文、章节跳转与无分章 TXT。其他格式及复杂原书继续验收。
 
 - 扫描 PDF 的 Vision OCR、文字几何、不可见文字层、原图像素保持、持久复用通过生产链路检查；原生 UI 覆盖整本准备、重新准备、跨页、重开和长按提问。旋转与复杂原书仍需扩展验收。
 - MinerU 生产原生 worker 通过受控 HTTPS URLProtocol 服务检查：实际上传 150／150／1 页 PDF，第二批上传确认中断后重启续作，保留同一任务编号，共完成 301 页。结果原页映射、精确 LaTeX 与 Token 隔离通过。此项不等于真实云端调用通过。

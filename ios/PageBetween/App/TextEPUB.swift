@@ -30,7 +30,15 @@ enum TextEPUB {
         var manifest = "", spine = "", links = ""
         func navigation(_ headings: [EPUBHeading], file: String) -> String {
             guard !headings.isEmpty else { return "" }
-            return "<ol>" + headings.map { "<li><a href=\"" + file + "#" + TextChapters.escape($0.anchor) + "\">" + TextChapters.escape($0.title) + "</a>" + navigation($0.children, file: file) + "</li>" }.joined() + "</ol>"
+            var result = "<ol>"
+            for heading in headings {
+                let anchor = TextChapters.escape(heading.anchor)
+                let title = TextChapters.escape(heading.title)
+                result += "<li><a href=\"\(file)#\(anchor)\">\(title)</a>"
+                result += navigation(heading.children, file: file)
+                result += "</li>"
+            }
+            return result + "</ol>"
         }
         let language = TextChapters.escape(content.language)
         for (index, chapter) in content.chapters.enumerated() {

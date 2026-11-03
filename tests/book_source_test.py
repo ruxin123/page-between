@@ -44,6 +44,10 @@ class BookSource(unittest.TestCase):
             self.assertEqual(call.call_args.args, ("search", {"cursor":"next"}))
             with self.assertRaises(ValueError):
                 source.call({"operation":"search", "query":"original", "format":"exe"})
+            source.call({"operation":"search", "author":"Original Author", "language":"english", "exact":True})
+            self.assertEqual(call.call_args.args, ("search", {"sources":["zlibrary"], "limit":20, "author":"Original Author", "languages":["english"], "exact":True}))
+            for payload in [{"query":""}, {"query":"original", "language":"invalid"}, {"query":"original", "exact":"false"}]:
+                with self.assertRaises(ValueError): source.call({"operation":"search", **payload})
 
     def test_password_stays_in_keychain_and_account_change_requires_password(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(source, "SETTINGS", Path(folder)/"settings.json"), patch.object(source.service_settings, "keychain") as keychain, patch.object(source.CLIENT, "close"):

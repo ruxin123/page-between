@@ -193,6 +193,8 @@ def validate(root):
         for ident in books
     ):
         raise ValueError("备份中的书籍标识无效或重复。")
+    import library_folders
+    library_folders.validate(collection.get("folders", []), set(books))
     if not isinstance(collection.get("jobs", []), list):
         raise ValueError("备份中的任务记录无效。")
     for job in collection.get("jobs", []):

@@ -32,6 +32,7 @@
 !/book_images.py
 !/epub_export.py
 !/library_data.py
+!/library_folders.py
 !/chapter_edit.py
 !/paths.py
 !/normalize-headings.lua
@@ -88,6 +89,7 @@
 !/tests/knowledge.test.mjs
 !/tests/export_test.py
 !/tests/library_data_test.py
+!/tests/folders_test.py
 !/tests/chapter_edit_test.py
 !/tests/book_images_test.py
 !/docs/

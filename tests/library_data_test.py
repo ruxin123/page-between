@@ -20,6 +20,21 @@ from storage import load, save
 
 
 class LibraryRecovery(unittest.TestCase):
+    def test_folders_survive_backup_and_restore(self):
+        path = self.library / "library.json"
+        collection = load(path, {})
+        folders = [{"id": "study", "name": "学习", "books": [self.book["id"]]}]
+        collection["folders"] = folders
+        self.snapshot["library.json"] = copy.deepcopy(collection)
+        save(path, collection)
+        package = self.package()
+        collection["folders"] = []
+        save(path, collection)
+        data.prepare_restore(package)
+        data.approve_restore()
+        data.apply_pending_restore()
+        self.assertEqual(load(path, {})["folders"], folders)
+
     def test_saved_selection_text_survives_backup_restore_and_cache_cleanup(self):
         folder = (
             self.library

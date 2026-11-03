@@ -165,10 +165,16 @@ def verify(app, epubcheck=None, samples=()):
                 )
             library = json.loads(request("/api/library")[2])
             assert len(library["books"]) == 5
+            def folder_change(payload):
+                return json.loads(request("/api/folders", json.dumps(payload).encode(), content_type="application/json")[2])["folders"]
+            folder_id = folder_change({"operation":"create", "name":"原创分类"})[-1]["id"]
+            folder_change({"operation":"assign", "id":folder_id, "book":"demo-a"})
             for path in (
                 "/",
                 "/app-v2.mjs",
                 "/ui/settings.mjs",
+                "/ui/folders.mjs",
+                "/ui/book-source.mjs",
                 "/ui/navigation.mjs",
                 "/ui/ocr-layer.mjs",
                 "/assets/fonts/han-serif.otf",
@@ -672,6 +678,10 @@ def verify(app, epubcheck=None, samples=()):
             assert not any(item["id"] == "demo-a" for item in json.loads(request("/api/library")[2])["books"])
             request("/api/books/demo-a/restore", b"{}", content_type="application/json")
             assert any(item["id"] == "demo-a" for item in json.loads(request("/api/library")[2])["books"])
+            restored_folders = json.loads(request("/api/library")[2])["folders"]
+            assert next(item for item in restored_folders if item["id"] == folder_id)["books"] == ["demo-a"]
+            folder_change({"operation":"remove", "id":folder_id})
+            assert any(item["id"] == "demo-a" for item in json.loads(request("/api/library")[2])["books"])
             assert request(original_url)[2] == original_bytes
             assert request("/api/state")[2] == reading_records
             subprocess.run(
@@ -679,6 +689,7 @@ def verify(app, epubcheck=None, samples=()):
             )
             return {
                 "standaloneService": True,
+                "folderBackupAndRestart": True,
                 "developmentPath": False,
                 "demoBooks": 5,
                 "import": True,

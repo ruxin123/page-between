@@ -847,6 +847,13 @@ class Handler(SimpleHTTPRequestHandler):
             )
             if route.path == "/api/book-source/settings":
                 return self.json(book_source.configure(payload))
+            if route.path == "/api/folders":
+                import library_folders
+                with MUTEX:
+                    collection = library()
+                    folders = library_folders.change(collection, payload)
+                    save(DATA / "library.json", collection)
+                return self.json({"folders": folders})
             if re.fullmatch(r"/api/books/[A-Za-z0-9][A-Za-z0-9_-]{0,80}/(?:remove|restore)", route.path):
                 return self.json({"book":set_book_deleted(route.path.split("/")[-2], route.path.endswith("/remove"))})
             if route.path == "/api/book-source/install":

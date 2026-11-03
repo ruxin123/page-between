@@ -189,7 +189,17 @@ def call(payload):
         if payload.get("cursor"):
             args = {"cursor": bounded(payload["cursor"], 1024)}
         else:
-            args = {"query": bounded(payload.get("query"), 500), "sources":["zlibrary"], "limit":20}
+            args = {"sources":["zlibrary"], "limit":20}
+            if payload.get("query"): args["query"] = bounded(payload["query"], 500)
+            if payload.get("author"): args["author"] = bounded(payload["author"], 200)
+            if not args.get("query") and not args.get("author"): raise ValueError("请输入书名、作者或 ISBN。")
+            if payload.get("language"):
+                language = payload["language"]
+                if language not in {"chinese", "english", "japanese", "french", "german"}: raise ValueError("语言无效。")
+                args["languages"] = [language]
+            if "exact" in payload:
+                if type(payload["exact"]) is not bool: raise ValueError("匹配方式无效。")
+                args["exact"] = payload["exact"]
             if payload.get("format"):
                 fmt = payload["format"]
                 if fmt not in {"epub", "pdf", "txt", "mobi", "azw3", "djvu"}:

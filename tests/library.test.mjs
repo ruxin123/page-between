@@ -90,3 +90,15 @@ assert.equal(nextVisibleCard(adjacent, adjacent[1]), adjacent[0]);
 adjacent[0].hidden = true;
 assert.equal(nextVisibleCard(adjacent, adjacent[1]), undefined);
 console.log("书库筛选、内容转义、卡片复用与删除：通过。");
+
+const { inFolder } = await import('../ui/folders.mjs');
+const folderBooks = [{id:'a'}, {id:'b'}, {id:'c'}];
+const folders = [{id:'math', name:'Math', books:['a', 'c']}];
+assert.deepEqual(inFolder(folderBooks, folders, 'math').map(b=>b.id), ['a','c']);
+assert.deepEqual(inFolder(folderBooks, folders, 'unfiled').map(b=>b.id), ['b']);
+assert.equal(inFolder(folderBooks, folders, ''), folderBooks);
+const { metadataHTML } = await import('../ui/book-source.mjs');
+const metadata = metadataHTML({isbn:['123','456'], series:{name:'Series'}, categories:['Math','<script>'], rating:0, description:'<img onerror=alert(1)>', description_truncated:true});
+assert.match(metadata, /ISBN/); assert.match(metadata, /Series/); assert.match(metadata, /评分/);
+assert.match(metadata, /简介节选/); assert.ok(!metadata.includes('<script>')); assert.ok(!metadata.includes('<img'));
+assert.ok(!metadataHTML({}).includes('<dt>'));

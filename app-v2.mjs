@@ -9,6 +9,7 @@ import {
 } from "/core.mjs";
 import { escapeHTML, icon } from "/ui/shared.mjs";
 import { createLibraryView } from "/ui/library.mjs";
+import { createFolders, inFolder } from "/ui/folders.mjs";
 import { createBookSource } from "/ui/book-source.mjs";
 import { createBookSourceSettings } from "/ui/book-source-settings.mjs";
 import { createToasts } from "/ui/feedback.mjs";
@@ -41,7 +42,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.52";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.53";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { PdfPreviewCache } from "/ui/pdf-preview.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
@@ -83,6 +84,7 @@ const defaults = {
 };
 let prefs = { ...defaults },
   books = [],
+  folders = [],
   jobs = [],
   positions = {},
   bookmarks = [],
@@ -249,6 +251,7 @@ const documentParsing = createDocumentParsing({
   },
 });
 const libraryView = createLibraryView(document);
+const folderView = createFolders({ post, refresh: refreshLibrary, changed: renderLibrary });
 function postState(patch) {
   stateWrites++;
   stateQueue = stateQueue
@@ -375,15 +378,17 @@ function progressFor(book) {
   return clamp(positions[book.id]?.progress || 0, 0, 1);
 }
 function renderLibrary() {
+  folderView.render(folders, books);
+  const visibleBooks = inFolder(books, folders, folderView.selected);
   const last =
     books.find((book) => book.id === current?.id) ||
     books.find((book) => positions[book.id]) ||
     books[0];
   libraryView.render({
-    books,
+    books: visibleBooks,
     filter: shelfFilter,
     query: $("library-search").value,
-    last,
+    last: visibleBooks.some(book => book.id === last?.id) ? last : null,
     progress: progressFor,
     detail: (book) => chapterTitle(book, positions[book.id]?.index || 1),
   });
@@ -3108,7 +3113,7 @@ function showRoute(sourcePosition) {
   } else {
     document.title =
       { settings: "设置", source: "找书", library: "书库" }[next] + " · 页间";
-    if (next === "source") bookSource.open();
+    if (next === "source") bookSource.open(requested.slice(1));
     if (next === "library") renderLibrary();
     if (requested[0] === "imports") openJobs();
     if (next === "settings") {
@@ -3238,6 +3243,8 @@ async function submitImport() {
           headers: { "Content-Type": "application/octet-stream" },
           body: item.file,
         });
+        if (!response.duplicate && folders.some(folder => folder.id === folderView.selected))
+          await folderView.assign(response.book, folderView.selected);
         results.push(
           `${response.duplicate ? "已在书库中" : "已导入"}：${response.book.title}`,
         );
@@ -3263,12 +3270,14 @@ async function submitImport() {
 }
 function openBookOptions(id) {
   if (bookSaving) return toast("正在保存书籍设置，请稍候。");
+  folderView.render(folders, books);
   editingBook = books.find((book) => book.id === id);
   if (!editingBook) return;
   const book = editingBook;
   $("book-form").innerHTML =
     `<label>书名<input id="book-name" type="text" value="${escapeHTML(book.title)}" maxlength="240"></label><label>书籍类别<select id="book-shelf"><option ${book.shelf === "小说" ? "selected" : ""}>小说</option><option ${book.shelf === "学习" ? "selected" : ""}>学习</option></select></label><label class="parse-toggle"><span>文档解析</span><input id="book-parse" type="checkbox" ${book.parseEnabled ? "checked" : ""}></label>${book.type === "pdf" ? `<label>PDF 页码偏移<input id="book-offset" type="number" value="${book.pageOffset ?? ""}" placeholder="自动" title="PDF 页序减去印刷页码。例如印刷第 3 页在 PDF 第 5 页，填写 2。"></label>` : ""}<div class="book-details">${escapeHTML(book.format)} · ${book.type === "pdf" ? book.pages + " 页" : book.chapters.length + " 章"}</div>`;
   $("book-save-note").textContent = "";
+  $("book-form").insertAdjacentHTML("beforeend", folderView.options(book));
   $("book-cloud").hidden = book.type !== "pdf";
   $("book-chapters").hidden = book.type !== "txt";
   $("book-dialog").showModal();
@@ -3355,6 +3364,7 @@ async function saveBookOptions(forCloud = false) {
   try {
     await savePosition(true);
     await post("/api/books/" + source.id, patch);
+    await folderView.assign(source, $("book-folder").value);
     if (editingBook === source) $("book-dialog").close();
     const resume =
       current?.id === source.id && readerReady ? makePosition() : null;
@@ -3381,6 +3391,7 @@ async function refreshLibrary() {
   const data = await api("/api/library");
   const previous = current;
   books = data.books;
+  folders = data.folders || [];
   jobs = data.jobs;
   if (previous) {
     const replacement = books.find((book) => book.id === previous.id);
@@ -3727,6 +3738,7 @@ $("empty-action").onclick = () => {
   else {
     $("library-search").value = "";
     shelfFilter = "all";
+    folderView.reset();
     renderLibrary();
     $("library-search").focus();
   }
@@ -4370,6 +4382,7 @@ try {
     api("/api/state"),
   ]);
   books = collection.books;
+  folders = collection.folders || [];
   jobs = collection.jobs;
   formatInfo = formats.formats;
   $("file-input").accept = formatInfo.map((info) => info.extension).join(",");

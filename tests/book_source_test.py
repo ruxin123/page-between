@@ -11,6 +11,13 @@ import book_source as source
 
 
 class BookSource(unittest.TestCase):
+    def test_unsupported_edition_is_rejected_before_download(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(source.CLIENT, "call", return_value={"format":"djvu"}) as call:
+            destination = Path(directory)/"download"
+            with self.assertRaises(ValueError): source.acquire("original-ref", destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(call.call_args.args[0], "get_book")
+            self.assertEqual(call.call_count, 1)
     def test_download_import_deduplicates_and_removes_temporary_files(self):
         import server
         with tempfile.TemporaryDirectory() as folder:
@@ -65,9 +72,10 @@ class BookSource(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             base = Path(folder)
             outside = base/"outside.txt"; outside.write_text("outside")
-            with patch.object(source.CLIENT, "call", return_value={"path":str(outside)}):
+            with patch.object(source.CLIENT, "call", side_effect=lambda name,args: {"format":"txt"} if name == "get_book" else {"path":str(outside)}):
                 with self.assertRaises(ValueError): source.acquire("row-ref", base/"download")
             def download(name, args):
+                if name == "get_book": return {"format":"txt"}
                 path = Path(args["output_dir"])/"original.txt"; path.write_text("original")
                 return {"path":str(path)}
             with patch.object(source.CLIENT, "call", side_effect=download):

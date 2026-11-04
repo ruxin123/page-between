@@ -220,6 +220,10 @@ def bounded(value, limit):
 
 
 def acquire(ref, destination):
+    from book_import import SUPPORTED
+    detail = CLIENT.call("get_book", {"ref": bounded(ref, 1024)})
+    if "." + str(detail.get("format", "")).lower().lstrip(".") not in SUPPORTED:
+        raise ValueError("页间暂不支持这个版本的格式，请选择其他版本。")
     destination.mkdir(parents=True, exist_ok=False)
     response = CLIENT.call("download", {"ref":bounded(ref, 1024), "output_dir":str(destination)})
     raw = Path(response.get("path", ""))

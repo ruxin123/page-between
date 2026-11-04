@@ -42,7 +42,7 @@ import {
   epubTocAtAnchor,
   pdfTocAtPosition,
 } from "/ui/navigation.mjs";
-import { PageLayout, characterRect } from "/page-layout.mjs?v=2.53";
+import { PageLayout, characterRect } from "/page-layout.mjs?v=2.54";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { PdfPreviewCache } from "/ui/pdf-preview.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
@@ -469,7 +469,7 @@ function settingsMarkup() {
   }</section><section class="settings-section"><h2>阅读主题</h2><div class="theme-choices">${themes.map(([theme, title, color]) => `<button data-theme="${theme}" aria-pressed="${prefs.theme === theme}"><span class="theme-circle" style="background:${color}"></span>${title}</button>`).join("")}</div></section>${
     pdf
       ? `<section class="settings-section"><h2>原书版面</h2>${range("页面缩放", "pdfZoom", 25, 400, 5, `${Math.round(currentZoom())}%`, currentZoom())}<button class="secondary-button" data-fit style="margin-top:16px">适合页面宽度</button><label class="setting-check">随主题柔化页面<input data-pref="pdfTint" type="checkbox" ${prefs.pdfTint ? "checked" : ""}></label></section>`
-      : `<section class="settings-section"><h2>排版</h2>${select(
+      : `<section class="settings-section"><h2>排版</h2><div class="density-choices"><button class="secondary-button" data-density="1.7">紧凑</button><button class="secondary-button" data-density="1.95">舒展</button></div>${select(
           "中文字体",
           "zhFont",
           [
@@ -519,6 +519,7 @@ function applyPreferences() {
   style.setProperty("--reading-line", palm ? 1.65 : prefs.lineHeight);
   style.setProperty("--reading-width", `${prefs.textWidth}px`);
   $("pdf-paper").classList.toggle("tinted", prefs.pdfTint);
+  $("reader").classList.toggle("compact-text", prefs.lineHeight <= 1.8);
   readerZoom.update();
   document
     .querySelectorAll(".adaptive-size-note")
@@ -859,6 +860,11 @@ function currentProgress() {
 
 function updateProgress() {
   readerZoom.update();
+  if (current?.type === "pdf") {
+    const value = Math.round(currentZoom());
+    document.querySelectorAll('[data-output="pdfZoom"]').forEach(output => output.textContent = `${value}%`);
+    document.querySelectorAll('input[data-pref="pdfZoom"]').forEach(input => { if (document.activeElement !== input) input.value = value; });
+  }
   if (!current || !location) return;
   const progress = currentProgress();
   const active = activeTocItem(),
@@ -2401,8 +2407,17 @@ function onPageInput(event) {
   }
 }
 let lastWheel = 0,
-  touchStart;
+  touchStart, lastSwipe = 0, chromeTapTimer;
 function attachPageGestures(target) {
+  target.addEventListener("touchcancel", () => { touchStart = null; }, {passive:true});
+  target.addEventListener("click", event => {
+    clearTimeout(chromeTapTimer);
+    if ((!palm && innerWidth >= 760) || event.detail !== 1 || Date.now() - lastSwipe < 500 || event.target.closest?.("a,button,input,textarea,select,[data-pdf-object]")) return;
+    chromeTapTimer = setTimeout(() => {
+      const selection = (target.ownerDocument || target).getSelection?.();
+      if ((!selection || selection.isCollapsed) && !currentSelection && readerReady) setFocus(!$("reader").classList.contains("focused"));
+    }, 240);
+  });
   target.addEventListener("wheel", onPageInput, { passive: false });
   target.addEventListener("wheel", zoomWheel, { passive: false });
   target.addEventListener(
@@ -2410,7 +2425,7 @@ function attachPageGestures(target) {
     (event) => {
       touchStart =
         event.touches.length === 1
-          ? [event.touches[0].clientX, event.touches[0].clientY]
+          ? [event.touches[0].clientX, event.touches[0].clientY, Date.now()]
           : null;
     },
     { passive: true },
@@ -2418,17 +2433,22 @@ function attachPageGestures(target) {
   target.addEventListener(
     "touchend",
     (event) => {
+      const start = touchStart;
+      touchStart = null;
+      const selection = (target.ownerDocument || target).getSelection?.();
       if (
-        !touchStart ||
+        !start || Date.now() - start[2] > 650 ||
         readingMode() !== "pages" ||
         !event.changedTouches[0] ||
-        (!target.getSelection?.()?.isCollapsed && target.getSelection?.())
+        (selection && !selection.isCollapsed)
       )
         return;
-      const dx = event.changedTouches[0].clientX - touchStart[0],
-        dy = event.changedTouches[0].clientY - touchStart[1];
-      if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.4)
+      const dx = event.changedTouches[0].clientX - start[0],
+        dy = event.changedTouches[0].clientY - start[1];
+      if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+        lastSwipe = Date.now();
         flip(dx < 0 ? 1 : -1);
+      }
       touchStart = null;
     },
     { passive: true },
@@ -2939,7 +2959,7 @@ async function navigate(index, options = {}, record = true) {
   }
   // Restoring a target suppresses scroll saves, so commit navigation explicitly.
   if (readerReady) savePosition(true).catch((error) => toast(error.message));
-  if (innerWidth < 760) setTocOpen(false);
+  if (innerWidth < 1100) setTocOpen(false);
 }
 
 async function flip(direction) {
@@ -3047,9 +3067,15 @@ function goBack() {
     navigate(previous.position.index, previous.position, false);
   }
 }
-function setTocOpen(open) {
+function setTocOpen(open, reflow = true) {
+  const position = readerReady && reflow ? makePosition() : null;
+  const docked = open && innerWidth >= 1100 && !palm;
+  const changed = $("reader").classList.contains("toc-docked") !== docked;
   $("reader-aside").hidden = !open;
+  $("reader").classList.toggle("toc-docked", docked);
+  if (open) $("reader-settings").hidden = true;
   $("toc-toggle").setAttribute("aria-expanded", String(open));
+  if (position && changed && route === "reader") renderCurrent(position);
 }
 async function readBook(id, sourcePosition) {
   const book = books.find((book) => book.id === id);
@@ -3061,7 +3087,7 @@ async function readBook(id, sourcePosition) {
     : initialLocation(book);
   history = [];
   $("toc-search").value = "";
-  setTocOpen(!palm);
+  setTocOpen(!palm && innerWidth >= 1100, false);
   $("toc-tab").click();
   $("reader-settings").hidden = true;
   return renderCurrent(location);
@@ -3614,6 +3640,8 @@ function setFocus(value) {
 }
 
 document.addEventListener("click", async (event) => {
+  const density = event.target.closest("[data-density]");
+  if (density) { await changePreference("lineHeight", Number(density.dataset.density)); return; }
   const processing = event.target.closest("[data-process]");
   if (processing) {
     documentParsing.open(processing.dataset.process);
@@ -3738,7 +3766,6 @@ $("empty-action").onclick = () => {
   else {
     $("library-search").value = "";
     shelfFilter = "all";
-    folderView.reset();
     renderLibrary();
     $("library-search").focus();
   }
@@ -3779,6 +3806,7 @@ $("toc-toggle").onclick = () => {
   setTocOpen($("reader-aside").hidden);
 };
 $("toc-close").onclick = () => setTocOpen(false);
+$("toc-scrim").onclick = () => setTocOpen(false);
 $("toc-search").addEventListener("input", renderToc);
 $("toc-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-index]");
@@ -3849,8 +3877,12 @@ $("source-pdf-open").onclick = () => {
 $("focus-button").onclick = () =>
   setFocus(!$("reader").classList.contains("focused"));
 $("focus-exit").onclick = () => setFocus(false);
-$("reader-settings-open").onclick = () =>
-  ($("reader-settings").hidden = !$("reader-settings").hidden);
+$("reader-settings-open").onclick = () => {
+  const open = $("reader-settings").hidden;
+  if (open) { setTocOpen(false); renderSettings(); }
+  $("reader-settings").hidden = !open;
+  $("reader-settings-open").setAttribute("aria-expanded", String(open));
+};
 $("reader-settings-close").onclick = () => ($("reader-settings").hidden = true);
 $("palm-settings").onclick = () =>
   ($("reader-settings").hidden = !$("reader-settings").hidden);
@@ -4177,6 +4209,7 @@ window.addEventListener("resize", () => {
   const anchor = lastAnchor || captureAnchor();
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(async () => {
+    $("reader").classList.toggle("toc-docked", !$("reader-aside").hidden && innerWidth >= 1100 && !palm);
     applyPreferences();
     if (route !== "reader" || !current) return;
     if (current.type === "pdf") {

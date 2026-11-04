@@ -3960,3 +3960,28 @@ body[data-theme="night"] .danger-button { color:#e89c8e; }
  .source-detail-body .source-metadata { grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
 }
 .source-acquire input, .source-filters input { accent-color:var(--accent); }
+
+/* Reserve reading space for a docked table of contents. */
+.reader.toc-docked:not(.focused) .reader-stage { margin-left:320px; }
+.reader.focused .reader-aside { display:none; }
+@media(min-width:1100px) { .reader.toc-docked .reader-aside { top:72px; bottom:64px; left:16px; } }
+.continue-card { min-height:116px; padding:16px 24px; margin-bottom:20px; gap:20px; }
+.continue-card .small-cover { width:56px; height:78px; }
+#folder-navigation { margin:16px 0; }
+.library-tools { margin-bottom:20px; }
+.book-grid { grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:24px; }
+.library-book { max-width:180px; }
+.reader-actions { gap:4px; }
+#ai-open, #toc-toggle, #reader-settings-open { margin-left:8px; border-left:1px solid var(--line); border-radius:0; }
+.reader-footer { font-size:12px; }
+.library-heading-actions { display:flex; align-items:center; gap:12px; }
+.library-management { position:relative; }
+.library-management summary { list-style:none; cursor:pointer; padding:8px 12px; font-size:24px; }
+.library-management[open] > button { position:absolute; right:0; top:100%; z-index:30; white-space:nowrap; box-shadow:var(--shadow-card); }
+.book-read-progress { color:var(--accent); margin-left:8px; font-variant-numeric:tabular-nums; }
+.density-choices { display:flex; gap:8px; margin-bottom:20px; }
+.reader.compact-text .chapter-rule { margin:12px 0 18px; }
+.reader.focused #palm-bar { display:none; }
+#toc-scrim { display:none; position:absolute; inset:0; z-index:19; background:color-mix(in srgb,var(--ink) 20%,transparent); cursor:pointer; }
+.reader:not(.toc-docked):not(.focused):has(#reader-aside:not([hidden])) #toc-scrim { display:block; }
+#position-label, .page-controls, .timer-button { font-size:12px; }

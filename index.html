@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.53" />
+    <link rel="stylesheet" href="/layout.css?v=2.54" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -55,18 +55,13 @@
               <h1 id="library-title">书库</h1>
               <p id="library-summary" role="status"></p>
             </div>
-            <button class="primary-button" id="import-open">
-              <i data-icon="plus"></i>导入书籍
-            </button>
+            <div class="library-heading-actions"><button class="primary-button" id="import-open"><i data-icon="plus"></i>导入书籍</button><details class="library-management"><summary aria-label="书库管理">⋯</summary><button id="removed-books-open" class="secondary-button">最近删除</button></details></div>
           </header>
           <div id="continue-reading"></div>
           <nav id="folder-navigation" aria-label="书籍文件夹"></nav>
           <div class="library-tools">
-            <button id="removed-books-open" class="secondary-button">
-              最近删除
-            </button>
             <div class="filter-chips" id="shelf-filters">
-              <button data-filter="all" aria-pressed="true">全部</button
+              <button data-filter="all" aria-pressed="true">所有类型</button
               ><button data-filter="pinned" aria-pressed="false">常读 ★</button
               ><button data-filter="小说" aria-pressed="false">小说</button
               ><button data-filter="学习" aria-pressed="false">学习</button>
@@ -425,6 +420,7 @@
         </button>
       </header>
       <div class="reader-stage">
+        <button id="toc-scrim" aria-label="关闭目录"></button>
         <div
           id="reading-viewport"
           class="reading-viewport"
@@ -1195,6 +1191,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.53"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.54"></script>
   </body>
 </html>

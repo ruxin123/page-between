@@ -60,7 +60,7 @@ export function createLibraryView(doc) {
   function createCard() {
     const card = doc.createElement("article");
     card.className = "library-book";
-    card.innerHTML = `<button class="cover-open"></button><button class="book-more icon-button">${icon("more")}</button><div class="book-card-foot"><div class="book-card-copy"><h3></h3><p></p><div class="book-tags"><span class="book-format"></span><span class="book-tag-separator" aria-hidden="true">·</span><span class="book-status"></span></div><button class="book-process" hidden>文档处理</button></div><button class="shelf-star">${icon("star")}</button></div>`;
+    card.innerHTML = `<button class="cover-open"></button><button class="book-more icon-button">${icon("more")}</button><div class="book-card-foot"><div class="book-card-copy"><h3></h3><p></p><div class="book-tags"><span class="book-format"></span><span class="book-tag-separator" aria-hidden="true">·</span><span class="book-status"></span><span class="book-read-progress"></span></div><button class="book-process" hidden>文档处理</button></div><button class="shelf-star">${icon("star")}</button></div>`;
     return card;
   }
   function updateCard(card, book) {
@@ -129,7 +129,7 @@ export function createLibraryView(doc) {
         new Set(selected.map((b) => b.id)),
         cards,
         createCard,
-        updateCard,
+        (card, book) => { updateCard(card, book); const fraction = progress(book); card.querySelector(".book-read-progress").textContent = fraction > 0 ? `${Math.round(fraction * 100)}%` : ""; },
       );
       $("library-empty").hidden = selected.length > 0;
       $("empty-title").textContent = !books.length

@@ -27,7 +27,9 @@ struct AssistantSelection: Identifiable {
     @Published var scroll = false
     @Published var theme = "paper"
     @Published var history: [Locator] = []
-    @Published var chromeVisible = true
+    @Published var chromeVisible = false
+    @Published var lineHeight = 1.85
+    @Published var pageMargins = 1.0
     @Published var bookmarked = false
     var navigator: Navigator?
     let store: LibraryStore
@@ -44,6 +46,8 @@ struct AssistantSelection: Identifiable {
         super.init()
         let defaults = UserDefaults.standard
         fontScale = defaults.object(forKey: "reading.fontScale") == nil ? 100 : min(200, max(70, defaults.double(forKey: "reading.fontScale")))
+        if let value = defaults.object(forKey: "reading.lineHeight") as? Double, value.isFinite { lineHeight = min(2.2, max(1.4, value)) }
+        if let value = defaults.object(forKey: "reading.pageMargins") as? Double, value.isFinite { pageMargins = min(2, max(0.5, value)) }
         fontFamily = defaults.string(forKey: "reading.fontFamily") ?? ""
         theme = defaults.string(forKey: "reading.theme") ?? "paper"
         let key = book.format == "pdf" ? "reading.pdfScroll" : "reading.textScroll"
@@ -100,10 +104,11 @@ struct AssistantSelection: Identifiable {
     }
     private var hasContentSelection: Bool { (navigator as? SelectableNavigator)?.currentSelection != nil || (navigator as? MobilePDFNavigator)?.hasSelection == true }
     private func preferences() -> EPUBPreferences {
-        EPUBPreferences(columnCount: .one, fontFamily: fontFamily.isEmpty ? nil : FontFamily(rawValue: fontFamily), fontSize: fontScale / 100, lineHeight: 1.85, pageMargins: 1.0, publisherStyles: fontFamily.isEmpty, scroll: scroll, theme: theme == "night" ? .dark : theme == "sepia" ? .sepia : .light)
+        EPUBPreferences(columnCount: .one, fontFamily: fontFamily.isEmpty ? nil : FontFamily(rawValue: fontFamily), fontSize: fontScale / 100, lineHeight: lineHeight, pageMargins: pageMargins, publisherStyles: fontFamily.isEmpty && lineHeight == 1.85 && pageMargins == 1, scroll: scroll, theme: theme == "night" ? .dark : theme == "sepia" ? .sepia : .light)
     }
     func apply() {
         let defaults = UserDefaults.standard
+        defaults.set(lineHeight, forKey: "reading.lineHeight"); defaults.set(pageMargins, forKey: "reading.pageMargins")
         defaults.set(fontScale, forKey: "reading.fontScale"); defaults.set(fontFamily, forKey: "reading.fontFamily"); defaults.set(theme, forKey: "reading.theme"); defaults.set(scroll, forKey: book.format == "pdf" ? "reading.pdfScroll" : "reading.textScroll")
         (navigator as? EPUBNavigatorViewController)?.submitPreferences(preferences())
         (navigator as? MobilePDFNavigator)?.applyScroll(scroll)
@@ -262,6 +267,7 @@ struct ReaderScreen: View {
     @State private var toc = false
     @State private var appearance = false
     @State private var bookmarkTab = false
+    @State private var chapterQuery = ""
     @State private var conversations = false
     @State private var processing = false
     init(book: MobileBook, store: LibraryStore) { _reader = StateObject(wrappedValue: MobileReader(book: book, store: store)) }
@@ -273,15 +279,14 @@ struct ReaderScreen: View {
                 else { ProgressView("正在打开书籍…") }
             }
             .navigationTitle(reader.book.title).navigationBarTitleDisplayMode(.inline)
-            .toolbar(reader.chromeVisible ? .visible : .hidden, for: .navigationBar, .bottomBar)
-            .statusBarHidden(!reader.chromeVisible)
+            .toolbar(reader.chromeVisible || reader.controller == nil || reader.failure != nil ? .visible : .hidden, for: .navigationBar, .bottomBar)
+            .statusBarHidden(!reader.chromeVisible && reader.controller != nil && reader.failure == nil)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("书库", systemImage: "chevron.left") { Task { await reader.flush(); dismiss() } } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if !reader.history.isEmpty { Button("返回原位置", systemImage: "arrow.uturn.backward") { Task { await reader.back() } } }
                     Button("目录", systemImage: "list.bullet") { toc = true }
                     Menu {
-                        Button("阅读设置", systemImage: "textformat.size") { appearance = true }
                         Button("答疑记录", systemImage: "text.bubble") { conversations = true }
                         if reader.book.format == "pdf" { Button("文档处理", systemImage: "doc.badge.gearshape") { processing = true } }
                         if let recent = reader.lastSelection {
@@ -293,22 +298,15 @@ struct ReaderScreen: View {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button("上一页", systemImage: "chevron.left") { Task { _ = await reader.navigator?.goBackward(options: .animated) } }
                     Spacer()
-                    VStack(spacing: 3) { Text(reader.chapter).lineLimit(1).font(.caption); Text("\(Int(reader.progress * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }.frame(width: 112)
+                    VStack(spacing: 3) { Text(reader.chapter).lineLimit(1).font(.caption); Text("\(Int(reader.progress * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }.frame(width: 112).accessibilityElement(children: .combine).accessibilityIdentifier("reader.position")
                     Spacer()
                     Button("书签", systemImage: reader.bookmarked ? "bookmark.fill" : "bookmark") { Task { await reader.bookmark() } }.accessibilityIdentifier("reader.bookmark").accessibilityLabel(reader.bookmarked ? "移除书签" : "添加书签")
+                    Button("阅读设置", systemImage: "textformat.size") { appearance = true }.accessibilityIdentifier("reader.appearance")
                     Button("下一页", systemImage: "chevron.right") { Task { _ = await reader.navigator?.goForward(options: .animated) } }
                 }
             }
             .sheet(isPresented: $toc) { navigationSheet }
-            .sheet(isPresented: $appearance) { NavigationStack { Form {
-                Toggle("连续滚动", isOn: $reader.scroll).onChange(of: reader.scroll) { reader.apply() }
-                if reader.book.format != "pdf" {
-                    Picker("字体", selection: $reader.fontFamily) { Text("原书").tag(""); Text("宋体").tag("Songti SC"); Text("苹方").tag("PingFang SC"); Text("Georgia").tag("Georgia") }.onChange(of: reader.fontFamily) { reader.apply() }
-                    LabeledContent("字号", value: "\(Int(reader.fontScale))%")
-                    Slider(value: $reader.fontScale, in: 70...200, step: 10).onChange(of: reader.fontScale) { reader.apply() }
-                    Picker("纸张", selection: $reader.theme) { Text("纸白").tag("paper"); Text("暖纸").tag("sepia"); Text("夜间").tag("night") }.onChange(of: reader.theme) { reader.apply() }
-                }
-            }.navigationTitle("阅读设置").navigationBarTitleDisplayMode(.inline).toolbar { Button("完成") { appearance = false } } }.presentationDetents([.medium]) }
+            .sheet(isPresented: $appearance) { appearanceSheet }
             .sheet(item: $reader.selection) { selection in AssistantScreen(selection: selection, title: reader.book.title, repository: reader.store.repository, openSource: { raw in Task { await reader.goSource(raw) } }) }
             .sheet(isPresented: $conversations) { ConversationHistoryScreen(book: reader.book, repository: reader.store.repository, openSource: { raw in conversations = false; Task { await reader.goSource(raw) } }) }
             .sheet(isPresented: $processing) { DocumentPreparationScreen(book: reader.book, store: reader.store) }
@@ -316,6 +314,35 @@ struct ReaderScreen: View {
             .onChange(of: phase) { if phase != .active { reader.store.preparation.pauseAll(); Task { await reader.flush() } } }
             .alert("操作未完成", isPresented: Binding(get: { reader.failure != nil && reader.controller != nil }, set: { if !$0 { reader.failure = nil } })) { Button("好") { reader.failure = nil } } message: { Text(reader.failure ?? "") }
         }.tint(MobilePalette.accent).preferredColorScheme(reader.theme == "night" ? .dark : .light)
+    }
+    private func appearanceSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double, display: String) -> some View {
+        HStack(spacing: 12) {
+            Text(title).frame(width: 52, alignment: .leading)
+            Slider(value: value, in: range, step: step).accessibilityLabel(title).onChange(of: value.wrappedValue) { reader.apply() }
+            Text(display).font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
+        }
+    }
+    private var appearanceSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("浏览方式", selection: $reader.scroll) { Text("左右翻页").tag(false); Text("连续滚动").tag(true) }.pickerStyle(.segmented).onChange(of: reader.scroll) { reader.apply() }
+                }
+                if reader.book.format != "pdf" {
+                    Section {
+                        appearanceSlider("字号", value: $reader.fontScale, range: 70...200, step: 10, display: "\(Int(reader.fontScale))%")
+                        Picker("字体", selection: $reader.fontFamily) { Text("原书").tag(""); Text("宋体").tag("Songti SC"); Text("苹方").tag("PingFang SC"); Text("Georgia").tag("Georgia") }.onChange(of: reader.fontFamily) { reader.apply() }
+                        appearanceSlider("行距", value: $reader.lineHeight, range: 1.4...2.2, step: 0.05, display: String(format: "%.2f", reader.lineHeight))
+                        appearanceSlider("页边距", value: $reader.pageMargins, range: 0.5...2, step: 0.1, display: String(format: "%.1f", reader.pageMargins))
+                    }
+                    Section {
+                        Picker("纸张", selection: $reader.theme) { Text("纸白").tag("paper"); Text("暖纸").tag("sepia"); Text("夜间").tag("night") }.pickerStyle(.segmented).onChange(of: reader.theme) { reader.apply() }
+                    }
+                }
+            }
+            .navigationTitle("阅读设置").navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("完成") { appearance = false } }
+        }.presentationDetents([.height(440), .large]).presentationDragIndicator(.visible)
     }
     private var navigationSheet: some View {
         NavigationStack {
@@ -327,24 +354,25 @@ struct ReaderScreen: View {
                 if bookmarkTab { bookmarkRows }
                 else { chapterRows }
             }
-            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $chapterQuery, prompt: "查找章节")
+            .navigationTitle(reader.book.title).navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("完成") { toc = false } }
         }
     }
     private var bookmarkRows: some View {
         let marks: [ReadingBookmark] = reader.store.books.first(where: { $0.id == reader.book.id })?.bookmarks ?? []
-        return ForEach(marks) { mark in
+        return ForEach(marks.filter { chapterQuery.isEmpty || $0.title.localizedCaseInsensitiveContains(chapterQuery) }) { mark in
             Button(action: { openBookmark(mark) }) { Text(mark.title) }
         }
     }
     private var chapterRows: some View {
-        let entries = flatten(reader.contents)
+        let entries = flatten(reader.contents).filter { chapterQuery.isEmpty || ($0.link.title ?? "").localizedCaseInsensitiveContains(chapterQuery) }
         return ForEach(entries.indices, id: \.self) { index in
             let item = entries[index]
             Button {
                 Task { await reader.go(item.link); toc = false }
             } label: {
-                Text(item.link.title ?? "章节").padding(.leading, CGFloat(item.depth * 16)).foregroundStyle(.primary)
+                Text(item.link.title ?? "章节").padding(.leading, CGFloat(item.depth * 16)).foregroundStyle(reader.chapter == item.link.title ? MobilePalette.accent : Color.primary).fontWeight(reader.chapter == item.link.title ? .semibold : .regular)
             }
         }
     }

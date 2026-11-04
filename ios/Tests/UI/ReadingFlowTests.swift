@@ -2,6 +2,35 @@ import XCTest
 
 final class ReadingFlowTests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
+    @MainActor func testImmersiveSwipeAppearanceAndChapterSearch() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["PAGE_BETWEEN_UI_TEST"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-reading.fontScale", "100", "-reading.textScroll", "NO"]
+        app.launch()
+        let book = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Mobile reading sample")).firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout: 30)); openBook(book, in: app)
+        app.buttons["目录"].tap()
+        let search = app.searchFields.matching(NSPredicate(format: "placeholderValue == %@", "查找章节")).firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("开始")
+        XCTAssertTrue(app.buttons["第一章 开始"].exists); XCTAssertFalse(app.buttons["第二章 继续"].exists)
+        capture(app, "chapter-search"); app.buttons["第一章 开始"].tap()
+        let position = app.descendants(matching: .any).matching(identifier: "reader.position").firstMatch
+        XCTAssertTrue(position.waitForExistence(timeout: 10)); let before = position.label
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["目录"])
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
+        app.webViews.firstMatch.swipeLeft()
+        capture(app, "swiped-immersive-page")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["目录"].waitForExistence(timeout: 10))
+        XCTAssertNotEqual(position.label, before, "A horizontal swipe must advance reading progress")
+        app.buttons["reader.appearance"].tap()
+        XCTAssertTrue(app.sliders["行距"].waitForExistence(timeout: 5))
+        app.sliders["行距"].adjust(toNormalizedSliderPosition: 0.4)
+        capture(app, "reading-bottom-sheet")
+        app.buttons["完成"].tap()
+        XCTAssertTrue(app.buttons["目录"].waitForExistence(timeout: 5))
+    }
     @MainActor func testImportOptionsAndIllustratedFB2() throws {
         let app = XCUIApplication()
         app.launchEnvironment["PAGE_BETWEEN_IMPORT_UI_TEST"] = "1"
@@ -179,8 +208,7 @@ final class ReadingFlowTests: XCTestCase {
         app.segmentedControls.buttons["书签"].tap()
         XCTAssertTrue(app.buttons["第二章 继续"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["完成"].tap()
-        app.buttons["reader.more"].tap()
-        app.buttons["阅读设置"].tap()
+        app.buttons["reader.appearance"].tap()
         app.sliders.firstMatch.adjust(toNormalizedSliderPosition: 0.6)
         app.buttons["完成"].tap()
         assertReadable(paragraph, in: app)
@@ -190,7 +218,9 @@ final class ReadingFlowTests: XCTestCase {
         ask.tap()
         XCTAssertTrue(app.navigationBars["书内答疑"].waitForExistence(timeout: 5), app.debugDescription)
         let quote = app.webViews["markdown.preview"].staticTexts.firstMatch
-        XCTAssertTrue(quote.waitForExistence(timeout: 8), "Selected text preview did not render")
+        let quoteRendered = quote.waitForExistence(timeout: 8)
+        capture(app, "selection-preview-result")
+        XCTAssertTrue(quoteRendered, "Selected text preview did not render: " + app.debugDescription)
         XCTAssertTrue(quote.isHittable)
         capture(app, "selected-source")
         app.buttons["完成"].tap()
@@ -206,6 +236,14 @@ final class ReadingFlowTests: XCTestCase {
             else { app.scrollViews.firstMatch.swipeDown() }
         }
         book.tap()
+        let content = app.descendants(matching: .any).matching(identifier: "reader.pdf").firstMatch
+        if !app.webViews.firstMatch.waitForExistence(timeout: 3) { XCTAssertTrue(content.waitForExistence(timeout: 20)) }
+        if !content.exists { XCTAssertTrue(app.webViews.staticTexts.firstMatch.waitForExistence(timeout: 30), "Reader content has not loaded") }
+        XCTAssertFalse(app.buttons["目录"].isHittable, "A book should open without toolbars")
+        capture(app, "immersive-reader")
+        if content.exists { content.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.9)).tap() }
+        else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+        XCTAssertTrue(app.buttons["目录"].waitForExistence(timeout: 10), app.debugDescription)
     }
     @MainActor private func assertReadable(_ paragraph: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(paragraph.isHittable, "Paragraph is outside the visible page")

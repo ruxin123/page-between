@@ -6,7 +6,9 @@ const { webkit } = require('playwright');
  const browser=await webkit.launch();
  try {
   const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:3,isMobile:true,hasTouch:true});
+  await page.addInitScript(() => { window.webkit = {messageHandlers:{markdownReady:{postMessage(message){window.rendererReady={message,render:typeof window.renderMarkdown,parser:typeof marked.parse,math:typeof katex.render,sanitize:typeof DOMPurify.sanitize}}}}}; });
   await page.goto(pathToFileURL(path.resolve(__dirname,'../PageBetween/Web/markdown.html')).href);
+  assert.deepEqual(await page.evaluate(()=>window.rendererReady),{message:'ready',render:'function',parser:'function',math:'function',sanitize:'function'});
   const samples=[String.raw`A set $S_n$ contains $\sigma$.`,String.raw`$$f(x)=\begin{cases}x^2 & x>0\\0 & x\le0\end{cases}$$`,String.raw`$$\begin{pmatrix}1&2&3\\3&1&2\end{pmatrix}$$`,String.raw`The empty set is $\varnothing$; spacing $f\text{ and }g$.`];
   for(const text of samples){
    const result=await page.evaluate(async text=>{

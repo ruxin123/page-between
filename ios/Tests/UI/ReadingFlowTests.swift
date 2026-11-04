@@ -170,8 +170,9 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(ask.waitForExistence(timeout: 6), app.debugDescription)
         ask.tap()
         XCTAssertTrue(app.navigationBars["书内答疑"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.webViews["markdown.preview"].staticTexts.firstMatch.waitForExistence(timeout: 8))
+        let previewReady = app.webViews["markdown.preview"].staticTexts.firstMatch.waitForExistence(timeout: 8)
         capture(app, "scanned-selection")
+        XCTAssertTrue(previewReady, app.debugDescription)
     }
     @MainActor func testImportSettingsChapterJumpAndProgress() throws {
         let app = XCUIApplication()

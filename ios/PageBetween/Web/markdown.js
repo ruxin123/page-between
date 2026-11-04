@@ -61,3 +61,6 @@ document.addEventListener('copy', event => {
   event.clipboardData.setData('text/plain', text);
   event.preventDefault();
 });
+
+// Signal renderer readiness after the deferred scripts have initialized.
+window.webkit?.messageHandlers?.markdownReady?.postMessage('ready');

@@ -159,7 +159,10 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["发送或存储迁移包"].waitForExistence(timeout: 45), app.debugDescription)
         capture(app, "transfer-export")
         app.buttons["发送或存储迁移包"].tap()
-        capture(app, "transfer-share")
+        let filesAction = app.descendants(matching: .any).matching(NSPredicate(format: "(label CONTAINS %@ AND (label BEGINSWITH %@ OR label BEGINSWITH %@)) OR label == %@", "文件", "保存", "存储", "Save to Files")).firstMatch
+        XCTAssertTrue(filesAction.waitForExistence(timeout: 15), app.debugDescription)
+        let share = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        share.name = "transfer-share"; share.lifetime = .keepAlways; add(share)
     }
     @MainActor func testScannedPDFPreparationNavigationAndSelection() throws {
         let app = XCUIApplication()

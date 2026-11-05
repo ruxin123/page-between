@@ -992,7 +992,7 @@ function renderBookmarks() {
         (mark) =>
           `<div class="bookmark-row"><button class="bookmark-open" data-mark="${escapeHTML(mark.id)}">${escapeHTML(mark.label)}<small>${escapeHTML(mark.detail)}</small></button><button class="icon-button" data-remove-mark="${escapeHTML(mark.id)}" aria-label="删除书签">${icon("close")}</button></div>`,
       )
-      .join("") || '<div class="empty-state">给想再读的地方，留个记号。</div>';
+      .join("") || '<div class="empty-state">暂无书签</div>';
   const position = makePosition();
   $("bookmark-button").setAttribute(
     "aria-pressed",

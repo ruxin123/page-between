@@ -9,6 +9,7 @@ struct TransferScreen: View {
     var incoming: URL? = nil
     @State private var choosing = false
     @State private var busy = false
+    @State private var sharing = false
     @State private var message = ""
     @State private var exported: URL?
     @State private var folder = FileManager.default.temporaryDirectory.appendingPathComponent("transfer-" + UUID().uuidString)
@@ -18,7 +19,7 @@ struct TransferScreen: View {
                 Section {
                     Text("迁移书籍、进度与书签。已有同书保留本机记录，服务密钥不迁移。").font(.callout)
                     Button("导出迁移包") { perform { exported = nil; exported = try await exportBooks(); message = "" } }.disabled(busy || store.importing)
-                    if let exported { ShareLink("发送或存储迁移包", item: exported) }
+                    if exported != nil { Button("发送或存储迁移包") { sharing = true } }
                     Button("导入迁移包") { choosing = true }.disabled(busy || store.importing)
                 } footer: { Text("通过隔空投送或文件传输。文本按章节与进度恢复，排版不同可能略有偏移。") }
                 if busy { ProgressView() }
@@ -29,7 +30,8 @@ struct TransferScreen: View {
                     switch result { case .success(let url): perform { try await importBooks(url) }; case .failure(let error): message = error.localizedDescription }
                 }
                 .task { if let incoming { perform { try await importBooks(incoming) } } }
-                .onDisappear { try? FileManager.default.removeItem(at: folder) }
+                .sheet(isPresented: $sharing) { if let exported { TransferShare(url: exported, presented: $sharing) } }
+                .onDisappear { if !sharing { try? FileManager.default.removeItem(at: folder) } }
         }.tint(MobilePalette.accent).interactiveDismissDisabled(busy)
     }
     private func perform(_ action: @escaping @MainActor () async throws -> Void) {
@@ -103,4 +105,15 @@ struct TransferScreen: View {
         await store.refresh()
         message = "已导入 \(added) 本，保留 \(duplicates) 本已有书籍。" + (failed.isEmpty ? "" : "未导入：" + failed.joined(separator: "、"))
     }
+}
+
+private struct TransferShare: UIViewControllerRepresentable {
+    let url: URL
+    @Binding var presented: Bool
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in Task { @MainActor in presented = false } }
+        return controller
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

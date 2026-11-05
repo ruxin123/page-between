@@ -929,15 +929,15 @@ class Handler(SimpleHTTPRequestHandler):
                             continue
                         record = {"title": book["title"], "author": book.get("author", ""), "position": library_transfer.position(state.get("positions", {}).get(book["id"], {})), "bookmarks": [{"title": m["label"], "position": library_transfer.position(m["position"])} for m in state.get("bookmarks", []) if m["book"] == book["id"]]}
                         records.append((record, source))
-                    ident = uuid.uuid4().hex + ".pbtransfer"
-                    directory = CACHE / "exports"
-                    directory.mkdir(parents=True, exist_ok=True)
-                    try:
-                        count = library_transfer.write(directory / (ident[:32] + ".part"), records)
-                        (directory / (ident[:32] + ".part")).replace(directory / ident)
-                    except Exception:
-                        (directory / (ident[:32] + ".part")).unlink(missing_ok=True)
-                        raise
+                ident = uuid.uuid4().hex + ".pbtransfer"
+                directory = CACHE / "exports"
+                directory.mkdir(parents=True, exist_ok=True)
+                try:
+                    count = library_transfer.write(directory / (ident[:32] + ".part"), records)
+                    (directory / (ident[:32] + ".part")).replace(directory / ident)
+                except Exception:
+                    (directory / (ident[:32] + ".part")).unlink(missing_ok=True)
+                    raise
                 return self.json({"id": ident, "download": "/api/downloads/" + ident, "name": "页间迁移.pbtransfer", "books": count, "skipped": skipped})
             if route.path == "/api/data/backup":
                 with MUTEX, ai_tutor.LOCK:

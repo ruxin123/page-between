@@ -10,11 +10,11 @@ iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcod
 
 ## 下载与安装
 
-当前发布版本 **0.5.32**，提供 Apple Silicon（arm64）安装包。
+当前发布版本 **0.5.33**，提供 Apple Silicon（arm64）安装包。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.32/page-between-0.5.32-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
+| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.33/page-between-0.5.33-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
 
 1. 下载 ZIP 并解压，将「页间.app」拖入应用程序文件夹。
 2. 打开应用，在书库点击「导入书籍」，选择文件并设置是否启用文档解析。
@@ -186,3 +186,5 @@ App 输出目录为 `~/Library/Caches/Page Between/build/`。发布脚本仅打�
 [完整功能说明](docs/FEATURES.md) · [架构与数据流](docs/ARCHITECTURE.md) · [字体清单](FONTS.md) · [第三方资源与许可证](THIRD_PARTY_NOTICES.md)
 
 产品与代码评审资料、[评审沟通记录](docs/REVIEW_DIALOGUE.md) 和 [开发验证记录](QA.md) 单独维护。项目尚未指定项目级开源许可证，第三方资源遵循各自许可证。
+
+设备间迁移：Mac 在“设置 → 数据”，iPhone 在“书库 → 更多”导出／导入迁移包，转移书籍、进度和书签。[格式与合并规则](docs/TRANSFER.md)。

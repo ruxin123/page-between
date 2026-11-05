@@ -819,6 +819,7 @@ function makePosition() {
     page: pagination?.page || 0,
     anchor: anchor ? { ...anchor } : null,
     sourceOffset,
+    chapterFraction: clamp(pagination ? pagination.page / Math.max(1, pagination.count - 1) : $("reading-viewport").scrollTop / Math.max(1, $("reading-viewport").scrollHeight - $("reading-viewport").clientHeight), 0, 1),
     progress: currentProgress(),
     updatedAt: Date.now(),
   };
@@ -2375,12 +2376,12 @@ function revealPosition(position) {
     }
   }
   if (pagination) {
-    pagination.set(position.end ? pagination.count - 1 : position.page || 0);
+    pagination.set(position.end ? pagination.count - 1 : Number.isFinite(position.chapterFraction) ? Math.round(position.chapterFraction * (pagination.count - 1)) : position.page || 0);
     restoreAnchor(position.anchor);
   } else {
     $("reading-viewport").scrollTop = position.end
       ? Number.MAX_SAFE_INTEGER
-      : position.top || 0;
+      : Number.isFinite(position.chapterFraction) ? position.chapterFraction * Math.max(0, $("reading-viewport").scrollHeight - $("reading-viewport").clientHeight) : position.top || 0;
     restoreAnchor(position.anchor);
   }
 }
@@ -4146,6 +4147,16 @@ $("translation-history-open").onclick = () => {
   if (current) translator.open({ book: current.id }, null, true);
 };
 $("ai-open").onclick = tutor.showHistory;
+$("records-bookmarks").onclick = () => { setTocOpen(true); $("bookmark-tab").click(); };
+$("reading-records").addEventListener("click", (event) => {
+  if (event.target.closest("button")) $("reading-records").open = false;
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#reading-records")) $("reading-records").open = false;
+});
+$("reading-records").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") { $("reading-records").open = false; document.querySelector("#reading-records summary").focus(); event.stopPropagation(); }
+});
 if (palm && native)
   document.querySelector(".ai-settings-link").onclick = (event) => {
     event.preventDefault();

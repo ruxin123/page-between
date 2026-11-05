@@ -116,6 +116,7 @@ assert(base && ["webkit", "chromium"].includes(engine));
     await page.locator("#translation-pin").click();
     await page.locator("#book-title").click();
     assert(!(await page.locator("#translation-panel").isVisible()));
+    await page.locator("#reading-records summary").click();
     await page.locator("#translation-history-open").click();
     await page.locator(".translation-history-item").first().click();
     await result();

@@ -24,6 +24,18 @@
 				<string>local.pagebetween.fb2</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>页间迁移包</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>local.pagebetween.transfer</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
@@ -53,10 +65,21 @@
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>UTTypeIdentifier</key><string>local.pagebetween.fb2</string>
-			<key>UTTypeDescription</key><string>FictionBook</string>
-			<key>UTTypeConformsTo</key><array><string>public.xml</string></array>
-			<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>fb2</string></array></dict>
+			<key>UTTypeIdentifier</key>
+			<string>local.pagebetween.fb2</string>
+			<key>UTTypeDescription</key>
+			<string>FictionBook</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fb2</string>
+				</array>
+			</dict>
 		</dict>
 	</array>
 	<key>UILaunchScreen</key>
@@ -66,6 +89,26 @@
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>local.pagebetween.transfer</string>
+			<key>UTTypeDescription</key>
+			<string>页间迁移包</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>pbtransfer</string>
+				</array>
+			</dict>
+		</dict>
 	</array>
 </dict>
 </plist>

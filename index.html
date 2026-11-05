@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.54" />
+    <link rel="stylesheet" href="/layout.css?v=2.55" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -237,6 +237,10 @@
               </div>
             </div>
             <fieldset id="data-actions">
+              <h2>设备迁移</h2>
+              <p class="setting-note">迁移书籍、进度与书签；已有同书保留本机记录。文本排版不同，恢复位置可能略有偏移。</p>
+              <div class="service-actions"><button id="transfer-export" class="secondary-button">导出迁移包</button><button id="transfer-import" class="secondary-button">导入迁移包…</button></div>
+              <input type="file" id="transfer-file" accept=".pbtransfer" hidden />
               <h2>备份与恢复</h2>
               <div class="service-actions">
                 <button id="data-backup" class="primary-button">
@@ -309,14 +313,29 @@
           </div>
         </div>
         <div class="reader-actions">
+          <details id="reading-records" class="reading-records">
+            <summary class="icon-button" aria-label="阅读记录" title="阅读记录"><i data-icon="bookmark"></i></summary>
+            <div class="reading-records-menu">
+              <button id="records-bookmarks"><i data-icon="bookmark"></i>书签</button>
+          <button
+            class="icon-button"
+            id="ai-open"
+            aria-label="书内 AI 答疑"
+            title="书内答疑"
+          >
+            <i data-icon="ask"></i>答疑记录
+          </button>
           <button
             id="translation-history-open"
             class="icon-button"
             title="本书翻译收藏"
             aria-label="本书翻译收藏"
           >
-            <i data-icon="translate"></i>
+            <i data-icon="translate"></i>翻译收藏
           </button>
+            </div>
+          </details>
+
           <button
             class="icon-button"
             id="source-pdf-open"
@@ -333,14 +352,6 @@
             title="书内检索与引用 · ⌘F"
           >
             <i data-icon="search"></i>
-          </button>
-          <button
-            class="icon-button"
-            id="ai-open"
-            aria-label="书内 AI 答疑"
-            title="书内答疑"
-          >
-            <i data-icon="ask"></i>
           </button>
           <button
             class="icon-button"
@@ -1067,7 +1078,7 @@
         aria-labelledby="local-preparation-heading"
       >
         <div class="document-process-heading">
-          <h3 id="local-preparation-heading">本地划词准备</h3>
+          <h3 id="local-preparation-heading">本机文字</h3>
           <span id="local-preparation-count"></span>
         </div>
         <progress
@@ -1097,7 +1108,7 @@
         aria-labelledby="cloud-processing-heading"
       >
         <div class="document-process-heading">
-          <h3 id="cloud-processing-heading">MinerU 内容增强</h3>
+          <h3 id="cloud-processing-heading">公式与表格</h3>
           <span id="cloud-progress-count"></span>
         </div>
         <progress
@@ -1127,6 +1138,8 @@
           </button>
         </div>
         <p class="setting-note">所选页将上传至 MinerU。</p>
+        <details id="cloud-advanced" class="processing-advanced">
+          <summary>页段与重新解析</summary>
         <form id="cloud-form" class="cloud-form">
           <label class="service-field"
             >PDF 文件页序<input
@@ -1144,14 +1157,17 @@
           <label class="setting-check"
             >重新提交解析<input id="cloud-fresh" type="checkbox"
           /></label>
-          <p id="cloud-status" class="setting-note" role="status"></p>
-          <a id="cloud-settings" href="#/settings/mineru">管理 MinerU 服务</a>
+
+
           <div class="cloud-footer">
             <button class="primary-button" id="cloud-start" type="submit">
               开始解析
             </button>
           </div>
         </form>
+        </details>
+        <p id="cloud-status" class="setting-note" role="status"></p>
+        <a id="cloud-settings" href="#/settings/mineru">MinerU 设置</a>
       </section>
     </dialog>
     <dialog id="page-dialog" class="book-dialog">
@@ -1191,6 +1207,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.54"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.55"></script>
   </body>
 </html>

@@ -139,6 +139,26 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(app.images["原书图像"].waitForExistence(timeout: 15), app.debugDescription)
         capture(app, "complete-image")
     }
+    @MainActor func testTransferImportProgressBookmarksAndExport() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["PAGE_BETWEEN_TRANSFER_UI_TEST"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["已导入 1 本，保留 0 本已有书籍。"].waitForExistence(timeout: 45), app.debugDescription)
+        capture(app, "transfer-import")
+        app.buttons["完成"].tap()
+        let book = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original transfer sample")).firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout: 10)); openBook(book, in: app)
+        XCTAssertTrue(app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original transferred second paragraph")).firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+        app.buttons["目录"].tap(); app.buttons["书签"].tap()
+        XCTAssertTrue(app.buttons["Transfer bookmark"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Transfer bookmark"].tap()
+        XCTAssertTrue(app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original transferred paragraph")).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["书库"].tap(); app.buttons["library.more"].tap(); app.buttons["设备迁移"].tap()
+        app.buttons["导出迁移包"].tap()
+        XCTAssertTrue(app.buttons["发送或存储迁移包"].waitForExistence(timeout: 45), app.debugDescription)
+        capture(app, "transfer-export")
+    }
     @MainActor func testScannedPDFPreparationNavigationAndSelection() throws {
         let app = XCUIApplication()
         app.launchEnvironment["PAGE_BETWEEN_PDF_UI_TEST"] = "1"
@@ -152,6 +172,7 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["准备整本"].waitForExistence(timeout: 5))
         app.buttons["准备整本"].tap()
         XCTAssertTrue(app.staticTexts["已完成"].waitForExistence(timeout: 60), app.debugDescription)
+        app.buttons["页段与重新准备"].tap()
         let range = app.textFields["页段，例如 1-20,35"]
         range.tap(); range.typeText("2")
         app.buttons["重新准备所选页"].tap()

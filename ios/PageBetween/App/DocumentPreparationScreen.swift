@@ -28,7 +28,7 @@ struct DocumentPreparationScreen: View {
                         }
                     }
                 }
-                Section("划词准备") {
+                Section("本机文字") {
                     if let task {
                         ProgressView(value: Double(task.completed.count), total: Double(max(1, task.pages.count)))
                         LabeledContent(status(task), value: "\(task.completed.count) / \(task.pages.count)")
@@ -38,12 +38,14 @@ struct DocumentPreparationScreen: View {
                     }
                     if task?.state != "running" {
                         Button("准备整本") { preparation.start(book, pages: Array(1...max(1, total))) }.disabled(!enabled || total == 0)
-                        TextField("页段，例如 1-20,35", text: $pageRange).keyboardType(.numbersAndPunctuation)
-                        Button("准备所选页") { do { preparation.start(book, pages: try PDFPageRange.parse(pageRange, total: total)) } catch { self.error = "请填写本书的 PDF 文件页序。" } }.disabled(!enabled || total == 0)
-                        Button("重新准备所选页") { do { preparation.start(book, pages: try PDFPageRange.parse(pageRange, total: total), fresh: true) } catch { self.error = "请填写本书的 PDF 文件页序。" } }.disabled(!enabled || total == 0 || pageRange.isEmpty)
+                        DisclosureGroup("页段与重新准备") {
+                            TextField("页段，例如 1-20,35", text: $pageRange).keyboardType(.numbersAndPunctuation)
+                            Button("准备所选页") { do { preparation.start(book, pages: try PDFPageRange.parse(pageRange, total: total)) } catch { self.error = "请填写本书的 PDF 文件页序。" } }.disabled(!enabled || total == 0)
+                            Button("重新准备所选页") { do { preparation.start(book, pages: try PDFPageRange.parse(pageRange, total: total), fresh: true) } catch { self.error = "请填写本书的 PDF 文件页序。" } }.disabled(!enabled || total == 0 || pageRange.isEmpty)
+                        }
                     }
                 }
-                Section("MinerU 增强") {
+                Section("公式与表格") {
                     if let task = preparation.mineruJobs[book.id] {
                         ProgressView(value: Double(task.completed.count), total: Double(max(1, task.pages.count)))
                         LabeledContent(status(task), value: "\(task.completed.count) / \(task.pages.count)")
@@ -54,10 +56,13 @@ struct DocumentPreparationScreen: View {
                     if preparation.mineruJobs[book.id]?.state != "running" {
                         Button("解析整本") { requestCloud(Array(1...max(1, total))) }.disabled(!enabled || total == 0)
                         Button("补全未解析页") { Task { await missingPages() } }.disabled(!enabled || total == 0)
-                        TextField("云解析页段，例如 1-20,35", text: $pageRange).keyboardType(.numbersAndPunctuation)
-                        Toggle("重新提交所选页", isOn: $resubmit)
-                        Button("解析所选页") { do { requestCloud(try PDFPageRange.parse(pageRange, total: total), fresh: resubmit) } catch { self.error = "请填写本书的 PDF 文件页序。" } }.disabled(!enabled || total == 0)
+                        DisclosureGroup("页段与重新解析") {
+                            TextField("云解析页段，例如 1-20,35", text: $pageRange).keyboardType(.numbersAndPunctuation)
+                            Toggle("重新提交所选页", isOn: $resubmit)
+                            Button("解析所选页") { do { requestCloud(try PDFPageRange.parse(pageRange, total: total), fresh: resubmit) } catch { self.error = "请填写本书的 PDF 文件页序。" } }.disabled(!enabled || total == 0)
+                        }
                     }
+                    Text("所选页将上传至 MinerU。").font(.footnote).foregroundStyle(.secondary)
                     Button("服务设置", systemImage: "gearshape") { settings = true }
                 }
                 if let error { Section { Text(error).foregroundStyle(.secondary) } }

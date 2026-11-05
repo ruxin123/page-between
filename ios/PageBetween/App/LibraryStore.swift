@@ -8,6 +8,7 @@ import ReadiumZIPFoundation
     @Published var error: String?
     @Published var importing = false
     @Published var importDraft: ImportDraft?
+    @Published var incomingTransfer: URL?
     let repository: LibraryRepository
     let preparation: PDFPreparationStore
     private let retriever: AssetRetriever

@@ -98,6 +98,8 @@ export function createDocumentParsing({
     $("cloud-pause").disabled = busy;
     $("cloud-start").disabled = busy || !configured || running;
     text("cloud-start", resumeMode ? "继续云解析" : "开始所选页解析");
+    if (!configured) $("cloud-settings").hidden = false;
+    else $("cloud-settings").hidden = true;
     if (localError) text("local-preparation-status", localError);
   }
   async function loadStatus(expected = revision) {
@@ -136,6 +138,7 @@ export function createDocumentParsing({
     $("book-dialog").close();
     $("jobs-dialog").close();
     text("cloud-book-title", book.title);
+    $("cloud-advanced").open = !!pages?.length;
     if (pages?.length) $("cloud-pages").value = formatPages(pages);
     else nearby();
     $("cloud-fresh").checked = false;

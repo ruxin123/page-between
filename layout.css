@@ -216,7 +216,7 @@ body[data-theme="blue"] {
   --ink: #2b3d51;
   --secondary: #566a80;
   --line: #d5deea;
-  --accent: #4d779b;
+  --accent: #446a8b;
   --soft: #dce8f2;
 }
 body[data-theme="night"] {
@@ -3985,3 +3985,18 @@ body[data-theme="night"] .danger-button { color:#e89c8e; }
 #toc-scrim { display:none; position:absolute; inset:0; z-index:19; background:color-mix(in srgb,var(--ink) 20%,transparent); cursor:pointer; }
 .reader:not(.toc-docked):not(.focused):has(#reader-aside:not([hidden])) #toc-scrim { display:block; }
 #position-label, .page-controls, .timer-button { font-size:12px; }
+
+/* Existing reading records share one entry without merging their storage. */
+.reading-records { position:relative; }
+.reading-records > summary { list-style:none; cursor:pointer; }
+.reading-records > summary::-webkit-details-marker { display:none; }
+.reading-records-menu { position:absolute; right:0; top:calc(100% + 8px); width:192px; padding:8px; background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); z-index:20; }
+.reading-records-menu button { display:flex; align-items:center; gap:12px; width:100%; height:44px; padding:8px 12px; text-align:left; border:0 !important; border-radius:8px; color:var(--ink); }
+.reading-records-menu button:hover { background:var(--soft); }
+.processing-advanced { margin-top:16px; }
+.processing-advanced > summary { cursor:pointer; padding:12px 0; color:var(--secondary); font-size:14px; }
+summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+#cloud-status:empty { display:none; }
+.reader-bar { position:relative; z-index:30; }
+
+.reading-records-menu .icon-button { width:100%; height:44px; padding:8px 12px; }

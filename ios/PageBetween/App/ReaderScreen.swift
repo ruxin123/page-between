@@ -287,7 +287,10 @@ struct ReaderScreen: View {
                     if !reader.history.isEmpty { Button("返回原位置", systemImage: "arrow.uturn.backward") { Task { await reader.back() } } }
                     Button("目录", systemImage: "list.bullet") { toc = true }
                     Menu {
-                        Button("答疑记录", systemImage: "text.bubble") { conversations = true }
+                        Section("阅读记录") {
+                            Button("书签", systemImage: "bookmark") { bookmarkTab = true; toc = true }
+                            Button("答疑记录", systemImage: "text.bubble") { conversations = true }
+                        }
                         if reader.book.format == "pdf" { Button("文档处理", systemImage: "doc.badge.gearshape") { processing = true } }
                         if let recent = reader.lastSelection {
                             Button("提问最近选段", systemImage: "text.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: false, markdown: recent.markdown, objects: recent.objects) }

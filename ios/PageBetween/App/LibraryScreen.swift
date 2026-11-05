@@ -13,6 +13,8 @@ struct LibraryScreen: View {
     @State private var search = ""
     @State private var importing = false
     @State private var settings = false
+    @State private var transfer = false
+    @State private var transferURL: URL?
     @State private var removed = false
     @State private var selected: MobileBook?
     @State private var deleting: MobileBook?
@@ -68,13 +70,14 @@ struct LibraryScreen: View {
             .toolbar { ToolbarItemGroup(placement: .topBarTrailing) {
                 if store.importing { ProgressView() }
                 else { Button("导入", systemImage: "plus") { importing = true } }
-                Menu { Button(removed ? "返回书库" : "最近删除", systemImage: "trash") { removed.toggle(); pinnedOnly = false; search = "" }; Button("设置", systemImage: "gearshape") { settings = true } } label: { Image(systemName: "ellipsis.circle") }.accessibilityIdentifier("library.more")
+                Menu { Button("设备迁移", systemImage: "arrow.left.arrow.right") { transferURL = nil; transfer = true }; Button(removed ? "返回书库" : "最近删除", systemImage: "trash") { removed.toggle(); pinnedOnly = false; search = "" }; Button("设置", systemImage: "gearshape") { settings = true } } label: { Image(systemName: "ellipsis.circle") }.accessibilityIdentifier("library.more")
             } }
             .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "epub")!, .pdf, .plainText, UTType(filenameExtension: "cbz") ?? .zip, UTType("local.pagebetween.fb2") ?? .xml], allowsMultipleSelection: true) { result in
                 switch result { case .success(let urls): store.reviewImport(urls); case .failure(let error): store.error = error.localizedDescription }
             }
             .sheet(item: $store.importDraft) { draft in ImportScreen(draft: draft) { choices in Task { await store.importBooks(choices) } } }
             .fullScreenCover(item: $selected) { book in ReaderScreen(book: book, store: store) }
+            .sheet(isPresented: $transfer) { TransferScreen(store: store, incoming: transferURL) }
             .sheet(isPresented: $settings) { MobileSettingsScreen() }
             .sheet(item: $processing) { DocumentPreparationScreen(book: $0, store: store) }
             .confirmationDialog("删除书籍？", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
@@ -82,7 +85,8 @@ struct LibraryScreen: View {
             }
             .alert("操作未完成", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("好") { store.error = nil } } message: { Text(store.error ?? "") }
             .task { await store.refresh() }
-            .onOpenURL { url in store.reviewImport([url]) }
+            .onOpenURL { url in if url.pathExtension.lowercased() == "pbtransfer" { store.incomingTransfer = url } else { store.reviewImport([url]) } }
+            .onChange(of: store.incomingTransfer) { if let url = store.incomingTransfer { if transfer { store.error = "请先关闭当前迁移窗口，再打开新的迁移包。"; store.incomingTransfer = nil; return }; transferURL = url; transfer = true; store.incomingTransfer = nil } }
             .onChange(of: phase) { if phase != .active { store.preparation.pauseAll() } }
         }.tint(MobilePalette.accent)
     }

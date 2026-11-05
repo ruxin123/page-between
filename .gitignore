@@ -115,3 +115,5 @@ __pycache__/
 *.key
 .DS_Store
 ._*
+!/library_transfer.py
+!/tests/transfer_test.py

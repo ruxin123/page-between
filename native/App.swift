@@ -301,7 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     let panel = NSOpenPanel()
     panel.canChooseDirectories = false
     panel.allowsMultipleSelection = parameters.allowsMultipleSelection
-    panel.allowedContentTypes = (supported + ["pbbackup"]).compactMap {
+    panel.allowedContentTypes = (supported + ["pbbackup", "pbtransfer"]).compactMap {
       UTType(filenameExtension: $0)
     }
     panel.beginSheetModal(for: window) { response in
@@ -468,7 +468,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func saveExport(path: String, name: String) {
     guard
-      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup)$", options: .regularExpression)
+      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer)$", options: .regularExpression)
         != nil,
       base != nil
     else { return }
@@ -495,7 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func writeExport(path: String, destination: URL) async throws {
     guard destination.isFileURL,
-      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup)$", options: .regularExpression)
+      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer)$", options: .regularExpression)
         != nil,
       let base = base, let url = URL(string: path, relativeTo: base)?.absoluteURL
     else {

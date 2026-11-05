@@ -48,6 +48,7 @@ import mineru_api
 import book_index
 import epub_export
 import library_data
+import library_transfer
 import chapter_edit
 import book_source
 
@@ -682,7 +683,7 @@ class Handler(SimpleHTTPRequestHandler):
             if route.path.startswith("/api/downloads/"):
                 prune_exports(CACHE)
                 name = route.path.removeprefix("/api/downloads/")
-                if not re.fullmatch(r"[0-9a-f]{32}\.(?:epub|pbbackup)", name):
+                if not re.fullmatch(r"[0-9a-f]{32}\.(?:epub|pbbackup|pbtransfer)", name):
                     raise ValueError("导出文件地址无效。")
                 path = CACHE / "exports" / name
                 if not path.is_file():
@@ -786,6 +787,40 @@ class Handler(SimpleHTTPRequestHandler):
         route = urlsplit(self.path)
         query = parse_qs(route.query)
         try:
+            if route.path == "/api/data/transfer/import":
+                with tempfile.TemporaryDirectory(prefix=".transfer-", dir=DATA.parent) as folder:
+                    source = Path(folder) / "incoming.pbtransfer"
+                    self.receive_file(source, library_transfer.MAX_TOTAL)
+                    incoming = library_transfer.read(source, folder)
+                    added, duplicates, failures = 0, 0, []
+                    for item in incoming:
+                        with IMPORT_LOCKS[item["sha256"]], MUTEX:
+                            collection = library()
+                            state = load(DATA / "state.json", {})
+                            positions = state.setdefault("positions", {})
+                            marks = state.setdefault("bookmarks", [])
+                            if any(b.get("sourceHash") == item["sha256"] for b in collection["books"]):
+                                duplicates += 1
+                                continue
+                            try:
+                                named_folder = Path(folder) / uuid.uuid4().hex
+                                named_folder.mkdir()
+                                title = re.sub(r"[/\\\x00]", "_", item.get("title", ""))[:120] or "书籍"
+                                named = named_folder / (title + item["source"].suffix)
+                                shutil.copyfile(item["source"], named)
+                                book = import_book(named, enabled=True)
+                                book["title"] = item.get("title") or book["title"]
+                                book["author"] = item.get("author") or book.get("author", "")
+                                save(BOOK_ROOT / book["id"] / "book.json", book)
+                                collection["books"].append(book)
+                                positions[book["id"]] = item["position"]
+                                marks.extend({"id": uuid.uuid4().hex, "book": book["id"], "label": mark["title"], "detail": "", "position": mark["position"]} for mark in item.get("bookmarks", []))
+                                save(DATA / "library.json", collection)
+                                save(DATA / "state.json", state)
+                                added += 1
+                            except (ValueError, OSError) as error:
+                                failures.append({"title": item.get("title", ""), "error": str(error)})
+                    return self.json({"added": added, "duplicates": duplicates, "failures": failures})
             if route.path == "/api/data/restore":
                 with (
                     RECOVERY_LOCK,
@@ -881,6 +916,29 @@ class Handler(SimpleHTTPRequestHandler):
                     updated = update_book(ident, chapter_edit.stage(book, payload))
                     chapter_edit.cleanup(updated)
                     return self.json({"book": updated})
+            if route.path == "/api/data/transfer/export":
+                with MUTEX:
+                    state = load(DATA / "state.json", {})
+                    records, skipped = [], []
+                    for book in library()["books"]:
+                        if book.get("deletedAt"):
+                            continue
+                        source = path_for(book["originalUrl"])
+                        if source.suffix.lower().lstrip(".") not in library_transfer.FORMATS:
+                            skipped.append(book["title"])
+                            continue
+                        record = {"title": book["title"], "author": book.get("author", ""), "position": library_transfer.position(state.get("positions", {}).get(book["id"], {})), "bookmarks": [{"title": m["label"], "position": library_transfer.position(m["position"])} for m in state.get("bookmarks", []) if m["book"] == book["id"]]}
+                        records.append((record, source))
+                    ident = uuid.uuid4().hex + ".pbtransfer"
+                    directory = CACHE / "exports"
+                    directory.mkdir(parents=True, exist_ok=True)
+                    try:
+                        count = library_transfer.write(directory / (ident[:32] + ".part"), records)
+                        (directory / (ident[:32] + ".part")).replace(directory / ident)
+                    except Exception:
+                        (directory / (ident[:32] + ".part")).unlink(missing_ok=True)
+                        raise
+                return self.json({"id": ident, "download": "/api/downloads/" + ident, "name": "页间迁移.pbtransfer", "books": count, "skipped": skipped})
             if route.path == "/api/data/backup":
                 with MUTEX, ai_tutor.LOCK:
                     snapshot = {

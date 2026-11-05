@@ -59,6 +59,21 @@ export function createDataSettings({ api, post, toast }) {
     if (bridge) bridge.postMessage({ action: "restartLibrary" });
     else $("data-status").textContent = "已准备，重新启动应用后生效。";
   }
+  $("transfer-export").onclick = () => run("正在生成迁移包…", async () => {
+    const result = await post("/api/data/transfer/export", {});
+    downloadFile(result);
+    $("data-status").textContent = `${result.books} 本书；跳过 ${result.skipped.length} 本手机暂不支持的格式。` + result.skipped.join("、");
+  });
+  $("transfer-import").onclick = () => $("transfer-file").click();
+  $("transfer-file").onchange = (event) => {
+    const file = event.target.files[0]; event.target.value = "";
+    if (!file) return;
+    run("正在检查并合并迁移包…", async () => {
+      const result = await api("/api/data/transfer/import", {method:"POST", headers:{"Content-Type":"application/octet-stream"}, body:file});
+      window.dispatchEvent(new Event("app-library-refresh"));
+      $("data-status").textContent = `已导入 ${result.added} 本，保留 ${result.duplicates} 本已有书籍。` + result.failures.map(item => `${item.title}：${item.error}`).join("；");
+    });
+  };
   $("data-backup").onclick = () =>
     run("正在生成备份…", async () => {
       const result = await post("/api/data/backup", {});

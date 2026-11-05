@@ -43,3 +43,5 @@ xcodebuild -project ios/PageBetween.xcodeproj -scheme PageBetween \
 排版依赖已随源码保存，离线阅读时不从 CDN 加载代码。密钥不随书籍导出或上传。
 
 开发验证与当前限制见 [QA](QA.md)。
+
+设备迁移：书库 → 更多 → 设备迁移，使用迁移包与 Mac 互传原件、进度和书签。[范围与合并规则](../docs/TRANSFER.md)。

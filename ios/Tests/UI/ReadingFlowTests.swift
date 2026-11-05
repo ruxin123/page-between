@@ -158,6 +158,8 @@ final class ReadingFlowTests: XCTestCase {
         app.buttons["导出迁移包"].tap()
         XCTAssertTrue(app.buttons["发送或存储迁移包"].waitForExistence(timeout: 45), app.debugDescription)
         capture(app, "transfer-export")
+        app.buttons["发送或存储迁移包"].tap()
+        capture(app, "transfer-share")
     }
     @MainActor func testScannedPDFPreparationNavigationAndSelection() throws {
         let app = XCUIApplication()

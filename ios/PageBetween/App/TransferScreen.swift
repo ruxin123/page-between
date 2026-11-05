@@ -48,7 +48,8 @@ struct TransferScreen: View {
         let index = min(max(0, position.index - 1), max(0, publication.readingOrder.count - 1))
         let href = publication.readingOrder.indices.contains(index) ? publication.readingOrder[index].href : "original.pdf"
         let locations: [String: Any] = book.format == "pdf" ? ["position":position.index, "fragments":["page=\(position.index)", "y=\(position.pdfY)"], "totalProgression":position.progress] : ["progression":position.chapterFraction, "totalProgression":position.progress]
-        let value: [String: Any] = ["href":href, "type":book.format == "pdf" ? "application/pdf" : "application/xhtml+xml", "locations":locations]
+        let mediaType = publication.readingOrder.indices.contains(index) ? publication.readingOrder[index].mediaType?.string : nil
+        let value: [String: Any] = ["href":href, "type":mediaType ?? (book.format == "pdf" ? "application/pdf" : "application/xhtml+xml"), "locations":locations]
         return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
     }
     private func exportBooks() async throws -> URL {

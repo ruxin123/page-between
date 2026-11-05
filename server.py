@@ -805,7 +805,7 @@ class Handler(SimpleHTTPRequestHandler):
                             try:
                                 named_folder = Path(folder) / uuid.uuid4().hex
                                 named_folder.mkdir()
-                                title = re.sub(r"[/\\\x00]", "_", item.get("title", ""))[:120] or "书籍"
+                                title = re.sub(r"[/\\\x00]", "_", item.get("title", ""))[:40] or "书籍"
                                 named = named_folder / (title + item["source"].suffix)
                                 shutil.copyfile(item["source"], named)
                                 book = import_book(named, enabled=True)

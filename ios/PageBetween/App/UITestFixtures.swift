@@ -14,7 +14,7 @@ enum UITestFixtures {
                 try Data(("第一章 Transfer start\n\nOriginal transferred paragraph.\n第二章 Transfer continue\n\nOriginal transferred second paragraph.\n" + UUID().uuidString).utf8).write(to: original)
                 let hash = try TransferManifest.hash(original), path = "books/" + hash + ".txt"
                 let mark = TransferBookmark(title: "Transfer bookmark", position: TransferPosition(index: 1))
-                let book = TransferBook(title: "Original transfer sample", author: "Original Author", file: path, sha256: hash, position: TransferPosition(index: 2, progress: 0.4, chapterFraction: 0.3), bookmarks: [mark])
+                let book = TransferBook(title: "Original transfer sample " + String(repeating: "长标题", count: 35), author: "Original Author", file: path, sha256: hash, position: TransferPosition(index: 2, progress: 0.4, chapterFraction: 0.3), bookmarks: [mark])
                 let meta = folder.appendingPathComponent("manifest.json")
                 try JSONEncoder().encode(TransferManifest(books: [book])).write(to: meta)
                 let file = folder.appendingPathComponent("original.pbtransfer")

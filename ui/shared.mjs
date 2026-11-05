@@ -25,6 +25,7 @@ const paths = {
   forward: "M9 5l7 7-7 7",
   toc: "M8 5h12M8 12h12M8 19h12M3 5h.1M3 12h.1M3 19h.1",
   bookmark: "M6 3h12v18l-6-4-6 4z",
+  history: "M3 4v5h5M3.5 9a9 9 0 1 1 1 9M12 7v5l3 2",
   palm: "M7 2h10v20H7zM10 18h4",
   focus: "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5",
   more: "M5 12h.1M12 12h.1M19 12h.1",

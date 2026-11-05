@@ -91,7 +91,7 @@ struct TransferScreen: View {
             store.error = nil
             let namedFolder = staging.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: namedFolder, withIntermediateDirectories: true)
-            let title = String(item.title.prefix(120)).replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "\\", with: "_").replacingOccurrences(of: "\0", with: "_")
+            let title = item.title.unicodeScalars.prefix(40).map { String($0) }.joined().replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "\\", with: "_").replacingOccurrences(of: "\0", with: "_")
             let named = namedFolder.appendingPathComponent((title.isEmpty ? "书籍" : title) + "." + source.pathExtension)
             try FileManager.default.copyItem(at: source, to: named)
             await store.importFiles([named])

@@ -19,13 +19,13 @@ class Settings(unittest.TestCase):
         self,
     ):
         settings.update("ai", self.config)
-        reference = settings.preferences()["services"]["ai"]["keyRef"]
+        reference = settings.preferences()["services"]["ai"]["key"]
         self.assertFalse(settings.ai_configuration()["supportsImages"])
         result = settings.update(
             "ai", {**self.config, "key": "", "supportsImages": True}
         )
         self.assertTrue(result["services"]["ai"]["supportsImages"])
-        self.assertEqual(settings.preferences()["services"]["ai"]["keyRef"], reference)
+        self.assertEqual(settings.preferences()["services"]["ai"]["key"], reference)
         settings.update("ai", {**self.config, "key": ""})
         self.assertTrue(settings.ai_configuration()["supportsImages"])
         with self.assertRaises(settings.SettingsError):
@@ -35,11 +35,11 @@ class Settings(unittest.TestCase):
         import ai_tutor
 
         settings.update("ai", self.config)
-        settings.keychain.reset_mock()
+        settings.legacy_key.reset_mock()
         self.assertTrue(ai_tutor.status()["configured"])
-        settings.keychain.assert_not_called()
+        settings.legacy_key.assert_not_called()
 
-    def test_translation_can_inherit_or_use_its_own_keychain_model(self):
+    def test_translation_can_inherit_or_use_its_own_file_model(self):
         with self.assertRaises(settings.SettingsError):
             settings.ai_configuration("translation")
         settings.update("ai", self.config)
@@ -52,9 +52,9 @@ class Settings(unittest.TestCase):
         self.assertEqual(settings.ai_configuration()["key"], "example-credential")
         settings.update("translation", {**self.config, "model": "translation-model", "key": "", "useChatModel": True, "provider": "ai"})
         self.assertEqual(settings.ai_configuration("translation")["model"], "example-model")
-        settings.keychain.reset_mock()
+        settings.legacy_key.reset_mock()
         self.assertTrue(settings.public_settings()["services"]["translation"]["ready"])
-        settings.keychain.assert_not_called()
+        settings.legacy_key.assert_not_called()
 
     def test_google_needs_no_model_and_invalid_provider_is_rejected(self):
         import translation
@@ -75,7 +75,7 @@ class Settings(unittest.TestCase):
         self.overrides = [
             patch.object(settings, "CONFIG", self.root / "services.json"),
             patch.object(settings, "ROOT", self.root),
-            patch.object(settings, "keychain", side_effect=self.keychain),
+            patch.object(settings, "legacy_key", side_effect=lambda reference: self.secrets.get(reference)),
             patch.dict(
                 os.environ,
                 {name: "" for group in settings.ENV.values() for name in group},
@@ -93,15 +93,6 @@ class Settings(unittest.TestCase):
         for override in reversed(self.overrides):
             override.stop()
         self.temp.cleanup()
-
-    def keychain(self, operation, account, value=None):
-        if operation == "get":
-            return self.secrets.get(account)
-        if operation == "set":
-            self.assertNotIn(account, self.secrets)
-            self.secrets[account] = value
-        if operation == "delete":
-            self.secrets.pop(account, None)
 
     def test_legacy_migrates_on_save_and_app_overrides_environment(self):
         self.root.joinpath(".env").write_text(
@@ -122,18 +113,18 @@ class Settings(unittest.TestCase):
             self.assertEqual(settings.ai_configuration()["model"], "example-model")
             self.assertEqual(result["services"]["ai"]["source"], "app")
             self.assertNotIn("old-credential", json.dumps(result))
-            self.assertNotIn("old-credential", settings.CONFIG.read_text())
-            self.assertEqual(len(self.secrets), 1)
+            self.assertIn("old-credential", settings.CONFIG.read_text())
+            self.assertEqual(settings.CONFIG.stat().st_mode & 0o777, 0o600)
 
     def test_keep_replace_remove_and_missing_key_never_falls_back(self):
         settings.update("ai", self.config)
-        original_ref = settings.preferences()["services"]["ai"]["keyRef"]
+        original_ref = settings.preferences()["services"]["ai"]["key"]
         settings.update("ai", {**self.config, "key": "", "model": "new-model"})
         self.assertEqual(
-            settings.preferences()["services"]["ai"]["keyRef"], original_ref
+            settings.preferences()["services"]["ai"]["key"], original_ref
         )
         settings.update("ai", {**self.config, "key": "replacement"})
-        self.assertEqual(list(self.secrets.values()), ["replacement"])
+        self.assertEqual(settings.effective("ai")["key"], "replacement")
         with patch.dict(os.environ, {"AI_API_KEY": "fallback-must-stay-disabled"}):
             result = settings.update(
                 "ai", {**self.config, "key": "", "removeKey": True}
@@ -142,10 +133,6 @@ class Settings(unittest.TestCase):
             with self.assertRaises(settings.SettingsError):
                 settings.ai_configuration()
         self.assertEqual(self.secrets, {})
-        settings.update("ai", self.config)
-        self.secrets.clear()
-        with self.assertRaisesRegex(settings.SettingsError, "重新填写"):
-            settings.ai_configuration()
 
     def test_failed_file_write_preserves_old_config_and_credential(self):
         settings.update("ai", self.config)
@@ -155,12 +142,27 @@ class Settings(unittest.TestCase):
                 settings.update("ai", {**self.config, "key": "replacement"})
         self.assertEqual(settings.CONFIG.read_bytes(), old_file)
         self.assertEqual(self.secrets, old_secrets)
-        with patch.object(
-            settings, "keychain", side_effect=settings.SettingsError("locked")
-        ):
-            with self.assertRaises(settings.SettingsError):
-                settings.update("ai", {**self.config, "key": "replacement"})
-        self.assertEqual(settings.CONFIG.read_bytes(), old_file)
+    def test_old_reference_migrates_once_and_failed_migration_preserves_it(self):
+        reference = "ai:" + "a" * 32
+        original = {"schema": 1, "services": {"ai": {"baseUrl": self.config["baseUrl"], "model": self.config["model"], "keyRef": reference}}}
+        settings.save(settings.CONFIG, original)
+        self.secrets[reference] = "legacy-value"
+        before = settings.CONFIG.read_bytes()
+        with patch.object(settings, "save", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                settings.effective("ai")
+        self.assertEqual(settings.CONFIG.read_bytes(), before)
+        self.assertEqual(settings.effective("ai")["key"], "legacy-value")
+        self.assertNotIn("keyRef", settings.preferences()["services"]["ai"])
+        settings.legacy_key.reset_mock()
+        self.assertEqual(settings.effective("ai")["key"], "legacy-value")
+        settings.legacy_key.assert_not_called()
+        settings.save(settings.CONFIG, original)
+        self.secrets.clear()
+        with self.assertRaisesRegex(settings.SettingsError, "重新填写"):
+            settings.effective("ai")
+        settings.update("ai", self.config)
+        self.assertEqual(settings.effective("ai")["key"], self.config["key"])
 
     def test_validation_and_changed_destination_do_not_reuse_saved_key(self):
         settings.update("ai", self.config)

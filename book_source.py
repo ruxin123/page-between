@@ -1,20 +1,20 @@
 """A local MCP stdio client; account secrets never enter frontend responses."""
 
 import atexit
+import hashlib
 import json
 import os
 import queue
 import subprocess
 import threading
 import time
-import uuid
 from pathlib import Path
 
 import service_settings
-from paths import CACHE, SUPPORT
+from paths import CACHE
 from storage import load, save
 
-SETTINGS = SUPPORT / "book-source.json"
+SETTINGS = service_settings.CONFIG.parent / "book-source.json"
 RUNTIME = Path.home() / "Library/Application Support/Page Between/Book Source"
 DOWNLOADS = CACHE / "book-source-downloads"
 INSTALL = {"status":"idle"}
@@ -41,9 +41,22 @@ def install_component():
 
 
 def settings():
-    value = load(SETTINGS, {})
-    return {"email": value.get("email", ""), "hasPassword": bool(value.get("keyRef")),
+    value = configuration(read_password=False)
+    return {"email": value.get("email", ""), "hasPassword": bool(value.get("password") or value.get("keyRef")),
             "installed": (RUNTIME / "dist/index.js").is_file()}
+
+
+def configuration(*, read_password=True):
+    with service_settings.LOCK:
+        value = load(SETTINGS, {})
+        if read_password and value.get("keyRef") and "password" not in value:
+            password = service_settings.legacy_key(value["keyRef"])
+            if not password:
+                raise ValueError("旧账号无法自动迁移，请在设置中重新填写密码。")
+            value["password"] = password
+            value.pop("keyRef")
+            save(SETTINGS, value)
+        return value
 
 
 def configure(payload):
@@ -53,22 +66,17 @@ def configure(payload):
     email = email.strip()
     if not email or "@" not in email or any(char.isspace() for char in email):
         raise ValueError("请填写有效的账号邮箱。")
-    previous = load(SETTINGS, {})
-    ref = previous.get("keyRef", "")
-    if password:
-        ref = "book-source:" + uuid.uuid4().hex
-        service_settings.keychain("set", ref, password)
-    elif previous.get("email") != email:
-        raise ValueError("更换账号时请同时填写密码。")
-    try:
-        save(SETTINGS, {"email": email, "keyRef": ref})
-    except OSError:
-        if ref and ref != previous.get("keyRef"):
-            service_settings.keychain("delete", ref)
-        raise ValueError("账号设置未保存，请检查本机存储。") from None
+    with service_settings.LOCK:
+        previous = configuration(read_password=False)
+        if not password:
+            if previous.get("email") != email:
+                raise ValueError("更换账号时请同时填写密码。")
+            password = configuration().get("password", "")
+        try:
+            save(SETTINGS, {"email": email, "password": password})
+        except OSError:
+            raise ValueError("账号设置未保存，请检查本机存储。") from None
     CLIENT.close()
-    if previous.get("keyRef") and previous["keyRef"] != ref:
-        service_settings.keychain("delete", previous["keyRef"])
     return settings()
 
 
@@ -125,8 +133,9 @@ class MCPClient:
             raise ValueError("书源响应超时或连接中断，请重试。") from None
 
     def connect(self):
-        config = load(SETTINGS, {})
-        account = (config.get("email", ""), config.get("keyRef", ""))
+        config = configuration()
+        secret = config.get("password", "")
+        account = (config.get("email", ""), hashlib.sha256(secret.encode()).hexdigest())
         if self.process and self.process.poll() is None and self.account == account:
             return
         self.close()
@@ -134,7 +143,6 @@ class MCPClient:
         node = RUNTIME / "node"
         if not entry.is_file() or not node.exists():
             raise ValueError("请先安装书源组件。")
-        secret = service_settings.keychain("get", config["keyRef"]) if config.get("keyRef") else ""
         DOWNLOADS.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "ZLIBRARY_EMAIL": config.get("email", ""), "ZLIBRARY_PASSWORD": secret or "",
                "ZLIBRARY_OUTPUT_ROOT": str(DOWNLOADS), "PATH": str(RUNTIME / "bin") + os.pathsep + os.environ.get("PATH", "")}

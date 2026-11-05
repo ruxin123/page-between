@@ -69,10 +69,10 @@ import PDFKit
     func pause(_ id: UUID) { running[id]?.cancel(); nearby[id]?.cancel(); cloudRunning[id]?.cancel() }
     func startMinerU(_ book: MobileBook, pages: [Int], fresh: Bool = false) {
         guard cloudRunning[book.id] == nil, !pages.isEmpty else { return }
-        let services = MobileServices(), profile = services.mineru, key = SecureKeys.read("mineru")
+        let services = MobileServices(), profile = services.mineru
         cloudRunning[book.id] = Task {
             do {
-                try await mineru.run(book, pages: pages, profile: profile, key: key, fresh: fresh) { task in await self.cloudProgress(task) }
+                try await mineru.run(book, pages: pages, profile: profile, key: LocalCredentials.read("mineru"), fresh: fresh) { task in await self.cloudProgress(task) }
             } catch {
                 if let failure = error as? MinerUFailure, failure == .unfinishedTask, var previous = mineruJobs[book.id] {
                     previous.message = failure.localizedDescription; mineruJobs[book.id] = previous

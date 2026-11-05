@@ -1,5 +1,7 @@
 # 页间 · Page Between
 
+**本项目是完全的 Vibe Coding 产物。**
+
 一个面向 macOS 的本地阅读应用。在同一个书库中阅读小说与教材：EPUB 沿用原书结构，PDF 保留原始版面并增强目录与划词，文字书支持柔和翻页，还可以放进桌面角落的掌上小窗。
 
 [下载最新版本](https://github.com/ruxin123/page-between/releases/latest) · [全部版本](https://github.com/ruxin123/page-between/releases) · [更新日志](docs/CHANGELOG.md)
@@ -10,11 +12,11 @@ iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcod
 
 ## 下载与安装
 
-当前发布版本 **0.5.33**，提供 Apple Silicon（arm64）安装包。
+当前发布版本 **0.5.34**，提供 Apple Silicon（arm64）安装包。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.33/page-between-0.5.33-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
+| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.34/page-between-0.5.34-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
 
 1. 下载 ZIP 并解压，将「页间.app」拖入应用程序文件夹。
 2. 打开应用，在书库点击「导入书籍」，选择文件并设置是否启用文档解析。
@@ -32,7 +34,7 @@ iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcod
 
 ![书籍详情](docs/screenshots/book-source.png)
 
-此功能使用可选的 [zlibrary-mcp](https://github.com/rookslog/zlibrary-mcp) 本机组件。首次安装需 Node.js 22+、npm、uv 与 Git；在书源设置中安装组件并保存自己的 Z-Library 邮箱、密码。密码保存在 macOS 钥匙串。原网页浏览窗口继续作为网站入口保留。
+此功能使用可选的 [zlibrary-mcp](https://github.com/rookslog/zlibrary-mcp) 本机组件。首次安装需 Node.js 22+、npm、uv 与 Git；在书源设置中安装组件并保存自己的 Z-Library 邮箱、密码。密码保存在 App 本地配置文件中。原网页浏览窗口继续作为网站入口保留。
 
 下载暂存使用本机缓存目录，导入后清理；书库中的原文件保留。MCP 暂存目录需支持硬链接，默认的 macOS 系统缓存目录符合要求。
 
@@ -66,13 +68,19 @@ PDF 以原页为阅读主体，优先利用已有文字层与书签。原生文�
 
 macOS 使用可拖出主窗口、调整大小的独立浮窗；点击别处自动收起，也可固定在桌面。支持修改原文与复制，收藏、记录、出处和提问收在「更多」中。翻译默认不写入磁盘，也不复用上次结果。只有主动收藏的译文保留，最多 100 条，可从阅读器顶部查看，并随书库备份。掌上阅读同样可用。
 
-![划词翻译](docs/screenshots/translation.png)
+![数学教材划词翻译](docs/screenshots/math-translation.png)
+
+| 英文教材划词 | 中文教材划词 |
+| --- | --- |
+| ![英文教材选区与操作](docs/screenshots/math-selection-en.png) | ![中文教材选区与操作](docs/screenshots/math-selection-zh.png) |
 
 ### 带出处的书内 AI 答疑
 
 划选原文后即可翻译、解释术语或追问，也可围绕当前页面发起问题。macOS 答疑使用独立窗口，可拖到主阅读窗口外并调整大小，生成过程中可以继续阅读。
 
 按需检索本书当前位置之前的资料，为回答提供参考；来源可预览、跳回原文，再返回阅读位置。支持流式回答、停止、重试和连续追问，对话与选段保存在本机。支持图像的模型还可以接收本次选中的原图。
+
+![选段的 Markdown 与公式渲染](docs/screenshots/math-formulas.png)
 
 ### 掌上阅读
 
@@ -88,7 +96,7 @@ macOS 使用可拖出主窗口、调整大小的独立浮窗；点击别处自�
 
 - 导出 EPUB：原生 EPUB 保留原书副本，TXT 按章节导出，PDF 将已解析内容转换为可重排正文；未解析页与复杂内容可保留原图。
 - TXT 自动识别中英文章节，也可手动分章、合并与改名。
-- 书库备份与恢复包含图书、进度、书签、对话、翻译收藏及已保存的识别结果；服务凭据留在本机钥匙串。
+- 书库备份与恢复包含图书、进度、书签、对话、翻译收藏及已保存的识别结果；服务凭据单独保存在本机配置文件中。
 
 ## 支持的格式
 
@@ -115,11 +123,11 @@ macOS 使用可拖出主窗口、调整大小的独立浮窗；点击别处自�
 
 Google 使用与 Bob 插件相同的网页接口方式，需要能访问 Google 的网络；接口变化或限流时可切换 AI。AI 翻译的专用模型和凭据独立保存，未设置专用模型时默认沿用 AI 答疑。
 
-API Key 与 Token 由 macOS 钥匙串保存。连接本机模型时可使用回环 HTTP 地址，并按服务要求留空 Key。基础阅读、导入和本机 OCR 不需要配置这些服务。
+API Key、Token 与书源密码保存在 App 数据目录的本地文件中，文件权限为仅当前用户可读写。连接本机模型时可使用回环 HTTP 地址，并按服务要求留空 Key。基础阅读、导入和本机 OCR 不需要配置这些服务。
 
 只有主动翻译、发送问题或发起云解析时，相应内容才会交给所配置的服务：AI 翻译发送当前选段和少量附近文字，Google 只接收当前待译原文；答疑发送本次选段、附近文字、检索资料和选定图片；MinerU 接收选定的 PDF 页面。MinerU 支持按页数与文件大小拆分批次，已完成页面可以复用。
 
-找书的 MCP 组件在本机运行，使用自己的账号连接 Z-Library，搜索与下载受该账号和服务额度限制。密码由钥匙串读取后仅交给本机书源进程，不写入书库备份。网页补充入口与阅读器隔离，网站无法调用页间的本机接口；网页登录会话保存在独立 WebKit 数据中。
+找书的 MCP 组件在本机运行，使用自己的账号连接 Z-Library，搜索与下载受该账号和服务额度限制。密码从本地配置文件读取后交给本机书源进程，不写入书库备份。网页补充入口与阅读器隔离，网站无法调用页间的本机接口；网页登录会话保存在独立 WebKit 数据中。
 
 ![应用内服务设置](docs/screenshots/services.png)
 
@@ -150,9 +158,11 @@ API Key 与 Token 由 macOS 钥匙串保存。连接本机模型时可使用回�
 图书与阅读积累保存在本机，应用不会自动扫描 Apple 图书或其他私人书库。
 
 - 普通版：`~/Library/Application Support/Page Between/Personal/`
+- 服务密钥和 Token：`~/Library/Application Support/Page Between/Personal/services.json`
+- 书源账号和密码：`~/Library/Application Support/Page Between/Personal/book-source.json`
 - 临时缓存：`~/Library/Caches/Page Between/`
 
-可在「设置 → 书库与数据」中备份、恢复和清理缓存。安装包及本仓库不包含个人书籍、阅读记录或凭据；页面截图使用原创演示资料。
+可在「设置 → 书库与数据」中备份、恢复和清理缓存。安装包及本仓库不包含个人书籍、阅读记录或凭据；页面截图包含原创示例和用户授权展示的中英文数学教材短选段。
 
 ## 从源码运行
 

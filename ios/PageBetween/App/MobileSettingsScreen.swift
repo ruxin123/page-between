@@ -3,9 +3,9 @@ import SwiftUI
 struct MobileSettingsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var services = MobileServices()
-    @State private var aiKey = SecureKeys.read("ai")
-    @State private var translationKey = SecureKeys.read("translation")
-    @State private var mineruKey = SecureKeys.read("mineru")
+    @State private var aiKey = ""
+    @State private var translationKey = ""
+    @State private var mineruKey = ""
     @State private var error: String?
     var body: some View {
         NavigationStack {
@@ -31,6 +31,13 @@ struct MobileSettingsScreen: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("保存") { do { try services.save(aiKey: aiKey, translationKey: translationKey, mineruKey: mineruKey); dismiss() } catch { self.error = error.localizedDescription } } } }
             .alert("设置未保存", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("好") { error = nil } } message: { Text(error ?? "") }
         }.tint(MobilePalette.accent)
+        .task {
+            do {
+                aiKey = try LocalCredentials.read("ai")
+                translationKey = try LocalCredentials.read("translation")
+                mineruKey = try LocalCredentials.read("mineru")
+            } catch { self.error = error.localizedDescription }
+        }
     }
     private func profile(_ value: Binding<ServiceProfile>, key: Binding<String>) -> some View {
         Group { TextField("API 地址", text: value.baseURL).keyboardType(.URL); TextField("模型名称", text: value.model); SecureField("API Key", text: key) }.textInputAutocapitalization(.never).autocorrectionDisabled()

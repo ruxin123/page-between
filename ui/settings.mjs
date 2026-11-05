@@ -43,7 +43,6 @@ export function createServiceSettings({ document, api, post, toast }) {
         ${ai ? `<label class="setting-check">支持图像输入<input name="supportsImages" type="checkbox" ${config.supportsImages ? "checked" : ""}></label>` : ""}
         <label class="service-field">${ai ? "API Key" : "API Token"}<input name="key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="${config.hasKey ? "已保存，留空保持现有凭据" : ai ? "填写 Key；本机模型可留空" : "填写 MinerU Token"}"></label>
         ${config.hasKey ? '<label class="setting-check remove-key">移除已保存的凭据<input type="checkbox" name="removeKey"></label>' : ""}
-        <p class="service-storage-note">${saved.keychainAvailable ? "" : "钥匙串不可用，暂时无法保存凭据。"}</p>
         <div class="service-actions"><button type="submit" class="primary-button">保存设置</button><button type="button" class="secondary-button" data-test>${ai ? "测试连接" : "检查配置"}</button><button type="button" class="service-reset" data-reset>还原修改</button></div>
       </fieldset><p class="service-result" data-result role="status" aria-live="polite"></p></form>`;
     const form = container.querySelector("form");
@@ -94,13 +93,7 @@ export function createServiceSettings({ document, api, post, toast }) {
       if (saving) {
         saved = data;
         render(service);
-        const message = data.cleanupWarning
-          ? "新配置已保存；旧凭据清理未完成，可稍后检查钥匙串。"
-          : "已保存。";
-        const status = $("settings-" + service).querySelector("[data-result]");
-        status.textContent = data.cleanupWarning ? message : "";
-        status.dataset.kind = data.cleanupWarning ? "warning" : "success";
-        toast(message, { kind: data.cleanupWarning ? "warning" : "success" });
+        toast("已保存。", { kind: "success" });
       } else {
         result.textContent = data.verified === false ? "格式有效" : "连接成功";
         result.dataset.kind = data.verified === false ? "" : "success";

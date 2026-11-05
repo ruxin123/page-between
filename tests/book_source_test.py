@@ -56,17 +56,31 @@ class BookSource(unittest.TestCase):
             for payload in [{"query":""}, {"query":"original", "language":"invalid"}, {"query":"original", "exact":"false"}]:
                 with self.assertRaises(ValueError): source.call({"operation":"search", **payload})
 
-    def test_password_stays_in_keychain_and_account_change_requires_password(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(source, "SETTINGS", Path(folder)/"settings.json"), patch.object(source.service_settings, "keychain") as keychain, patch.object(source.CLIENT, "close"):
+    def test_password_file_and_account_change_requires_password(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(source, "SETTINGS", Path(folder)/"settings.json"), patch.object(source.service_settings, "legacy_key") as legacy_key, patch.object(source.CLIENT, "close"):
             result = source.configure({"email":"reader@example.invalid", "password":"private-value"})
             self.assertTrue(result["hasPassword"])
-            self.assertNotIn("private-value", source.SETTINGS.read_text())
+            self.assertIn("private-value", source.SETTINGS.read_text())
+            self.assertNotIn("private-value", json.dumps(result))
+            self.assertEqual(source.SETTINGS.stat().st_mode & 0o777, 0o600)
             source.configure({"email":"reader@example.invalid", "password":""})
-            self.assertEqual(keychain.call_count, 1)
+            legacy_key.assert_not_called()
             with self.assertRaises(ValueError):
                 source.configure({"email":"other@example.invalid", "password":""})
             with self.assertRaises(ValueError):
                 source.configure({"email":"", "password":"private-value"})
+
+    def test_old_password_migrates_once_and_failed_save_preserves_file(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(source, "SETTINGS", Path(folder)/"settings.json"), patch.object(source.service_settings, "legacy_key", return_value="old-password") as legacy, patch.object(source.CLIENT, "close"):
+            source.save(source.SETTINGS, {"email": "reader@example.invalid", "keyRef": "book-source:" + "a" * 32})
+            self.assertEqual(source.configuration()["password"], "old-password")
+            self.assertNotIn("keyRef", source.configuration())
+            self.assertEqual(legacy.call_count, 1)
+            previous = source.SETTINGS.read_bytes()
+            with patch.object(source, "save", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(ValueError, "未保存"):
+                    source.configure({"email": "reader@example.invalid", "password": "replacement"})
+            self.assertEqual(source.SETTINGS.read_bytes(), previous)
 
     def test_acquire_refuses_outside_path_and_keeps_download_inside_owned_folder(self):
         with tempfile.TemporaryDirectory() as folder:

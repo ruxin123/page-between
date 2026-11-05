@@ -1,11 +1,10 @@
-"""Local service preferences; credential values stay in the macOS Keychain."""
+"""Service preferences and credentials in the App's private configuration directory."""
 
 import json
 import os
 import subprocess
 import sys
 import threading
-import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -64,17 +63,16 @@ def preferences():
         raise SettingsError("暂时无法读取服务设置，请检查本机存储。") from None
 
 
-def keychain(operation, account, value=None):
+def legacy_key(account):
+    """Read old credentials once without requesting system authentication."""
     binary = RUNTIME / "service-secrets"
     if sys.platform != "darwin" or not binary.is_file():
-        raise SettingsError("钥匙串组件不可用，暂时无法保存或读取凭据。")
+        raise SettingsError("旧凭据无法自动迁移，请在设置中重新填写。")
     request = {
-        "operation": operation,
+        "operation": "get",
         "account": account,
         "profile": "demo" if DEMO else "personal",
     }
-    if value is not None:
-        request["value"] = value
     try:
         result = subprocess.run(
             [str(binary)],
@@ -86,11 +84,9 @@ def keychain(operation, account, value=None):
         )
         response = json.loads(result.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
-        raise SettingsError("钥匙串暂时无法访问，请解锁后重试。") from None
+        raise SettingsError("旧凭据无法自动迁移，请在设置中重新填写。") from None
     if response.get("error"):
-        if response["error"] == "invalid_request":
-            raise SettingsError("凭据类型与钥匙串组件版本不兼容，请更新页间后重试。")
-        raise SettingsError("钥匙串未允许本次操作，请检查系统授权后重试。")
+        raise SettingsError("旧凭据无法自动迁移，请在设置中重新填写。")
     return response.get("value")
 
 
@@ -102,12 +98,18 @@ def effective(service, *, read_key=True):
         if stored is not None:
             config = {**DEFAULTS[service], **stored, "source": "app"}
             reference = config.get("keyRef", "")
-            config["hasKey"] = bool(reference)
-            config["key"] = (
-                keychain("get", reference) or "" if reference and read_key else ""
-            )
-            if reference and read_key and not config["key"]:
-                raise SettingsError("保存的凭据已不在钥匙串中，请重新填写。")
+            if reference and "key" not in stored and read_key:
+                value = legacy_key(reference)
+                if not value:
+                    raise SettingsError("旧凭据无法自动迁移，请在设置中重新填写。")
+                data = preferences()
+                migrated = {**stored, "key": value}
+                migrated.pop("keyRef", None)
+                data["services"][service] = migrated
+                save(CONFIG, data)
+                config = {**DEFAULTS[service], **migrated, "source": "app"}
+            config["hasKey"] = bool(config.get("key") or reference)
+            config["key"] = config.get("key", "") if read_key else ""
         else:
             values = legacy()
             base, model, key = (values.get(name, "").strip() for name in ENV[service])
@@ -218,8 +220,7 @@ def public_settings():
             services[service].update(provider=config["provider"], useChatModel=config["useChatModel"])
     return {
         "services": services,
-        "keychainAvailable": sys.platform == "darwin"
-        and (RUNTIME / "service-secrets").is_file(),
+        "credentialStorage": "file",
         "mineruIntegrated": True,
         "profile": "demo" if DEMO else "personal",
     }
@@ -267,19 +268,10 @@ def update(service, payload):
     with LOCK:
         config = candidate(service, payload)
         data = preferences()
-        old = data["services"].get(service, {})
-        value = config["key"]
-        reference = old.get("keyRef", "")
-        new_reference = (
-            reference if not payload.get("key") and not payload.get("removeKey") else ""
-        )
-        if value and not new_reference:
-            new_reference = service + ":" + uuid.uuid4().hex
-            keychain("set", new_reference, value)
         data["services"][service] = {
             "baseUrl": config["baseUrl"],
             "model": config["model"],
-            "keyRef": new_reference,
+            "key": config["key"],
         }
         if service == "ai":
             data["services"][service]["supportsImages"] = config["supportsImages"]
@@ -288,18 +280,7 @@ def update(service, payload):
         try:
             save(CONFIG, data)
         except OSError:
-            if new_reference and new_reference != reference:
-                try:
-                    keychain("delete", new_reference)
-                except SettingsError:
-                    pass
             raise SettingsError(
-                "服务设置未保存，请检查本机存储后重试；原配置仍保留。"
+                "服务设置未保存，请检查本机存储后重试。"
             ) from None
-        cleanup_failed = False
-        if reference and reference != new_reference:
-            try:
-                keychain("delete", reference)
-            except SettingsError:
-                cleanup_failed = True
-        return {**public_settings(), "cleanupWarning": cleanup_failed}
+        return public_settings()

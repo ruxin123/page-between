@@ -2,6 +2,12 @@
 
 按构建完成日期记录功能与修复。[GitHub Releases](https://github.com/ruxin123/page-between/releases) 提供对应源码标签、普通版安装包，以及 `SHA256SUMS.txt`。
 
+## 0.5.34
+
+- API Key、MinerU Token 与书源密码改为保存在 App 本地配置文件中，Mac 和 iPhone 同步采用文件存储。
+- 旧凭据无交互迁移，读取受阻时可在设置中重新填写。配置继续支持保留、替换与移除。
+- README 注明完全由 Vibe Coding 制作，并补充中英文教材的划词、翻译和公式渲染截图。
+
 ## iPhone 0.1.0 · 开发中
 
 手机端尚未发布安装包，完整移植进度见 [功能清单](../ios/PORTING.md)。

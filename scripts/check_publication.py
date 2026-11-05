@@ -1,4 +1,4 @@
-"""Check the exact Git index before publishing code and synthetic screenshots."""
+"""Check the exact Git index before publishing code and reviewed screenshots."""
 
 import argparse
 import json

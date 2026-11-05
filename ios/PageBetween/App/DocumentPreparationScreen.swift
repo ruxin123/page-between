@@ -83,7 +83,9 @@ struct DocumentPreparationScreen: View {
     private func status(_ task: PDFPreparationTask) -> String { ["running": "正在准备", "paused": "已暂停", "failed": "准备未完成", "done": "已完成"][task.state] ?? "等待准备" }
     private func requestCloud(_ pages: [Int], fresh: Bool = false) {
         guard enabled else { return }
-        if SecureKeys.read("mineru").isEmpty { settings = true; return }
+        do {
+            if try LocalCredentials.read("mineru").isEmpty { settings = true; return }
+        } catch { self.error = error.localizedDescription; settings = true; return }
         cloudFresh = fresh; cloudConsent = pages
     }
     private func missingPages() async {

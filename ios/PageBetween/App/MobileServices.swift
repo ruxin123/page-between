@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import LocalAuthentication
 import SwiftUI
 
 struct ServiceProfile: Codable, Equatable {
@@ -8,23 +9,42 @@ struct ServiceProfile: Codable, Equatable {
     var supportsImages: Bool?
 }
 
-enum SecureKeys {
-    static let service = "local.pagebetween.ios.services"
-    static func read(_ name: String) -> String {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: name, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
-        var value: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &value) == errSecSuccess, let data = value as? Data else { return "" }
-        return String(data: data, encoding: .utf8) ?? ""
+enum LocalCredentials {
+    static func file() throws -> CredentialFile {
+        let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        return CredentialFile(url: root.appendingPathComponent("PageBetween/credentials.json"))
     }
-    static func write(_ name: String, value: String) throws {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: name]
-        if value.isEmpty { let status = SecItemDelete(query as CFDictionary); guard status == errSecSuccess || status == errSecItemNotFound else { throw ServiceError.message("无法清除凭据。") }; return }
-        let attributes = [kSecValueData as String: Data(value.utf8)]
-        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            status = SecItemAdd(query.merging(attributes) { _, new in new }.merging([kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]) { _, new in new } as CFDictionary, nil)
+    static func read(_ name: String) throws -> String {
+        let file = try file()
+        if FileManager.default.fileExists(atPath: file.url.path) {
+            return try file.read()[name] ?? ""
         }
-        guard status == errSecSuccess else { throw ServiceError.message("凭据未能保存，请重试。") }
+        var migrated: [String: String] = [:]
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        for account in ["ai", "translation", "mineru"] {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: "local.pagebetween.ios.services",
+                kSecAttrAccount as String: account,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+                kSecUseAuthenticationContext as String: context,
+            ]
+            var value: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &value)
+            if status == errSecItemNotFound { continue }
+            guard status == errSecSuccess, let data = value as? Data,
+                  let key = String(data: data, encoding: .utf8) else {
+                throw ServiceError.message("旧凭据无法自动迁移，请在设置中重新填写。")
+            }
+            migrated[account] = key
+        }
+        try file.write(migrated)
+        return migrated[name] ?? ""
+    }
+    static func write(_ values: [String: String]) throws {
+        try file().write(values)
     }
 }
 
@@ -70,9 +90,7 @@ private let readingNetwork: URLSession = {
         _ = try Self.endpoint(ai.baseURL)
         if separateTranslation { _ = try Self.endpoint(translation.baseURL) }
         try mineru.validate()
-        try SecureKeys.write("ai", value: aiKey)
-        try SecureKeys.write("translation", value: translationKey)
-        try SecureKeys.write("mineru", value: mineruKey)
+        try LocalCredentials.write(["ai": aiKey, "translation": translationKey, "mineru": mineruKey])
         let defaults = UserDefaults.standard
         defaults.set(try JSONEncoder().encode(ai), forKey: "services.ai")
         defaults.set(try JSONEncoder().encode(translation), forKey: "services.translation")
@@ -87,9 +105,9 @@ private let readingNetwork: URLSession = {
         guard images.isEmpty || !translate && profile.supportsImages == true else { throw ServiceError.message("请配置支持图像的答疑模型。") }
         let key: String
         #if DEBUG
-        key = AIUITestProtocol.enabled ? "" : SecureKeys.read(dedicated ? "translation" : "ai")
+        key = try (AIUITestProtocol.enabled ? "" : LocalCredentials.read(dedicated ? "translation" : "ai"))
         #else
-        key = SecureKeys.read(dedicated ? "translation" : "ai")
+        key = try LocalCredentials.read(dedicated ? "translation" : "ai")
         #endif
         return try ServiceRequests.ai(base: profile.baseURL, model: profile.model, key: key, quote: quote, question: question, translate: translate, history: history, images: images, stream: stream)
     }

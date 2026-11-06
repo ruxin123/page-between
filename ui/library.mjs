@@ -12,6 +12,16 @@ export function filterBooks(books, filter, query = "") {
   );
 }
 
+export function resumableBook(books, positions, preferred) {
+  const readable = books.filter((book) => {
+    const index = positions[book.id]?.index;
+    return Number.isInteger(index) && index >= 1;
+  });
+  return readable.find((book) => book.id === preferred) || readable.sort(
+    (left, right) => (positions[right.id].updatedAt || 0) - (positions[left.id].updatedAt || 0),
+  )[0];
+}
+
 export function cover(book, small = false) {
   return `<div class="book-cover ${book.shelf === "学习" ? "cover-study" : ""} ${small ? "small-cover" : ""}">${
     book.cover
@@ -150,7 +160,7 @@ export function createLibraryView(doc) {
             ? $("empty-action")
             : doc.querySelector(`[data-filter="${filter}"]`))
         )?.focus({ preventScroll: true });
-      $("continue-reading").hidden = !!query.trim() || !last;
+      $("continue-reading").hidden = !!query.trim() || !selected.some(book => book.id === last?.id);
       if (last) {
         const fraction = progress(last),
           description = detail(last);
@@ -169,7 +179,7 @@ export function createLibraryView(doc) {
             last.type !== "pdf" &&
             !["comic", "pre-paginated"].includes(last.layout);
           $("continue-reading").innerHTML =
-            `<article class="continue-card">${cover(last, true)}<div class="continue-copy"><h2>${escapeHTML(last.title)}</h2><p>${escapeHTML(description)}${fraction ? ` · ${Math.round(fraction * 100)}%` : ""}</p></div><div class="continue-actions"><button class="primary-button" data-read="${escapeHTML(last.id)}">继续阅读 ${icon("forward")}</button>${canPalm ? `<button class="secondary-button palm-action" data-palm="${escapeHTML(last.id)}">${icon("palm")}掌上阅读</button>` : ""}</div><div class="continue-progress" style="width:${Math.max(1, fraction * 100)}%"></div></article>`;
+            `<article class="continue-card">${cover(last, true)}<div class="continue-copy"><h2>${escapeHTML(last.title)}</h2><p>${escapeHTML(description)}${fraction ? ` · ${Math.round(fraction * 100)}%` : ""}</p></div><div class="continue-actions"><button class="primary-button" data-read="${escapeHTML(last.id)}">继续阅读 ${icon("forward")}</button>${canPalm ? `<button class="secondary-button palm-action" data-palm="${escapeHTML(last.id)}">${icon("palm")}掌上阅读</button>` : ""}</div><div class="continue-progress" style="width:${fraction * 100}%"></div></article>`;
           continueSignature = signature;
         }
       }

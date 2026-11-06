@@ -8,7 +8,7 @@ import {
   sliceText,
 } from "/core.mjs";
 import { escapeHTML, icon } from "/ui/shared.mjs";
-import { createLibraryView } from "/ui/library.mjs";
+import { createLibraryView, filterBooks, resumableBook } from "/ui/library.mjs";
 import { createFolders, inFolder } from "/ui/folders.mjs";
 import { createBookSource } from "/ui/book-source.mjs";
 import { createBookSourceSettings } from "/ui/book-source-settings.mjs";
@@ -380,10 +380,11 @@ function progressFor(book) {
 function renderLibrary() {
   folderView.render(folders, books);
   const visibleBooks = inFolder(books, folders, folderView.selected);
-  const last =
-    books.find((book) => book.id === current?.id) ||
-    books.find((book) => positions[book.id]) ||
-    books[0];
+  const last = resumableBook(
+    filterBooks(visibleBooks, shelfFilter, $("library-search").value),
+    positions,
+    current?.id,
+  );
   libraryView.render({
     books: visibleBooks,
     filter: shelfFilter,
@@ -3375,14 +3376,14 @@ $("removed-books-list").onclick = async (event) => {
     button.disabled = false;
   }
 };
-async function saveBookOptions(forCloud = false) {
+async function saveBookOptions() {
   if (bookSaving || !editingBook) return false;
   const source = editingBook;
   const patch = {
     title: $("book-name").value.trim() || source.title,
     shelf: $("book-shelf").value,
   };
-  if (!forCloud) patch.parseEnabled = $("book-parse").checked;
+  patch.parseEnabled = $("book-parse").checked;
   if ($("book-offset")?.value !== " " && $("book-offset")?.value)
     patch.pageOffset = Number($("book-offset").value);
   bookSaving = true;
@@ -3793,7 +3794,7 @@ $("import-submit").onclick = submitImport;
 $("book-save").onclick = () => saveBookOptions();
 $("book-cloud").onclick = async () => {
   const id = editingBook.id;
-  if (await saveBookOptions(true)) documentParsing.open(id);
+  if (await saveBookOptions()) documentParsing.open(id);
 };
 $("reader-process").onclick = () => {
   if (current?.type === "pdf") documentParsing.open(current.id);

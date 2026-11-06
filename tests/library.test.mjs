@@ -4,6 +4,7 @@ import {
   reconcileCards,
   cover,
   nextVisibleCard,
+  resumableBook,
 } from "../ui/library.mjs";
 
 const books = [
@@ -35,6 +36,13 @@ assert.deepEqual(
 assert.equal(filterBooks(books, "小说", "PDF").length, 0);
 assert.equal(filterBooks(books, "all", "unknown").length, 0);
 assert.equal(filterBooks([], "all").length, 0);
+assert.equal(resumableBook(books, {}, "a"), undefined);
+assert.equal(resumableBook(books, { a: { index: 0 } }, "a"), undefined);
+const places = { a: { index: 1, progress: 0, updatedAt: 1 }, b: { index: 2, updatedAt: 2 } };
+assert.equal(resumableBook(books, places, "a").id, "a");
+assert.equal(resumableBook(books, places).id, "b");
+assert.equal(resumableBook(filterBooks(books, "学习"), places, "a").id, "b");
+assert.equal(resumableBook(filterBooks(books, "小说"), { b: places.b }, "b"), undefined);
 assert.ok(
   cover({ ...books[0], title: '<img src=x onerror="bad">' }).includes(
     "&lt;img",

@@ -3,6 +3,7 @@
 import atexit
 import hashlib
 import json
+import math
 import os
 import queue
 import subprocess
@@ -232,6 +233,12 @@ def acquire(ref, destination):
     detail = CLIENT.call("get_book", {"ref": bounded(ref, 1024)})
     if "." + str(detail.get("format", "")).lower().lstrip(".") not in SUPPORTED:
         raise ValueError("页间暂不支持这个版本的格式，请选择其他版本。")
+    try:
+        size = float(detail.get("size_mb"))
+    except (TypeError, ValueError):
+        size = 0
+    if math.isfinite(size) and size > 200:
+        raise ValueError("这个版本超过 200 MB，请选择较小的版本。")
     destination.mkdir(parents=True, exist_ok=False)
     response = CLIENT.call("download", {"ref":bounded(ref, 1024), "output_dir":str(destination)})
     raw = Path(response.get("path", ""))

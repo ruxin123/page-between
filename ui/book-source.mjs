@@ -110,8 +110,9 @@ export function createBookSource({ api, post, refresh }) {
       if (selected !== row || version !== revision || page.hidden || $("[data-detail-page]").hidden) return;
       const format = (detail.format || row.format || "").toLowerCase();
       const book = {...row, ...detail};
-      const canImport = (await supported).has(format);
-      $("[data-detail]").innerHTML = `<div class="source-detail-hero"><div class="source-cover source-cover-large" aria-hidden="true"><span>${esc(book.title || "未命名")}</span><small>${esc(format)}</small></div><div class="source-detail-title"><h1 tabindex="-1">${esc(book.title || "未命名")}</h1>${book.author ? `<p class="source-author">${esc(book.author)}</p>` : ""}<div class="source-acquire"><button data-download class="primary-button" ${canImport ? "" : "disabled"}>${canImport ? icon("import") + "下载导入" : "暂不支持此格式"}</button><label ${canImport ? "" : "hidden"}><input type="checkbox" data-parse ${["pdf", "txt", "djvu"].includes(format) ? "checked" : ""}>文档解析</label></div></div></div><div class="source-detail-body">${metadataHTML(book)}</div>`;
+      const tooLarge = Number(book.size_mb) > 200;
+      const canImport = (await supported).has(format) && !tooLarge;
+      $("[data-detail]").innerHTML = `<div class="source-detail-hero"><div class="source-cover source-cover-large" aria-hidden="true"><span>${esc(book.title || "未命名")}</span><small>${esc(format)}</small></div><div class="source-detail-title"><h1 tabindex="-1">${esc(book.title || "未命名")}</h1>${book.author ? `<p class="source-author">${esc(book.author)}</p>` : ""}<div class="source-acquire"><button data-download class="primary-button" ${canImport ? "" : "disabled"}>${canImport ? icon("import") + "下载导入" : tooLarge ? "超过 200 MB" : "暂不支持此格式"}</button><label ${canImport ? "" : "hidden"}><input type="checkbox" data-parse ${["pdf", "txt", "djvu"].includes(format) ? "checked" : ""}>文档解析</label></div></div></div><div class="source-detail-body">${metadataHTML(book)}</div>`;
       $("[data-download]").onclick = () => download(row);
       $("[data-detail] h1").focus({preventScroll:true});
     } catch (error) {

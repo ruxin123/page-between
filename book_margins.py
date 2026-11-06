@@ -60,7 +60,8 @@ def change(book, payload):
             source = ai_tutor.source_for(book, payload.get("source"))
             # Nearby context is for answering questions, not part of a saved excerpt.
             source = {key: source[key] for key in ("quote", "position", "citation", "image") if key in source}
-            source["kind"] = "table" if payload["source"].get("kind") == "table" else "text"
+            kind = payload["source"].get("kind")
+            source["kind"] = kind if isinstance(kind, str) and kind in {"text", "table", "equation", "image"} else "text"
             item = {"id": ident, "source": source, "createdAt": time.time(), "note": ""}
             related = payload.get("related")
             if related:

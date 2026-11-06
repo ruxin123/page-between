@@ -63,8 +63,12 @@ export function createMargins({ api, post, toast, getBookmarks, openSource }) {
       $("[data-detail]").hidden = false;
       $("[data-list]").hidden = true;
       $(".margins-tools").hidden = true;
-      $("[data-detail]").innerHTML = `<div class="margin-detail-actions"><button class="secondary-button" data-record-back>返回列表</button><button class="secondary-button" data-source>返回原文</button><button class="secondary-button" data-pin ${source(full).quote ? "" : "disabled"}>固定引用</button>${type === "excerpts" ? '<button class="secondary-button" data-remove>删除</button>' : ''}</div><p class="margin-citation">${esc(source(full).citation)}</p><div class="ai-markdown">${html || `<p>${esc(full.label)}</p>`}${source(full).image ? `<img src="${esc(source(full).image)}" alt="原文图像">` : ""}</div>${type === "excerpts" ? `<label class="margin-note">笔记<textarea maxlength="2000" rows="3">${esc(full.note || "")}</textarea></label><button class="secondary-button" data-save-note>保存笔记</button>` : type === "bookmarks" ? "" : `<button class="secondary-button" data-keep>保存到页边</button>`}`;
+      $("[data-detail]").innerHTML = `<div class="margin-detail-actions"><button class="secondary-button" data-record-back>返回列表</button><button class="secondary-button" data-source>返回原文</button><button class="secondary-button" data-copy-source ${source(full).kind === "image" ? "hidden" : ""}>复制原文</button><button class="secondary-button" data-pin ${source(full).quote ? "" : "disabled"}>固定引用</button>${type === "excerpts" ? '<button class="secondary-button" data-remove>删除</button>' : ''}</div><p class="margin-citation">${esc(source(full).citation)}</p><div class="ai-markdown">${html || `<p>${esc(full.label)}</p>`}${source(full).image ? `<img src="${esc(source(full).image)}" alt="原文图像">` : ""}</div>${type === "excerpts" ? `<label class="margin-note">笔记<textarea maxlength="2000" rows="3">${esc(full.note || "")}</textarea></label><button class="secondary-button" data-save-note>保存笔记</button>` : type === "bookmarks" ? "" : `<button class="secondary-button" data-keep>保存到页边</button>`}`;
       $("[data-record-back]").onclick = load;
+      $("[data-copy-source]").onclick = async () => {
+        try { await navigator.clipboard.writeText(source(full).quote); $("[data-status]").textContent = "已复制原文。"; }
+        catch { $("[data-status]").textContent = "暂时无法复制，请返回原文重试。"; }
+      };
       $("[data-source]").onclick = () => { dialog.close(); openSource(book.id, source(full).position); };
       $("[data-pin]").onclick = () => { dialog.close(); pin({ book: book.id, source: source(full) }); };
       if (type === "excerpts") {

@@ -3615,7 +3615,7 @@ let appearanceSample;
     return;
   }
   if (route !== "reader" || editing) return;
-  if (event.target.closest?.(".question-panel,.translation-panel")) return;
+  if (event.target.closest?.(".question-panel,.translation-panel,.margins-dialog,.pinned-reference")) return;
   if (
     (event.metaKey || event.ctrlKey) &&
     !event.shiftKey &&
@@ -3697,16 +3697,16 @@ let appearanceSample;
 }
 function onCopy(event) {
   const selection = event.target.ownerDocument?.defaultView?.getSelection();
-  const inTutor =
-    event.target.closest?.(".question-panel,.translation-panel") ||
+  const inPanel =
+    event.target.closest?.(".question-panel,.translation-panel,.margins-dialog,.pinned-reference") ||
     selection?.anchorNode?.parentElement?.closest(
-      ".question-panel,.translation-panel",
+      ".question-panel,.translation-panel,.margins-dialog,.pinned-reference",
     );
-  if (!inTutor && selection?.rangeCount && !selection.isCollapsed)
+  if (!inPanel && selection?.rangeCount && !selection.isCollapsed)
     captureSelection(event.target.ownerDocument || document);
   if (
     currentSelection &&
-    !inTutor &&
+    !inPanel &&
     !event.target.closest?.("input,textarea")
   ) {
     event.clipboardData.setData("text/plain", currentSelection.text);

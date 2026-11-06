@@ -58,6 +58,9 @@ def change(book, payload):
             if len(data["items"]) >= 10000:
                 raise ValueError("本书页边记录已达上限，请先导出整理。")
             source = ai_tutor.source_for(book, payload.get("source"))
+            original = payload["source"].get("quote", "")
+            if original.strip():
+                source["quote"] = original
             # Nearby context is for answering questions, not part of a saved excerpt.
             source = {key: source[key] for key in ("quote", "position", "citation", "image") if key in source}
             kind = payload["source"].get("kind")

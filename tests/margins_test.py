@@ -40,6 +40,12 @@ class Margins(unittest.TestCase):
         margins.validate(self.book,self.root/"books")
         for payload in [{**request,"id":"../outside"},{**request,"id":"b"*32,"source":{**self.context,"position":{"index":5}}},{"id":item["id"],"operation":"note","note":"x"*2001}]:
             with self.assertRaises(ValueError): margins.change(self.book,payload)
+    def test_saving_a_table_preserves_leading_tabs_and_trailing_newlines(self):
+        raw = "\tFirst\tSecond\nrow\t1\t2\n\n"
+        item = margins.change(self.book, {"id": "e" * 32, "operation": "save", "source": {**self.context, "quote": raw, "kind": "table"}})
+        self.assertEqual(item["source"]["quote"], raw)
+        self.assertEqual(item["source"]["kind"], "table")
+
     def test_failed_large_export_removes_partial_file_and_preserves_saved_source(self):
         import random
         with Image.frombytes("RGB", (32, 32), random.Random(1).randbytes(32 * 32 * 3)) as image:

@@ -27,8 +27,8 @@ struct ExcerptsScreen: View {
                     Button { selected = item } label: {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(item.quote.isEmpty ? "原文图像" : item.quote).lineLimit(3).foregroundStyle(.primary)
-                            Text(item.chapter).font(.caption).foregroundStyle(.secondary)
-                            if !item.note.isEmpty { Text(item.note).font(.callout).foregroundStyle(.secondary).lineLimit(2) }
+                            Text(item.chapter).font(.caption).foregroundStyle(Color.secondary)
+                            if !item.note.isEmpty { Text(item.note).font(.callout).foregroundStyle(.primary).lineLimit(2) }
                         }.padding(.vertical, 8)
                     }.accessibilityIdentifier("excerpt.row." + item.id.uuidString).swipeActions {
                         Button("删除", role: .destructive) { Task { await remove(item) } }
@@ -127,29 +127,35 @@ private struct ExcerptDetail: View {
     let openSource: () -> Void
     @State private var images: [MarkdownSourceImage] = []
     @State private var error: String?
+    @State private var loading = true
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(item.chapter).font(.caption).foregroundStyle(.secondary)
-                    MarkdownView(text: item.markdown ?? item.quote, images: images)
-                    ForEach(Array(item.objects.enumerated()), id: \.offset) { index, object in
-                        if object.type == "image", index < images.count, let image = UIImage(data: images[index].data) { Image(uiImage: image).resizable().scaledToFit() }
+                    if loading { ProgressView() }
+                    else {
+                        Text(item.chapter).font(.caption).foregroundStyle(.secondary)
+                        let source = item.markdown ?? item.quote
+                        if !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { MarkdownView(text: source, images: images) }
+                        ForEach(Array(item.objects.enumerated()), id: \.offset) { index, object in
+                            if object.type == "image", index < images.count, let image = UIImage(data: images[index].data) { Image(uiImage: image).resizable().scaledToFit() }
+                        }
+                        if let answer = item.answer, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { MarkdownView(text: answer, images: images) }
+                        TextField("笔记", text: $item.note, axis: .vertical).lineLimit(3...8).accessibilityIdentifier("excerpt.note").textFieldStyle(.roundedBorder)
+                        HStack {
+                            Button("保存笔记") { Task { if await save(item) { dismiss() } else { error = "笔记未保存，请重试。" } } }.buttonStyle(.borderedProminent)
+                            Button("返回原文") { dismiss(); openSource() }
+                            Spacer()
+                            Button("删除", role: .destructive) { Task { await remove(); dismiss() } }
+                        }
+                        if let error { Text(error).foregroundStyle(.secondary) }
                     }
-                    if let answer = item.answer { MarkdownView(text: answer, images: images) }
-                    TextField("笔记", text: $item.note, axis: .vertical).lineLimit(3...8).accessibilityIdentifier("excerpt.note").textFieldStyle(.roundedBorder)
-                    HStack {
-                        Button("保存笔记") { Task { if await save(item) { dismiss() } else { error = "笔记未保存，请重试。" } } }.buttonStyle(.borderedProminent)
-                        Button("返回原文") { dismiss(); openSource() }
-                        Spacer()
-                        Button("删除", role: .destructive) { Task { await remove(); dismiss() } }
-                    }
-                    if let error { Text(error).foregroundStyle(.secondary) }
                 }.padding(20)
             }
             .navigationTitle("选段").navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("完成") { dismiss() } }
             .task {
+                defer { loading = false }
                 do {
                     let original = try await repository.file(book, name: book.originalName)
                     images = try item.objects.map { MarkdownSourceImage(raw: PDFTextAlignment.standaloneFormula($0.text) ?? $0.text, data: try PDFSourceContent.image($0, original: original)) }

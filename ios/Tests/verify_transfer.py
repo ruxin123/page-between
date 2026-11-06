@@ -16,8 +16,11 @@ parser.add_argument('--zipfoundation', type=Path)
 args = parser.parse_args()
 scratch = Path.home() / 'Library/Caches/Page Between/iOS/TransferTests'
 sources = scratch/'Sources/Fixture'; sources.mkdir(parents=True, exist_ok=True)
-for relative in ['ios/PageBetween/Core/Library.swift','ios/PageBetween/Core/Transfer.swift','ios/PageBetween/App/TransferArchive.swift','ios/Tests/TransferFixture.swift']:
-    source = root/relative; link=sources/source.name
+files = [*(root / 'ios/PageBetween/Core').glob('*.swift'), root / 'ios/PageBetween/App/TransferArchive.swift', root / 'ios/Tests/TransferFixture.swift']
+for source in files:
+    if source.name.startswith('._'):
+        continue
+    link=sources/source.name
     if not link.exists(): link.symlink_to(source)
 dependency = args.zipfoundation or scratch.parent/'CompileCheck/.build/checkouts/ZIPFoundation'
 (scratch/'Package.swift').write_text('''// swift-tools-version:5.10

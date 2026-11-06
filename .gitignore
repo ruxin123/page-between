@@ -117,3 +117,10 @@ __pycache__/
 ._*
 !/library_transfer.py
 !/tests/transfer_test.py
+
+!/book_margins.py
+!/tests/margins_test.py
+!/tests/reading-preferences.test.mjs
+
+!/local_backup.py
+!/tests/local_backup_test.py

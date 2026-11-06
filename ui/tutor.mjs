@@ -1,3 +1,4 @@
+import { saveMargin } from "./saved-excerpts.mjs";
 import { escapeHTML } from "./shared.mjs";
 import { prepareQuestionImage } from "./book-images.mjs";
 
@@ -246,6 +247,9 @@ export function createTutor({
     book = context.book;
     $("question-panel").dataset.book = book;
     source = context.source;
+    $("question-tasks").hidden = !context.study;
+    $("question-tasks").innerHTML = ["解释这一步", "展开推导", "给一个提示"].map(text => `<button type="button">${text}</button>`).join("");
+    for (const button of $("question-tasks").querySelectorAll("button")) button.onclick = () => { $("question-input").value = button.textContent; $("question-input").focus(); };
     active = null;
     $("ai-send-image").checked = source.kind === "image";
     $("question-panel").hidden = false;
@@ -466,6 +470,21 @@ export function createTutor({
     $("question-panel").hidden = true;
     clearTimeout(pollTimer);
     closeWindow?.();
+  };
+  const keep = document.createElement("button");
+  keep.className = "secondary-button";
+  keep.type = "button";
+  keep.textContent = "保存到页边";
+  $("copy-question").parentElement.append(keep);
+  keep.onclick = async () => {
+    const original = active?.source || source;
+    if (!original || !book) return;
+    keep.disabled = true;
+    try {
+      await saveMargin(post, { book, source: original }, active ? { type: "ai", id: active.id } : undefined);
+      toast("已保存到页边。");
+    } catch (error) { toast(error.message, { kind: "error" }); }
+    finally { keep.disabled = false; }
   };
   $("copy-question").onclick = async () => {
     const original = active?.source || source;

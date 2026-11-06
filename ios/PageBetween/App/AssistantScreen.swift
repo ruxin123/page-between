@@ -60,6 +60,17 @@ struct AssistantScreen: View {
             .navigationTitle(selection.translate ? "翻译" : "书内答疑").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("服务设置", systemImage: "gearshape") { settings = true } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("保存到页边", systemImage: "text.badge.plus") {
+                        Task {
+                            do {
+                                var item = SavedExcerpt(quote: selection.quote, markdown: selection.markdown, locator: selection.locator, chapter: title, objects: selection.objects)
+                                item.answer = selection.translate ? answer : turns.filter { $0.role == "assistant" && $0.status != "generating" }.map(\.content).joined(separator: "\n\n")
+                                try await repository.saveExcerpt(selection.book, excerpt: item)
+                            } catch { self.error = error.localizedDescription }
+                        }
+                    }.disabled(busy)
+                }
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { request?.cancel(); dismiss() } }
             }
             .sheet(isPresented: $settings, onDismiss: { services.reload() }) { MobileSettingsScreen() }

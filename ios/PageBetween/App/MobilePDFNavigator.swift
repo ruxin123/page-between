@@ -7,13 +7,14 @@ import Combine
 private final class ReadingPDFView: PDFView {
     var copySource: (() -> Void)?
     var askSource: (() -> Void)?
+    var saveSource: (() -> Void)?
     var translateSource: (() -> Void)?
     var resolveDestination: ((PDFDestination) -> PDFDestination)?
     override func copy(_ sender: Any?) { copySource?() }
     override func go(to destination: PDFDestination) { super.go(to: resolveDestination?(destination) ?? destination) }
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
-        let actions = [UIAction(title: "提问") { [weak self] _ in self?.askSource?() }, UIAction(title: "翻译") { [weak self] _ in self?.translateSource?() }]
+        let actions = [UIAction(title: "保存到页边") { [weak self] _ in self?.saveSource?() }, UIAction(title: "提问") { [weak self] _ in self?.askSource?() }, UIAction(title: "翻译") { [weak self] _ in self?.translateSource?() }]
         builder.insertChild(UIMenu(options: .displayInline, children: actions), atStartOfMenu: .standardEdit)
     }
 }
@@ -26,6 +27,7 @@ private final class ReadingPDFView: PDFView {
     var onTap: (() -> Void)?
     var onJump: ((Locator) -> Void)?
     var onCopy: (() -> Void)?
+    var onSave: (() -> Void)?
     var onCopyImage: (() -> Void)?
     var onAsk: ((Bool) -> Void)?
     private let pdf = ReadingPDFView()
@@ -67,6 +69,7 @@ private final class ReadingPDFView: PDFView {
         pdf.backgroundColor = .secondarySystemBackground
         pdf.minScaleFactor = 0.25; pdf.maxScaleFactor = 4
         pdf.copySource = { [weak self] in self?.onCopy?() }
+        pdf.saveSource = { [weak self] in self?.onSave?() }
         pdf.askSource = { [weak self] in self?.onAsk?(false) }
         pdf.translateSource = { [weak self] in self?.onAsk?(true) }
         pdf.resolveDestination = { [weak self] in self?.destination($0) ?? $0 }
@@ -205,6 +208,7 @@ private final class ReadingPDFView: PDFView {
         actions.append(UIAction(title: "复制原图", image: UIImage(systemName: "photo")) { [weak self] _ in self?.onCopyImage?() })
         actions.append(UIAction(title: "提问", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.onAsk?(false) })
         if selectedObject.object.type != "equation", !selectedObject.object.text.isEmpty { actions.append(UIAction(title: "翻译", image: UIImage(systemName: "character.bubble")) { [weak self] _ in self?.onAsk?(true) }) }
+        actions.append(UIAction(title: "保存到页边", image: UIImage(systemName: "text.badge.plus")) { [weak self] _ in self?.onSave?() })
         return UIMenu(children: actions)
     }
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {

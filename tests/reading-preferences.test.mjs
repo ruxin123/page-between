@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { typographyPresets, selectedTypography, readingPreferences } from '../ui/reading-preferences.mjs';
+const global = { fontSize:21, lineHeight:1.95, tocOpen:true };
+const overrides = { a:{fontSize:19,tocOpen:false} };
+assert.deepEqual(readingPreferences(global,overrides,{id:'a'},true),{fontSize:19,lineHeight:1.95,tocOpen:false});
+assert.equal(readingPreferences(global,overrides,{id:'b'},true).fontSize,21);
+assert.equal(readingPreferences(global,overrides,{id:'a'},false),global);
+for(const [key,preset] of Object.entries(typographyPresets)) assert.equal(selectedTypography(preset),key);
+assert.equal(selectedTypography({...typographyPresets.compact,lineHeight:2}),undefined);
+assert.equal(global.fontSize,21);

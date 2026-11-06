@@ -22,6 +22,11 @@ export function createDataSettings({ api, post, toast }) {
           .filter((item) => item.bytes > 0)
           .map((item) => `${item.label} ${bytes(item.bytes)}`)
           .join(" · ") || "没有可清理的缓存。";
+      const transfer = await api("/api/data/transfer/preview");
+      $("transfer-preview").textContent = `${transfer.books} 本 · 约 ${bytes(transfer.bytes)}` + (transfer.skipped.length ? ` · 跳过 ${transfer.skipped.length} 本` : "") + (transfer.bytes > 1024 ** 3 ? " · 超过 1 GB" : "");
+      $("transfer-export").disabled = !transfer.canExport;
+      $("transfer-skipped").textContent = transfer.skipped.map(item => `${item.title} · ${item.reason}`).join("\n");
+      $("transfer-skipped").parentElement.hidden = !transfer.skipped.length;
       $("data-reveal").hidden = !bridge;
       $("data-restore-review").hidden = !data.pendingRestore;
       $("data-restore-summary").textContent = data.pendingRestore
@@ -35,6 +40,8 @@ export function createDataSettings({ api, post, toast }) {
       $("data-previous").hidden = !data.previousAvailable;
       $("data-restart").hidden = !data.pendingCacheClear;
       $("data-last-restore").textContent = data.lastRestore.message || "";
+      $("backup-frequency").value = data.backup?.frequency || "off";
+      $("backup-last").textContent = data.backup?.error || (data.backup?.lastSuccess ? "上次备份 " + new Date(data.backup.lastSuccess * 1000).toLocaleString() : "");
     } catch (error) {
       $("data-status").textContent = error.message;
     }
@@ -74,6 +81,17 @@ export function createDataSettings({ api, post, toast }) {
       $("data-status").textContent = `已导入 ${result.added} 本，保留 ${result.duplicates} 本已有书籍。` + result.failures.map(item => `${item.title}：${item.error}`).join("；");
     });
   };
+  $("backup-frequency").onchange = event => run("正在保存…", async () => {
+    await post("/api/data/backup/settings", { frequency: event.target.value });
+    $("data-status").textContent = "";
+  });
+  window.addEventListener("native-file-saved", async event => {
+    const name = event.detail?.path?.split("/").at(-1);
+    if (/^[0-9a-f]{32}\.pbbackup$/.test(name || "")) {
+      try { await post("/api/data/backup/saved", { id: name }); await show(); }
+      catch (error) { $("data-status").textContent = error.message; }
+    }
+  });
   $("data-backup").onclick = () =>
     run("正在生成备份…", async () => {
       const result = await post("/api/data/backup", {});

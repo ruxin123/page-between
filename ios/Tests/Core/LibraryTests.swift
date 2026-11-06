@@ -31,6 +31,45 @@ final class LibraryTests: XCTestCase {
         catch { XCTAssertTrue(error is LibraryFailure) }
     }
 
+    func testPerBookAppearanceAndExcerptsPreserveLocationAcrossRestart() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let first = folder.appendingPathComponent("First.txt")
+        let second = folder.appendingPathComponent("Second.txt")
+        try Data("Original first book".utf8).write(to: first)
+        try Data("Original second book".utf8).write(to: second)
+        let root = folder.appendingPathComponent("Library")
+        let repository = try LibraryRepository(root: root)
+        let a = try await repository.importFile(first)
+        let b = try await repository.importFile(second)
+        let appearance = ReadingAppearance(fontScale: 95, lineHeight: 1.8, pageMargins: 1, fontFamily: "Georgia", theme: "night", scroll: false)
+        try await repository.saveLocation(a.id, locator: "{\"href\":\"chapter.xhtml\"}", progress: 0.4, chapter: "Original chapter")
+        try await repository.saveAppearance(a.id, value: appearance)
+        var item = SavedExcerpt(quote: "Original $x^2$", markdown: nil, locator: "{\"href\":\"chapter.xhtml\"}", chapter: "Original chapter")
+        try await repository.saveExcerpt(a.id, excerpt: item)
+        try await repository.saveExcerpt(a.id, excerpt: item)
+        item.note = "My thought"
+        item.deletedAt = Date()
+        try await repository.saveExcerpt(a.id, excerpt: item)
+        item.deletedAt = nil
+        try await repository.saveExcerpt(a.id, excerpt: item)
+        var staleMetadata = a
+        staleMetadata.progress = 0.4
+        staleMetadata.pinned = true
+        try await repository.update(staleMetadata)
+        let reopened = try LibraryRepository(root: root)
+        let books = await reopened.books()
+        XCTAssertEqual(books.first(where: { $0.id == a.id })?.appearance, appearance)
+        XCTAssertEqual(books.first(where: { $0.id == a.id })?.progress, 0.4)
+        XCTAssertEqual(books.first(where: { $0.id == a.id })?.excerpts, [item])
+        XCTAssertNil(books.first(where: { $0.id == b.id })?.appearance)
+        XCTAssertNil(books.first(where: { $0.id == b.id })?.excerpts)
+        item.quote = String(repeating: "x", count: 12001)
+        do { try await reopened.saveExcerpt(a.id, excerpt: item); XCTFail("Oversized excerpt accepted") }
+        catch { XCTAssertTrue(error is LibraryFailure) }
+    }
+
     func testCorruptCatalogIsNotOverwritten() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

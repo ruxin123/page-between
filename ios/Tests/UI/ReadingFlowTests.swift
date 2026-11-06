@@ -26,6 +26,7 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertNotEqual(position.label, before, "A horizontal swipe must advance reading progress")
         app.buttons["reader.appearance"].tap()
         XCTAssertTrue(app.sliders["行距"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["紧凑"].exists); app.buttons["紧凑"].tap()
         app.sliders["行距"].adjust(toNormalizedSliderPosition: 0.4)
         capture(app, "reading-bottom-sheet")
         app.buttons["完成"].tap()
@@ -138,6 +139,16 @@ final class ReadingFlowTests: XCTestCase {
         app.buttons["提问最近选段"].tap()
         XCTAssertTrue(app.images["原书图像"].waitForExistence(timeout: 15), app.debugDescription)
         capture(app, "complete-image")
+        app.buttons["保存到页边"].tap()
+        app.buttons["完成"].tap()
+        app.buttons["reader.more"].tap(); app.buttons["页边"].tap()
+        let excerpt = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "excerpt.row.")).firstMatch
+        XCTAssertTrue(excerpt.waitForExistence(timeout: 10), app.debugDescription)
+        excerpt.tap()
+        let note = app.descendants(matching: .any).matching(identifier: "excerpt.note").firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 10)); note.tap(); note.typeText("Original thought")
+        app.buttons["保存笔记"].tap()
+        capture(app, "saved-image-excerpt")
     }
     @MainActor func testTransferImportProgressBookmarksAndExport() throws {
         let app = XCUIApplication()

@@ -1,3 +1,4 @@
+import { saveMargin } from "./saved-excerpts.mjs";
 import { escapeHTML, icon } from "./shared.mjs";
 import { enablePanelDragging } from "./tutor.mjs";
 
@@ -91,7 +92,7 @@ export function createTranslation({
     $("translation-retry").disabled = unavailable || !!active;
     if (unavailable) {
       message("AI 尚未配置。");
-      $("translation-settings").hidden = false;
+      $("translation-settings").hidden = $("translation-provider").value !== "ai";
     }
   }
   function setEditing(value) {
@@ -173,7 +174,7 @@ export function createTranslation({
       $("translation-retry").disabled = false;
       panel.removeAttribute("aria-busy");
       message(error.message || "翻译没有完成，请重试。");
-      $("translation-settings").hidden = false;
+      $("translation-settings").hidden = $("translation-provider").value !== "ai";
     };
     try {
       const job = await post("/api/translation/start", {
@@ -261,6 +262,7 @@ export function createTranslation({
     showContent();
     showSource();
     $("translation-query").value = context.source?.quote || "";
+    panel.classList.toggle("word-translation", /^[A-Za-z][A-Za-z\'-]{0,48}$/.test(context.source?.quote?.trim() || ""));
     setEditing(false);
     renderOriginal();
     $("translation-result").hidden = true;
@@ -300,7 +302,7 @@ export function createTranslation({
         ? items
             .map(
               (item, index) =>
-                `<button class="translation-history-item" data-translation="${index}"><span>${item.favorite ? "★ " : ""}${escapeHTML(item.text)}</span><small>${escapeHTML(item.translation)}</small></button>`,
+                `<button class="translation-history-item" data-translation="${index}"><span>${item.favorite ? "★ " : ""}${escapeHTML(item.text)}</span><small>${escapeHTML(item.translation)}</small>${item.source?.citation ? `<small>${escapeHTML(item.source.citation)}</small>` : ""}</button>`,
             )
             .join("")
         : '<p class="setting-note">尚未收藏译文</p>';
@@ -401,6 +403,20 @@ export function createTranslation({
   };
   $("translation-copy-original").onclick = () =>
     copy($("translation-query").value);
+  const keep = document.createElement("button");
+  keep.type = "button";
+  keep.className = "secondary-button";
+  keep.textContent = "保存到页边";
+  $("translation-copy").parentElement.append(keep);
+  keep.onclick = async () => {
+    if (!result || !context?.source) return;
+    keep.disabled = true;
+    try {
+      await saveMargin(post, { book: context.book, source: { ...context.source, quote: result.text } }, { type: "translation", id: result.id });
+      toast("已保存到页边。");
+    } catch (error) { toast(error.message, { kind: "error" }); }
+    finally { keep.disabled = false; }
+  };
   $("translation-copy").onclick = () => {
     if (result) copy(result.translation);
   };

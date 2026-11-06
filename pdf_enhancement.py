@@ -1,6 +1,7 @@
 """One OCR/TOC pipeline for every PDF; no textbook-specific page tables."""
 
 import collections
+import copy
 import base64
 import json
 import re
@@ -17,7 +18,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
-from book_import import ROOT, path_for
+from book_import import ROOT, path_for, flatten_toc
 
 from paths import CACHE as CACHE_ROOT, RUNTIME
 from storage import save
@@ -718,6 +719,43 @@ def tree_from_entries(entries):
     return root
 
 
+def automatic_page_offset(book, end, progress=lambda phase: None):
+    votes = []
+    for page in range(end + 1, min(book["pages"], end + 11) + 1):
+        progress(f"核对印刷页码 · PDF 第 {page} 页")
+        number = printed_number(recognize(book, page, "layout")["lines"])
+        if number is not None:
+            votes.append(page - number)
+        if votes and collections.Counter(votes).most_common(1)[0][1] >= 3:
+            break
+    counter = collections.Counter(votes)
+    offset, count = counter.most_common(1)[0] if counter else (None, 0)
+    if count < 2:
+        offset = None
+    return offset, count / len(votes) if votes else 0
+
+
+def page_offset_patch(book, value):
+    if value is not None and (type(value) is not int or abs(value) > book.get("pages", 0)):
+        raise ValueError("页码偏移无效。")
+    patch = {"pageOffsetMode": "auto" if value is None else "manual"}
+    if value is None:
+        if "automaticPageOffset" in book:
+            value = book["automaticPageOffset"]
+        elif book.get("tocSource") == "ocr-contents" and book.get("tocPages"):
+            # Old books have no baseline. Reuse cached OCR to recover the printed-page mapping.
+            value, confidence = automatic_page_offset(book, book["tocPages"][-1])
+            patch.update(automaticPageOffset=value, mappingConfidence=confidence)
+    patch["pageOffset"] = value
+    toc = copy.deepcopy(book.get("toc", []))
+    for entry in flatten_toc(toc):
+        if type(entry.get("printed")) is int:
+            index = entry["printed"] + value if value is not None else None
+            entry["index"] = index if index is not None and 1 <= index <= book["pages"] else None
+    patch["toc"] = toc
+    return patch
+
+
 def build_contents(book, progress=lambda phase: None):
     if book.get("tocSource") == "pdf-outline":
         return {"toc": book["toc"], "tocSource": "pdf-outline", "processing": "ready"}
@@ -755,18 +793,8 @@ def build_contents(book, progress=lambda phase: None):
         ):
             unique.append(entry)
     entries = unique
-    votes = []
-    for page in range(end + 1, min(book["pages"], end + 11) + 1):
-        progress(f"核对印刷页码 · PDF 第 {page} 页")
-        number = printed_number(recognize(book, page, "layout")["lines"])
-        if number is not None:
-            votes.append(page - number)
-        if votes and collections.Counter(votes).most_common(1)[0][1] >= 3:
-            break
-    counter = collections.Counter(votes)
-    offset, count = counter.most_common(1)[0] if counter else (None, 0)
-    if count < 2:
-        offset = None
+    automatic, confidence = automatic_page_offset(book, end, progress)
+    offset = book.get("pageOffset") if book.get("pageOffsetMode") == "manual" else automatic
     for entry in entries:
         entry["index"] = (
             entry["printed"] + offset
@@ -777,9 +805,11 @@ def build_contents(book, progress=lambda phase: None):
         "toc": tree_from_entries(entries),
         "tocSource": "ocr-contents",
         "pageOffset": offset,
+        "automaticPageOffset": automatic,
+        "pageOffsetMode": book.get("pageOffsetMode", "auto"),
         "tocPages": [found, end],
         "processing": "ready",
-        "mappingConfidence": count / len(votes) if votes else 0,
+        "mappingConfidence": confidence,
         "processingNote": "目录已生成。"
         if offset is not None
         else "目录已识别，请校正书页与文件页序的对应关系。",

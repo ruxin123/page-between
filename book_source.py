@@ -61,6 +61,14 @@ def configuration(*, read_password=True):
 
 
 def configure(payload):
+    if payload.get("removePassword") is True:
+        with service_settings.LOCK:
+            try:
+                save(SETTINGS, {})
+            except OSError:
+                raise ValueError("账号未移除，请检查本机存储。") from None
+        CLIENT.close()
+        return settings()
     email, password = payload.get("email", ""), payload.get("password", "")
     if not isinstance(email, str) or not isinstance(password, str) or len(email) > 320 or len(password) > 4096 or any(ord(c) < 32 for c in email + password):
         raise ValueError("账号格式无效。")

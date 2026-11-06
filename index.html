@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.56" />
+    <link rel="stylesheet" href="/layout.css?v=2.57" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -32,6 +32,7 @@
             ><i data-icon="search"></i>找书</a
           >
         </nav>
+        <section id="folder-navigation" aria-label="书籍文件夹"></section>
         <div class="rail-foot">
           <button
             id="jobs-open"
@@ -58,7 +59,6 @@
             <div class="library-heading-actions"><button class="primary-button" id="import-open"><i data-icon="plus"></i>导入书籍</button><details class="library-management"><summary aria-label="书库管理">⋯</summary><button id="removed-books-open" class="secondary-button">最近删除</button></details></div>
           </header>
           <div id="continue-reading"></div>
-          <nav id="folder-navigation" aria-label="书籍文件夹"></nav>
           <div class="library-tools">
             <div class="filter-chips" id="shelf-filters">
               <button data-filter="all" aria-pressed="true">所有类型</button
@@ -96,9 +96,14 @@
               <h1>设置</h1>
             </div>
           </header>
-          <div class="settings-tabs" role="tablist" aria-label="设置分类">
+          <nav class="settings-groups" aria-label="设置分组">
+            <button data-settings-group="reading" aria-current="true">阅读</button>
+            <button data-settings-group="services">服务与隐私</button>
+            <button data-settings-group="data">书库与数据</button>
+          </nav>
+          <div class="settings-tabs" id="settings-service-tabs" role="tablist" aria-label="服务配置" hidden>
             <button
-              id="tab-reading"
+              id="tab-reading" hidden
               role="tab"
               aria-controls="settings-reading"
               aria-selected="true"
@@ -147,7 +152,7 @@
               书源账号
             </button>
             <button
-              id="tab-data"
+              id="tab-data" hidden
               role="tab"
               aria-controls="settings-data"
               aria-selected="false"
@@ -186,7 +191,7 @@
                 </dl>
               </details>
             </div>
-            <article class="type-sample">
+            <article class="type-sample"><select id="sample-source" aria-label="排版预览内容"><option value="sample">示例文字</option><option id="sample-current" value="current" disabled>当前书籍</option></select>
               <h2>留一点时间给书</h2>
               <p>
                 书页在眼前展开，窗外的声音渐渐远了。沿着文字往前走，偶尔停下来，想一想刚刚读到的那句话。
@@ -195,7 +200,7 @@
                 A quiet page, a little time. Some books invite us to wander;
                 others help us see a familiar idea in a new light.
               </p>
-              <span class="sample-leaf">❦</span>
+
             </article>
           </div>
           <section
@@ -239,9 +244,12 @@
             <fieldset id="data-actions">
               <h2>设备迁移</h2>
               <p class="setting-note">迁移书籍、进度与书签；已有同书保留本机记录。文本排版不同，恢复位置可能略有偏移。</p>
-              <div class="service-actions"><button id="transfer-export" class="secondary-button">导出迁移包</button><button id="transfer-import" class="secondary-button">导入迁移包…</button></div>
+              <p id="transfer-preview" class="setting-note" role="status"></p><details hidden><summary>跳过的书籍</summary><p id="transfer-skipped" class="setting-note"></p></details><div class="service-actions"><button id="transfer-export" class="secondary-button">导出迁移包</button><button id="transfer-import" class="secondary-button">导入迁移包…</button></div>
               <input type="file" id="transfer-file" accept=".pbtransfer" hidden />
               <h2>备份与恢复</h2>
+              <p class="setting-note">完整备份不含服务凭据。</p>
+              <label class="setting-row">本地自动备份<select id="backup-frequency"><option value="off">关闭</option><option value="daily">每天</option><option value="weekly">每周</option></select></label>
+              <p class="setting-note">自动备份保留最近 3 份。</p><p id="backup-last" class="setting-note" role="status"></p>
               <div class="service-actions">
                 <button id="data-backup" class="primary-button">
                   保存完整备份</button
@@ -313,8 +321,9 @@
           </div>
         </div>
         <div class="reader-actions">
+          <div id="reader-pinned-tools" class="reader-pinned-tools"></div>
           <details id="reading-records" class="reading-records">
-            <summary class="icon-button" aria-label="阅读记录" title="阅读记录"><i data-icon="history"></i></summary>
+            <summary class="icon-button" aria-label="页边与阅读记录" title="页边"><i data-icon="history"></i></summary>
             <div class="reading-records-menu">
               <button id="records-bookmarks"><i data-icon="bookmark"></i>书签</button>
           <button
@@ -405,7 +414,7 @@
             aria-expanded="false"
           >
             Aa</button
-          ><button class="icon-button" id="book-options" aria-label="书籍设置">
+          ><details id="reader-more" class="reader-more"><summary class="icon-button" aria-label="更多阅读工具">⋯</summary><div id="reader-more-tools" class="reader-more-tools"><button id="timer-start" class="secondary-button">专注计时</button><button id="pin-current-page" class="secondary-button" hidden>固定此页</button></div></details><button class="icon-button" id="book-options" aria-label="书籍设置">
             <i data-icon="more"></i>
           </button>
         </div>
@@ -441,7 +450,7 @@
           <div id="text-host" class="text-host" hidden>
             <article id="text-paper" class="text-paper" hidden>
               <h1 id="chapter-title"></h1>
-              <div class="chapter-rule">❦</div>
+              <div class="chapter-rule" aria-hidden="true"></div>
               <div id="chapter-body" class="chapter-body"></div>
               <button id="next-chapter" class="chapter-next">
                 继续下一章<i data-icon="forward"></i>
@@ -467,12 +476,12 @@
       </div>
       <footer class="reader-footer">
         <button
-          id="timer-button"
+          id="timer-button" hidden
           class="timer-button"
           aria-label="开始专注计时"
         >
           <i data-icon="timer"></i
-          ><span id="timer-label">专注一会儿</span></button
+          ><span id="timer-label">专注计时</span></button
         ><span id="position-label"></span>
         <div id="reader-zoom" class="reader-zoom"></div>
         <div class="page-controls">
@@ -582,9 +591,12 @@
         <i data-icon="translate"></i>翻译
       </button>
       <button id="search-selection"><i data-icon="search"></i>查书内</button>
-      <button id="chapter-start" hidden>
-        <i data-icon="toc"></i>从这里分章
-      </button>
+      <button id="save-selection" aria-label="保存到页边" type="button">保存</button>
+      <button id="selection-more-toggle" popovertarget="selection-more-menu" aria-label="更多选段操作">⋯</button>
+    </div>
+    <div id="selection-more-menu" popover>
+      <button id="pin-selection" type="button">固定引用</button>
+      <button id="chapter-start" hidden><i data-icon="toc"></i>从这里分章</button>
     </div>
     <aside
       id="translation-panel"
@@ -834,6 +846,7 @@
           <p id="ai-progress" class="setting-note" role="status" hidden></p>
         </div>
         <form id="ai-question-form">
+          <div id="question-tasks" class="question-tasks" hidden></div>
           <label id="ai-image-option" class="knowledge-scope" hidden
             ><input id="ai-send-image" type="checkbox" />附带原图</label
           >
@@ -891,7 +904,7 @@
       </div>
       <div class="dialog-footer">
         <span id="import-count"></span
-        ><button class="primary-button" id="import-submit" disabled>
+        ><button class="secondary-button" id="import-library" hidden>回到书库</button><button class="primary-button" id="import-submit" disabled>
           导入书籍
         </button>
       </div>
@@ -1207,6 +1220,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.56"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.57"></script>
   </body>
 </html>

@@ -551,6 +551,24 @@ def verify(app, epubcheck=None, samples=()):
             request("/api/translation/history?book=" + book["id"], authenticated=False, expected_status=401)
             bad = {**translation_payload, "targetLanguage": "unknown"}
             request("/api/translation/start", json.dumps(bad).encode(), content_type="application/json", expected_status=400)
+            note_payload = {"book": book["id"], "id": "d" * 32, "operation": "save", "source": translation_payload["source"], "related": {"type": "translation", "id": translation_result["id"]}}
+            note = json.loads(request("/api/margins", json.dumps(note_payload).encode(), content_type="application/json")[2])["item"]
+            request("/api/margins", json.dumps({"book": book["id"], "id": note["id"], "operation": "note", "note": "An original thought"}).encode(), content_type="application/json")
+            request("/api/state", json.dumps({"bookPrefs": {book["id"]: {"fontSize": 19, "tocOpen": False}}}).encode(), content_type="application/json")
+            detail = json.loads(request("/api/margins/item?book=" + book["id"] + "&id=" + note["id"])[2])
+            assert "<math" in detail["html"] and detail["item"]["translation"] == translation_result["translation"]
+            for format in ("json", "markdown"):
+                result = json.loads(request("/api/margins/export", json.dumps({"book": book["id"], "format": format}).encode(), content_type="application/json")[2])
+                status, headers, content = request(result["download"])
+                if format == "json":
+                    assert headers.get_content_type() == "application/json"
+                    exported = json.loads(content)
+                    assert exported["excerpts"][0]["source"]["quote"] == note["source"]["quote"]
+                else:
+                    with zipfile.ZipFile(io.BytesIO(content)) as package:
+                        assert "页边.md" in package.namelist()
+            assert json.loads(request("/api/data/transfer/preview")[2])["books"] > 0
+            assert json.loads(request("/api/data/info")[2])["backup"]["frequency"] == "off"
             backup = json.loads(
                 request("/api/data/backup", b"{}", content_type="application/json")[2]
             )
@@ -566,6 +584,9 @@ def verify(app, epubcheck=None, samples=()):
             process.wait(timeout=10)
             base = start()
             assert json.loads(request("/api/state")[2])["prefs"]["fontSize"] == 23
+            restored_notes = json.loads(request("/api/margins?book=" + book["id"])[2])["items"]
+            assert restored_notes[0]["note"] == "An original thought"
+            assert json.loads(request("/api/state")[2])["bookPrefs"][book["id"]]["fontSize"] == 19
             translation_restored = json.loads(request("/api/translation/item?book=" + book["id"] + "&id=" + translation_result["id"])[2])
             assert translation_restored["translation"] == translation_result["translation"] and translation_restored["favorite"]
             assert "<math" in translation_restored["html"]

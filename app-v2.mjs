@@ -9,10 +9,12 @@ import {
 } from "/core.mjs";
 import { escapeHTML, icon } from "/ui/shared.mjs";
 import { createLibraryView, filterBooks, resumableBook } from "/ui/library.mjs";
+import { typographyPresets, selectedTypography, readingPreferences } from "/ui/reading-preferences.mjs";
 import { createFolders, inFolder } from "/ui/folders.mjs";
 import { createBookSource } from "/ui/book-source.mjs";
 import { createBookSourceSettings } from "/ui/book-source-settings.mjs";
 import { createToasts } from "/ui/feedback.mjs";
+import { createMargins } from "/ui/margins.mjs";
 import { createTranslation } from "/ui/translation.mjs";
 import { createTutor } from "/ui/tutor.mjs";
 import { createServiceSettings } from "/ui/settings.mjs";
@@ -75,14 +77,22 @@ const defaults = {
   textWidth: 680,
   pdfZoom: 100,
   pdfZoomMode: "legacy",
-  pdfTint: true,
+  pdfTint: false,
+  pdfInvert: false,
+  paragraphSpace: 1.15,
+  headingSpace: 2,
+  tocOpen: true,
+  pinnedTool1: "auto",
+  pinnedTool2: "none",
   palmScale: 1,
   textMode: "pages",
   palmMode: "pages",
   palmKeys: "arrows",
   pdfMode: "scroll",
 };
-let prefs = { ...defaults },
+let globalPrefs = { ...defaults },
+  bookPrefs = {},
+  prefs = { ...defaults },
   books = [],
   folders = [],
   jobs = [],
@@ -92,6 +102,7 @@ let prefs = { ...defaults },
   location,
   route = "library",
   shelfFilter = "all";
+let appearanceSample;
 let renderRevision = 0,
   preferenceRevision = 0,
   renderTask,
@@ -132,7 +143,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.56";
+document.body.dataset.readerBuild = "2.57";
 document.body.dataset.mode = palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -250,6 +261,7 @@ const documentParsing = createDocumentParsing({
     if (route === "library") renderLibrary();
   },
 });
+const margins = createMargins({ api, post, toast, getBookmarks: () => bookmarks, openSource: (book, position) => window.readerOpenTutorSource(book, position) });
 const libraryView = createLibraryView(document);
 const folderView = createFolders({ post, refresh: refreshLibrary, changed: renderLibrary });
 function postState(patch) {
@@ -469,8 +481,8 @@ function settingsMarkup() {
       : ""
   }</section><section class="settings-section"><h2>阅读主题</h2><div class="theme-choices">${themes.map(([theme, title, color]) => `<button data-theme="${theme}" aria-pressed="${prefs.theme === theme}"><span class="theme-circle" style="background:${color}"></span>${title}</button>`).join("")}</div></section>${
     pdf
-      ? `<section class="settings-section"><h2>原书版面</h2>${range("页面缩放", "pdfZoom", 25, 400, 5, `${Math.round(currentZoom())}%`, currentZoom())}<button class="secondary-button" data-fit style="margin-top:16px">适合页面宽度</button><label class="setting-check">随主题柔化页面<input data-pref="pdfTint" type="checkbox" ${prefs.pdfTint ? "checked" : ""}></label></section>`
-      : `<section class="settings-section"><h2>排版</h2><div class="density-choices"><button class="secondary-button" data-density="1.7">紧凑</button><button class="secondary-button" data-density="1.95">舒展</button></div>${select(
+      ? `<section class="settings-section"><h2>原书版面</h2>${range("页面缩放", "pdfZoom", 25, 400, 5, `${Math.round(currentZoom())}%`, currentZoom())}<button class="secondary-button" data-fit style="margin-top:16px">适合页面宽度</button><label class="setting-check">柔化页面<input data-pref="pdfTint" type="checkbox" ${prefs.pdfTint ? "checked" : ""}></label><label class="setting-check">黑白页面反色<input data-pref="pdfInvert" type="checkbox" ${prefs.pdfInvert ? "checked" : ""}></label></section>`
+      : `<section class="settings-section"><h2>排版</h2><div class="density-choices">${Object.entries(typographyPresets).map(([id, preset]) => `<button class="secondary-button" data-typography="${id}" aria-pressed="${selectedTypography(prefs) === id}">${preset.title}</button>`).join("")}</div>${select(
           "中文字体",
           "zhFont",
           [
@@ -493,11 +505,12 @@ function settingsMarkup() {
           ["off", "关闭后台快捷键"],
         ])
       : ""
-  }</section>` : ""}`;
+  }</section>` : ""}<section class="settings-section"><h2>常用工具</h2>${["pinnedTool1", "pinnedTool2"].map((key, index) => select(index ? "第二个入口" : "第一个入口", key, [["auto", "按书籍类别"], ["none", "不固定"], ["palm", "掌上阅读"], ["process", "文档处理"], ["focus", "专注阅读"]])).join("")}</section>`;
 }
 function renderSettings() {
   $("global-settings").innerHTML = settingsMarkup();
   $("quick-settings").innerHTML = settingsMarkup();
+  $("sample-current").disabled = !appearanceSample?.text;
 }
 function actualSize() {
   return palm
@@ -518,8 +531,12 @@ function applyPreferences() {
   );
   style.setProperty("--reading-size", `${actualSize()}px`);
   style.setProperty("--reading-line", palm ? 1.65 : prefs.lineHeight);
+  style.setProperty("--paragraph-space", `${prefs.paragraphSpace}em`);
+  style.setProperty("--heading-space", `${prefs.headingSpace}em`);
   style.setProperty("--reading-width", `${prefs.textWidth}px`);
   $("pdf-paper").classList.toggle("tinted", prefs.pdfTint);
+  $("pdf-paper").classList.toggle("inverted", prefs.pdfInvert);
+  arrangeReaderTools();
   $("reader").classList.toggle("compact-text", prefs.lineHeight <= 1.8);
   readerZoom.update();
   document
@@ -670,13 +687,35 @@ function restoreAnchor(anchor) {
       : Math.max(0, anchor.pixels || 0));
 }
 
+function persistReadingPreferences(changes) {
+  if (route === "reader" && current && !Object.keys(changes).some(key => key.startsWith("pinnedTool"))) {
+    bookPrefs[current.id] = { ...bookPrefs[current.id], ...changes };
+    return postState({ bookPrefs: { [current.id]: changes } });
+  }
+  Object.assign(globalPrefs, changes);
+  return postState({ prefs: changes });
+}
+
+function arrangeReaderTools() {
+  if (!$("reader-more-tools")) return;
+  $("reader-more-tools").append($("reading-mode"), $("book-options"), $("pin-current-page"));
+  $("pin-current-page").hidden = current?.type !== "pdf";
+  const tools = { palm: $("palm-open"), process: $("reader-process"), focus: $("focus-button") };
+  const pinned = new Set([prefs.pinnedTool1, prefs.pinnedTool2].map(tool => tool === "auto" ? current?.shelf === "学习" ? "process" : "palm" : tool));
+  for (const [name, button] of Object.entries(tools))
+    (pinned.has(name) ? $("reader-pinned-tools") : $("reader-more-tools")).append(button);
+}
+
 async function changePreference(key, value) {
+  const changes = typeof key === "object" ? key : { [key]: value };
+  if (typeof key === "object") key = "typography";
+  if (key === "pdfZoom") changes.pdfZoomMode = "custom";
   lastInput = Date.now();
   if (key === "palmKeys") {
     if (!["arrows", "letters", "off"].includes(value)) return;
     try {
       await postState({ prefs: { palmKeys: value } });
-      prefs.palmKeys = value;
+      prefs.palmKeys = globalPrefs.palmKeys = value;
       reportNative();
     } catch (error) {
       toast(error.message, { kind: "error" });
@@ -689,19 +728,16 @@ async function changePreference(key, value) {
   pendingAnchor ??= lastAnchor || captureAnchor();
   const anchor = pendingAnchor;
   retainedAnchor = anchor;
-  prefs[key] = value;
-  if (key === "pdfZoom") prefs.pdfZoomMode = "custom";
+  Object.assign(prefs, changes);
   applyPreferences();
   document.querySelectorAll(`[data-pref="${key}"]`).forEach((control) => {
     if (control.type === "checkbox") control.checked = !!value;
     else if (document.activeElement !== control) control.value = value;
   });
-  postState({
-    prefs: {
-      [key]: value,
-      ...(key === "pdfZoom" ? { pdfZoomMode: "custom" } : {}),
-    },
-  }).catch((error) => toast(error.message));
+  persistReadingPreferences(changes).catch(error => toast(error.message));
+  document.querySelectorAll("[data-typography]").forEach(button =>
+    button.setAttribute("aria-pressed", String(selectedTypography(prefs) === button.dataset.typography)));
+  if (key === "typography") renderSettings();
   if (["pdfZoom", "pdfZoomMode", "pdfMode"].includes(key)) {
     if (current?.type === "pdf" && route === "reader") {
       const position = makePosition(),
@@ -777,7 +813,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.52",
+        build: "2.57",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),
@@ -1087,6 +1123,7 @@ async function setPinned(id, pinned, offerUndo = true) {
 function dismissSelection() {
   currentSelection = null;
   $("selection-toolbar").hidden = true;
+  $("selection-more-menu").hidePopover();
   document
     .querySelectorAll(".pdf-object.selected")
     .forEach((element) => element.classList.remove("selected"));
@@ -1189,7 +1226,7 @@ function watchSelection(doc) {
   const schedule = (event) => {
     if (
       event?.target?.closest?.(
-        ".selection-toolbar,.question-panel,.translation-panel,.reader-settings",
+        ".selection-toolbar,#selection-more-menu,.question-panel,.translation-panel,.reader-settings",
       )
     )
       return;
@@ -1206,7 +1243,7 @@ function watchSelection(doc) {
   doc.addEventListener("pointerdown", (event) => {
     if (
       event.target.closest?.(
-        ".selection-toolbar,.question-panel,.translation-panel,.reader-settings",
+        ".selection-toolbar,#selection-more-menu,.question-panel,.translation-panel,.reader-settings",
       )
     )
       return;
@@ -1331,16 +1368,19 @@ function selectionDetails(position) {
 function showToolbar(rectangle) {
   const bar = $("selection-toolbar");
   bar.hidden = false;
+  bar.dataset.content = /^[A-Za-z][A-Za-z\'-]{0,48}$/.test(currentSelection.text?.trim() || "") ? "word" : currentSelection.kind;
   $("copy-selection").hidden = currentSelection.kind === "image";
   $("translate-selection").hidden =
     currentSelection.kind === "image" ||
     currentSelection.kind === "equation" ||
     !currentSelection.text?.trim();
   $("copy-image").hidden = !currentSelection.image;
+  $("pin-selection").hidden = current.shelf !== "学习";
   $("chapter-start").hidden =
     current.type !== "txt" ||
     !current.parseEnabled ||
     !Number.isFinite(currentSelection.position?.sourceOffset);
+  $("selection-more-toggle").hidden = $("chapter-start").hidden && $("pin-selection").hidden;
   $("copy-label").textContent =
     currentSelection.format === "latex"
       ? "复制 LaTeX"
@@ -1353,6 +1393,7 @@ function showToolbar(rectangle) {
   bar.style.top = `${Math.max(7, Math.min(innerHeight - bar.offsetHeight - 38, rectangle.bottom + 8))}px`;
 }
 function refreshSelectionToolbar() {
+  if (currentSelection) revealReaderTools();
   const selected = document.querySelector(".pdf-object.selected");
   if (currentSelection && selected) {
     const rectangle = selected.getBoundingClientRect(),
@@ -2509,7 +2550,7 @@ async function styleEpub() {
   ])
     doc.documentElement.style.setProperty(key, colors.getPropertyValue(key));
   const fixed = current.layout === "pre-paginated";
-  style.textContent = `.reader-flow{font:inherit;color:inherit;}.reader-flow :is(img,svg,table,figure){break-inside:avoid;}.reader-flow :is(h1,h2,h3,h4){break-after:avoid;}html{height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;background:${colors.getPropertyValue("--paper")}!important;color:${colors.getPropertyValue("--ink")}!important;font-size:${actualSize()}px!important;}body{height:auto!important;min-height:0!important;margin:0!important;padding:${padding}!important;box-sizing:border-box!important;font-family:${fontFamilies[prefs.enFont]},${fontFamilies[prefs.zhFont]},serif!important;font-size:${actualSize()}px!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;overflow-wrap:break-word!important;color:${colors.getPropertyValue("--ink")}!important;background:${colors.getPropertyValue("--paper")}!important;}img{max-width:100%!important;}svg[viewBox][height="100%"]{height:auto!important;max-width:100%!important;}p{font-family:inherit!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;}table{max-width:100%;}a{color:${colors.getPropertyValue("--accent")};} [data-reader-selected]{outline:2px solid ${colors.getPropertyValue("--accent")};outline-offset:3px;}::selection{background:var(--selection);}${prefs.theme === "night" ? "body :is(p,span,div,h1,h2,h3,h4,li,blockquote){color:inherit!important;background-color:transparent!important;}" : ""}${palm ? "h1{font-size:1.25em!important;}h2{font-size:1.15em!important;}h3{font-size:1.08em!important;}" : ""}${fixed ? "body{padding:0!important;}" : ""}${readingMode() === "pages" ? `html,body{width:100%!important;height:100%!important;padding:0!important;}#reader-flow{font:inherit;}.reader-flow :is(img,svg){max-height:${Math.max(80, $("reading-viewport").clientHeight - (palm ? 90 : 160))}px!important;object-fit:contain;}` : ""}`;
+  style.textContent = `.reader-flow{font:inherit;color:inherit;}.reader-flow :is(img,svg,table,figure){break-inside:avoid;}.reader-flow :is(h1,h2,h3,h4){break-after:avoid;}html{height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;background:${colors.getPropertyValue("--paper")}!important;color:${colors.getPropertyValue("--ink")}!important;font-size:${actualSize()}px!important;}body{height:auto!important;min-height:0!important;margin:0!important;padding:${padding}!important;box-sizing:border-box!important;font-family:${fontFamilies[prefs.enFont]},${fontFamilies[prefs.zhFont]},serif!important;font-size:${actualSize()}px!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;overflow-wrap:break-word!important;color:${colors.getPropertyValue("--ink")}!important;background:${colors.getPropertyValue("--paper")}!important;}img{max-width:100%!important;}svg[viewBox][height="100%"]{height:auto!important;max-width:100%!important;}p{font-family:inherit!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;margin-bottom:${prefs.paragraphSpace}em!important;}table{max-width:100%;}a{color:${colors.getPropertyValue("--accent")};} [data-reader-selected]{outline:2px solid ${colors.getPropertyValue("--accent")};outline-offset:3px;}::selection{background:var(--selection);}${prefs.theme === "night" ? "body :is(p,span,div,h1,h2,h3,h4,li,blockquote){color:inherit!important;background-color:transparent!important;}" : ""}${palm ? "h1{font-size:1.25em!important;}h2{font-size:1.15em!important;}h3{font-size:1.08em!important;}" : ""}${fixed ? "body{padding:0!important;}" : ""}${readingMode() === "pages" ? `html,body{width:100%!important;height:100%!important;padding:0!important;}#reader-flow{font:inherit;}.reader-flow :is(img,svg){max-height:${Math.max(80, $("reading-viewport").clientHeight - (palm ? 90 : 160))}px!important;object-fit:contain;}` : ""}`;
   await Promise.race([
     Promise.all(
       [prefs.zhFont, prefs.enFont].map((key) =>
@@ -2964,7 +3005,24 @@ async function navigate(index, options = {}, record = true) {
   if (innerWidth < 1100) setTocOpen(false);
 }
 
+let quietTimer;
+function revealReaderTools() {
+  clearTimeout(quietTimer);
+  $("reader").classList.remove("quiet-chrome");
+}
+function quietAfterPage() {
+  revealReaderTools();
+  if (palm || current?.shelf === "学习" || current?.type === "pdf") return;
+  quietTimer = setTimeout(() => {
+    if (!currentSelection && $("reader-aside").hidden && $("reader-settings").hidden && !$("reader-more").open)
+      $("reader").classList.add("quiet-chrome");
+  }, 1800);
+}
+document.addEventListener("pointermove", event => { if (event.clientY < 88) revealReaderTools(); }, { passive: true });
+$("reader-bar").addEventListener("focusin", revealReaderTools);
+
 async function flip(direction) {
+  quietAfterPage();
   lastInput = Date.now();
   if (flipBusy) {
     pendingFlip = direction;
@@ -3065,6 +3123,8 @@ function goBack() {
     if (!book) return;
     if (current?.id !== book.id) readerReady = false;
     current = book;
+    prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, book, true));
+    applyPreferences();
     if (!palm) window.history.replaceState(null, "", "#/read/" + current.id);
     navigate(previous.position.index, previous.position, false);
   }
@@ -3075,7 +3135,10 @@ function setTocOpen(open, reflow = true) {
   const changed = $("reader").classList.contains("toc-docked") !== docked;
   $("reader-aside").hidden = !open;
   $("reader").classList.toggle("toc-docked", docked);
-  if (open) $("reader-settings").hidden = true;
+  const restoreFocus = !open && $("reader-aside").contains(document.activeElement);
+  if (open) setReaderSettingsOpen(false);
+  if (reflow && open && !docked) $("toc-search").focus();
+  if (restoreFocus) $("toc-toggle").focus();
   $("toc-toggle").setAttribute("aria-expanded", String(open));
   if (position && changed && route === "reader") renderCurrent(position);
 }
@@ -3084,14 +3147,17 @@ async function readBook(id, sourcePosition) {
   if (!book) return;
   savePosition();
   current = book;
+  revealReaderTools();
+  prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, book, true));
+  applyPreferences();
   location = sourcePosition
     ? { ...sourcePosition, index: clamp(sourcePosition.index, 1, count(book)) }
     : initialLocation(book);
   history = [];
   $("toc-search").value = "";
-  setTocOpen(!palm && innerWidth >= 1100, false);
+  setTocOpen(!palm && innerWidth >= 1100 && prefs.tocOpen, false);
   $("toc-tab").click();
-  $("reader-settings").hidden = true;
+  setReaderSettingsOpen(false);
   return renderCurrent(location);
 }
 function showRoute(sourcePosition) {
@@ -3108,14 +3174,17 @@ function showRoute(sourcePosition) {
         ? requested[0]
         : "library";
   if (route === "reader" && next !== "reader") {
+    if (current?.type !== "pdf" && readerReady) appearanceSample = { title: chapterTitle(), text: readingElements().map(element => element.textContent.trim()).filter(Boolean).join("\n\n").slice(0, 640) };
     leavePdfPreparation();
     savePosition(true);
     readerReady = false;
     $("question-panel").hidden = true;
-    $("reader-settings").hidden = true;
+    setReaderSettingsOpen(false);
     clearSelection();
   }
   route = next;
+  prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, current, next === "reader"));
+  applyPreferences();
   document.body.dataset.view = next;
   $("workspace").hidden = next === "reader";
   $("reader").hidden = next !== "reader";
@@ -3181,17 +3250,19 @@ async function openPalm(id) {
 }
 let importBusy = false,
   importRetry = false,
-  importComplete = false;
+  importComplete = false,
+  importedBooks = [];
 function updateImportControls() {
+  $("import-library").hidden = !importedBooks.length || importBusy;
   $("import-submit").disabled =
-    importBusy || importComplete || !importFiles.length;
+    importBusy || (!importComplete && !importFiles.length);
   $("file-input").disabled = importBusy;
   $("import-files").inert = importBusy;
   $("drop-zone").setAttribute("aria-disabled", String(importBusy));
   $("import-submit").textContent = importBusy
     ? "正在导入…"
     : importComplete
-      ? "本轮导入结束"
+      ? importedBooks.length > 1 ? "阅读第一本" : "开始阅读"
       : importRetry
         ? `重试 ${importFiles.length} 个失败文件`
         : importFiles.length
@@ -3207,6 +3278,7 @@ function openImport() {
   importFiles = [];
   importRetry = false;
   importComplete = false;
+  importedBooks = [];
   $("import-files").innerHTML = "";
   $("import-result").textContent = "";
   $("import-submit").disabled = true;
@@ -3220,6 +3292,7 @@ function addFiles(files) {
   if (importComplete) {
     importFiles = [];
     importComplete = false;
+    importedBooks = [];
     $("import-result").textContent = "";
   }
   for (const file of files) {
@@ -3250,7 +3323,13 @@ function renderImportFiles() {
     : "";
 }
 async function submitImport() {
-  if (importBusy || importComplete || !importFiles.length) return;
+  if (importBusy) return;
+  if (importComplete) {
+    $("import-dialog").close();
+    window.location.hash = "#/read/" + importedBooks[0];
+    return;
+  }
+  if (!importFiles.length) return;
   const batch = importFiles.map((item) => ({ ...item }));
   importBusy = true;
   updateImportControls();
@@ -3276,6 +3355,7 @@ async function submitImport() {
         results.push(
           `${response.duplicate ? "已在书库中" : "已导入"}：${response.book.title}`,
         );
+        if (!importedBooks.includes(response.book.id)) importedBooks.push(response.book.id);
       } catch (error) {
         failed.push(item);
         results.push(`${item.file.name}：${error.message}`);
@@ -3384,8 +3464,8 @@ async function saveBookOptions() {
     shelf: $("book-shelf").value,
   };
   patch.parseEnabled = $("book-parse").checked;
-  if ($("book-offset")?.value !== " " && $("book-offset")?.value)
-    patch.pageOffset = Number($("book-offset").value);
+  if ($("book-offset"))
+    patch.pageOffset = $("book-offset").value.trim() === "" ? null : Number($("book-offset").value);
   bookSaving = true;
   $("book-form").inert = true;
   $("book-save").disabled = $("book-cloud").disabled = true;
@@ -3482,12 +3562,17 @@ function validatePreferences(input) {
     ["textWidth", 480, 860],
     ["pdfZoom", 25, 400],
     ["palmScale", 0.5, 2],
+    ["paragraphSpace", .4, 2],
+    ["headingSpace", 1, 3],
   ])
     output[key] = clamp(output[key], min, max);
+  for (const key of ["pinnedTool1", "pinnedTool2"])
+    if (!["auto", "none", "palm", "process", "focus"].includes(output[key])) output[key] = defaults[key];
   return output;
 }
 
 function handleKeydown(event) {
+  revealReaderTools();
   lastInput = Date.now();
   if (event.isComposing) return;
   const editing =
@@ -3498,10 +3583,11 @@ function handleKeydown(event) {
     if (route === "library") {
       $("library-search").value = "";
       shelfFilter = "all";
+let appearanceSample;
       renderLibrary();
     }
     setTocOpen(false);
-    $("reader-settings").hidden = true;
+    setReaderSettingsOpen(false);
     $("question-panel").hidden = true;
     translator.close();
     clearSelection();
@@ -3642,8 +3728,12 @@ function setFocus(value) {
 }
 
 document.addEventListener("click", async (event) => {
-  const density = event.target.closest("[data-density]");
-  if (density) { await changePreference("lineHeight", Number(density.dataset.density)); return; }
+  const typography = event.target.closest("[data-typography]");
+  if (typography) {
+    const { title, ...changes } = typographyPresets[typography.dataset.typography];
+    await changePreference(changes);
+    return;
+  }
   const processing = event.target.closest("[data-process]");
   if (processing) {
     documentParsing.open(processing.dataset.process);
@@ -3755,6 +3845,15 @@ document.addEventListener("change", (event) => {
     importFiles[Number(event.target.dataset.fileShelf)].shelf =
       event.target.value;
 });
+const sampleContent = { title: document.querySelector(".type-sample h2").textContent, paragraphs: [...document.querySelectorAll(".type-sample p")].map(node => node.textContent) };
+$("sample-source").onchange = event => {
+  const actual = event.target.value === "current" && appearanceSample?.text;
+  document.querySelector(".type-sample h2").textContent = actual ? appearanceSample.title : sampleContent.title;
+  document.querySelectorAll(".type-sample p").forEach((node, index) => {
+    node.hidden = !!actual && index > 0;
+    node.textContent = actual ? appearanceSample.text : sampleContent.paragraphs[index];
+  });
+};
 $("library-search").addEventListener("input", renderLibrary);
 $("shelf-filters").addEventListener("click", (event) => {
   const button = event.target.closest("[data-filter]");
@@ -3768,6 +3867,7 @@ $("empty-action").onclick = () => {
   else {
     $("library-search").value = "";
     shelfFilter = "all";
+let appearanceSample;
     renderLibrary();
     $("library-search").focus();
   }
@@ -3791,6 +3891,10 @@ $("drop-zone").addEventListener("drop", (event) => {
   addFiles(event.dataTransfer.files);
 });
 $("import-submit").onclick = submitImport;
+$("import-library").onclick = () => {
+  $("import-dialog").close();
+  window.location.hash = "#/library";
+};
 $("book-save").onclick = () => saveBookOptions();
 $("book-cloud").onclick = async () => {
   const id = editingBook.id;
@@ -3805,9 +3909,11 @@ $("reader-home").onclick = () => {
 };
 $("reader-back").onclick = goBack;
 $("toc-toggle").onclick = () => {
-  setTocOpen($("reader-aside").hidden);
+  const open = $("reader-aside").hidden;
+  setTocOpen(open);
+  persistReadingPreferences({ tocOpen: open }).catch(error => toast(error.message));
 };
-$("toc-close").onclick = () => setTocOpen(false);
+$("toc-close").onclick = () => { setTocOpen(false); persistReadingPreferences({ tocOpen: false }).catch(error => toast(error.message)); };
 $("toc-scrim").onclick = () => setTocOpen(false);
 $("toc-search").addEventListener("input", renderToc);
 $("toc-list").addEventListener("click", (event) => {
@@ -3879,15 +3985,19 @@ $("source-pdf-open").onclick = () => {
 $("focus-button").onclick = () =>
   setFocus(!$("reader").classList.contains("focused"));
 $("focus-exit").onclick = () => setFocus(false);
-$("reader-settings-open").onclick = () => {
-  const open = $("reader-settings").hidden;
-  if (open) { setTocOpen(false); renderSettings(); }
+function setReaderSettingsOpen(open) {
+  const restoreFocus = !open && !$("reader-settings").hidden;
   $("reader-settings").hidden = !open;
   $("reader-settings-open").setAttribute("aria-expanded", String(open));
-};
-$("reader-settings-close").onclick = () => ($("reader-settings").hidden = true);
-$("palm-settings").onclick = () =>
-  ($("reader-settings").hidden = !$("reader-settings").hidden);
+  if (open) {
+    setTocOpen(false);
+    renderSettings();
+    $("reader-settings-close").focus();
+  } else if (restoreFocus) $("reader-settings-open").focus();
+}
+$("reader-settings-open").onclick = () => setReaderSettingsOpen($("reader-settings").hidden);
+$("reader-settings-close").onclick = () => setReaderSettingsOpen(false);
+$("palm-settings").onclick = () => setReaderSettingsOpen($("reader-settings").hidden);
 function openPageDialog() {
   if (!readerReady) return;
   const total = pagination?.count || count(current);
@@ -3939,9 +4049,36 @@ $("palm-bar").hidden = !palm;
 $("palm-footer").hidden = !palm;
 watchSelection(document);
 $("selection-toolbar").onmousedown = (event) => event.preventDefault();
+$("selection-more-menu").onmousedown = event => event.preventDefault();
+$("selection-more-toggle").onclick = () => {
+  const box = $("selection-more-toggle").getBoundingClientRect();
+  $("selection-more-menu").style.left = Math.max(8, Math.min(innerWidth - 200, box.right - 192)) + "px";
+  $("selection-more-menu").style.top = (box.top > 120 ? box.top - 112 : box.bottom + 8) + "px";
+};
 $("copy-selection").onclick = () =>
   currentSelection && copyText(currentSelection.text);
 $("copy-image").onclick = copyImage;
+$("save-selection").onclick = () => {
+  const context = tutorContext(currentSelection);
+  if (context && currentSelection) margins.save(context);
+};
+$("pin-selection").onclick = () => {
+  $("selection-more-menu").hidePopover();
+  const context = tutorContext(currentSelection);
+  if (context && currentSelection) margins.pin(context);
+};
+$("pin-current-page").onclick = () => {
+  if (!readerReady || current?.type !== "pdf") return;
+  const canvas = pdfPageElement(location.index)?.querySelector("canvas");
+  if (!canvas || !canvas.width) return;
+  const copy = document.createElement("canvas");
+  const ratio = Math.min(1, 1600 / Math.max(canvas.width, canvas.height));
+  copy.width = Math.round(canvas.width * ratio);
+  copy.height = Math.round(canvas.height * ratio);
+  copy.getContext("2d").drawImage(canvas, 0, 0, copy.width, copy.height);
+  margins.pin({ book: current.id, source: { quote: `PDF 第 ${location.index} 页`, position: { index: location.index, pdfY: 0 }, image: copy.toDataURL("image/png") } });
+  $("reader-more").open = false;
+};
 $("chapter-start").onclick = () => {
   if (!currentSelection || current?.type !== "txt") return;
   const selected = currentSelection;
@@ -4049,6 +4186,7 @@ function tutorContext(selection = null) {
   const start = Math.max(0, cursor - 4000);
   return {
     book: current.id,
+    study: current.shelf === "学习",
     source: {
       quote: sliceText(quote, 0, 6000),
       context: sliceText(context, start, start + 18000),
@@ -4149,6 +4287,10 @@ $("translation-history-open").onclick = () => {
 };
 $("ai-open").onclick = tutor.showHistory;
 $("records-bookmarks").onclick = () => { setTocOpen(true); $("bookmark-tab").click(); };
+document.querySelector("#reading-records summary").onclick = event => {
+  event.preventDefault();
+  if (current) margins.open(current);
+};
 $("reading-records").addEventListener("click", (event) => {
   if (event.target.closest("button")) $("reading-records").open = false;
 });
@@ -4203,7 +4345,10 @@ $("reading-viewport").addEventListener(
 window.addEventListener("palm-resume", async () => {
   const state = await api("/api/state");
   positions = state.positions || positions;
-  prefs = validatePreferences(state.prefs || {});
+  globalPrefs = validatePreferences(state.prefs || {});
+  bookPrefs = state.bookPrefs || {};
+  prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, current, true));
+  applyPreferences();
   renderSettings();
   location = initialLocation(current);
   renderCurrent(location);
@@ -4271,6 +4416,7 @@ window.addEventListener("pagehide", () => {
     );
   }
 });
+$("timer-start").onclick = () => { $("timer-button").click(); $("reader-more").open = false; };
 $("timer-button").onclick = () => {
   if (timerRunning) {
     timerRemaining = Math.max(
@@ -4300,7 +4446,11 @@ function updateTimer() {
     timerRunning || timerRemaining < 1500
       ? `${String(Math.floor(timerRemaining / 60)).padStart(2, "0")}:${String(timerRemaining % 60).padStart(2, "0")}${timerRunning ? "" : " · 已暂停"}`
       : "专注一会儿";
+  const active = timerRunning || timerRemaining > 0 && timerRemaining < 1500;
+  $("timer-button").hidden = !active;
+  $("timer-start").hidden = active;
   $("timer-button").classList.toggle("running", timerRunning);
+  $("timer-button").classList.toggle("timer-idle", !timerRunning && timerRemaining === 1500);
 }
 
 async function poll(resume = false) {
@@ -4351,7 +4501,9 @@ async function poll(resume = false) {
         !document.activeElement?.matches("input,textarea,select") &&
         (resume || Date.now() - lastInput > 1000),
     });
-    const nextPrefs = validatePreferences(state.prefs || {});
+    globalPrefs = validatePreferences(state.prefs || {});
+    bookPrefs = state.bookPrefs || {};
+    const nextPrefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, current, route === "reader"));
     const preferencesChanged =
       JSON.stringify(prefs) !== JSON.stringify(nextPrefs);
     const marksChanged =
@@ -4438,7 +4590,9 @@ try {
       .join(" · ") +
     "";
   const state = rawState;
-  prefs = validatePreferences(state.prefs || {});
+  globalPrefs = validatePreferences(state.prefs || {});
+  bookPrefs = state.bookPrefs || {};
+  prefs = globalPrefs;
   positions = state.positions || {};
   bookmarks = (state.bookmarks || []).filter(
     (mark) => mark.position && books.some((book) => book.id === mark.book),

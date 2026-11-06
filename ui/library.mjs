@@ -23,10 +23,11 @@ export function resumableBook(books, positions, preferred) {
 }
 
 export function cover(book, small = false) {
-  return `<div class="book-cover ${book.shelf === "学习" ? "cover-study" : ""} ${small ? "small-cover" : ""}">${
+  const palette = Array.from(book.title || "间").reduce((value, character) => (value * 31 + character.codePointAt(0)) >>> 0, 0) % 4;
+  return `<div data-palette="${palette}" class="book-cover ${book.shelf === "学习" ? "cover-study" : ""} ${small ? "small-cover" : ""}">${
     book.cover
       ? `<img src="${escapeHTML(book.cover)}" alt="${escapeHTML(book.title)}封面" loading="lazy">`
-      : `<span class="cover-format">${escapeHTML(book.format)}</span><span class="cover-stamp" aria-hidden="true">${escapeHTML(Array.from(book.title || "间")[0])}</span><span class="cover-title ${book.title.length > 36 ? "long-title" : ""}">${escapeHTML(book.title)}</span><span class="cover-author">${escapeHTML(book.author)}</span>`
+      : `<span class="cover-format">${escapeHTML(book.format)}</span><span class="cover-title ${book.title.length > 36 ? "long-title" : ""}">${escapeHTML(book.title)}</span><span class="cover-author">${escapeHTML(book.author)}</span>`
   }</div>`;
 }
 

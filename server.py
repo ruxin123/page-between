@@ -34,7 +34,7 @@ from book_import import (
     path_for,
     pdf_metadata,
 )
-from pdf_enhancement import build_contents, recognize, page_enrichment, apply_enrichment
+from pdf_enhancement import build_contents, recognize, page_enrichment, apply_enrichment, page_offset_patch
 from pdf_selection import align_spans
 from pdf_preparation import PDFPreparation
 
@@ -49,8 +49,10 @@ import book_index
 import epub_export
 import library_data
 import library_transfer
+import local_backup
 import chapter_edit
 import book_source
+import book_margins
 
 SOURCE_TASKS = {}
 SOURCE_LOCK = threading.Lock()
@@ -66,7 +68,7 @@ def source_download(payload):
             raise ValueError("已有下载正在进行。")
         SOURCE_TASKS.clear()
         ident = uuid.uuid4().hex
-        task = {"id": ident, "status":"downloading"}
+        task = {"id": ident, "ref": ref, "status":"downloading"}
         SOURCE_TASKS[ident] = task
     def run():
         folder = book_source.DOWNLOADS / ident
@@ -332,8 +334,13 @@ def start_job(ident, kind="local", pages=None, fresh=False, retry=False):
                 phase(patch["processingNote"], "ready")
             elif book["type"] == "pdf":
                 patch = build_contents(book, phase)
-                if book_for(ident)["parseEnabled"]:
-                    update_book(ident, patch)
+                with MUTEX:
+                    latest = book_for(ident)
+                    if latest and latest["parseEnabled"]:
+                        if "automaticPageOffset" in patch:
+                            offset = latest.get("pageOffset") if latest.get("pageOffsetMode") == "manual" else None
+                            patch.update(page_offset_patch({**latest, **patch}, offset))
+                        update_book(ident, patch)
                 phase(
                     patch.get("processingNote", "原书目录可用；文字在打开页面时准备。"),
                     "ready",
@@ -586,10 +593,25 @@ class Handler(SimpleHTTPRequestHandler):
             if route.path == "/api/book-source/component":
                 return self.json(dict(book_source.INSTALL))
             if route.path == "/api/book-source/task":
-                task = SOURCE_TASKS.get(query.get("id", [""])[0])
+                ident = query.get("id", [""])[0]
+                with SOURCE_LOCK:
+                    task = SOURCE_TASKS.get(ident) if ident else next(iter(SOURCE_TASKS.values()), None)
+                if not ident:
+                    return self.json({"task": dict(task) if task else None})
                 if not task:
                     raise ValueError("下载任务已过期。")
                 return self.json(dict(task))
+            if route.path in {"/api/margins", "/api/margins/item"}:
+                book = book_for(query.get("book", [""])[0])
+                if not book:
+                    raise ValueError("找不到这本书。")
+                items = book_margins.listing(book)
+                if route.path.endswith("/item"):
+                    item = next((item for item in items if item["id"] == query.get("id", [""])[0]), None)
+                    if not item:
+                        raise ValueError("找不到这条页边记录。")
+                    return self.json({"item": item, "html": book_margins.preview(book, item), "translationHtml": ai_tutor.answer_html(item.get("translation", ""), source=True), "answerHtml": ai_tutor.answer_html(item.get("answer", ""))})
+                return self.json({"items": items})
             if route.path == "/api/translation/status":
                 return self.json(translation.status())
             if route.path == "/api/ai/status":
@@ -637,9 +659,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(data)
             if route.path == "/api/books/removed":
                 return self.json({"books":[{key:book.get(key) for key in ["id", "title", "author", "format", "deletedAt"]} for book in library()["books"] if book.get("deletedAt")]})
+            if route.path == "/api/data/transfer/preview":
+                return self.json(library_transfer.preview(library()["books"], path_for))
             if route.path == "/api/data/info":
                 with RECOVERY_LOCK:
-                    return self.json(library_data.information())
+                    return self.json({**library_data.information(), "backup": local_backup.configuration()})
             if route.path == "/api/library-version":
                 return self.json(
                     {
@@ -683,7 +707,7 @@ class Handler(SimpleHTTPRequestHandler):
             if route.path.startswith("/api/downloads/"):
                 prune_exports(CACHE)
                 name = route.path.removeprefix("/api/downloads/")
-                if not re.fullmatch(r"[0-9a-f]{32}\.(?:epub|pbbackup|pbtransfer)", name):
+                if not re.fullmatch(r"[0-9a-f]{32}\.(?:epub|pbbackup|pbtransfer|json|zip)", name):
                     raise ValueError("导出文件地址无效。")
                 path = CACHE / "exports" / name
                 if not path.is_file():
@@ -693,7 +717,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "Content-Type",
                     "application/epub+zip"
                     if name.endswith(".epub")
-                    else "application/zip",
+                    else "application/json" if name.endswith(".json") else "application/zip",
                 )
                 self.send_header("Content-Length", str(path.stat().st_size))
                 self.send_header(
@@ -876,12 +900,24 @@ class Handler(SimpleHTTPRequestHandler):
             payload = json.loads(
                 self.request_body(
                     8 * 1024 * 1024
-                    if route.path in {"/api/ai/start", "/api/ai/ask"}
+                    if route.path in {"/api/ai/start", "/api/ai/ask", "/api/margins"}
                     else 2 * 1024 * 1024
                 )
             )
             if route.path == "/api/book-source/settings":
-                return self.json(book_source.configure(payload))
+                with SOURCE_LOCK:
+                    if any(task["status"] in {"downloading", "importing"} for task in SOURCE_TASKS.values()):
+                        raise ValueError("下载完成后再更改书源账号。")
+                    return self.json(book_source.configure(payload))
+            if route.path in {"/api/margins", "/api/margins/export"}:
+                book = book_for(payload.get("book"))
+                if not book:
+                    raise ValueError("找不到这本书。")
+                if route.path.endswith("/export"):
+                    with MUTEX:
+                        state = load(DATA / "state.json", {})
+                    return self.json(book_margins.export(book, state, payload.get("format")))
+                return self.json({"item": book_margins.change(book, payload)})
             if route.path == "/api/folders":
                 import library_folders
                 with MUTEX:
@@ -916,17 +952,27 @@ class Handler(SimpleHTTPRequestHandler):
                     updated = update_book(ident, chapter_edit.stage(book, payload))
                     chapter_edit.cleanup(updated)
                     return self.json({"book": updated})
+            if route.path == "/api/data/backup/settings":
+                return self.json(local_backup.configure(payload.get("frequency")))
+            if route.path == "/api/data/backup/saved":
+                ident = payload.get("id")
+                if not isinstance(ident, str) or not re.fullmatch(r"[0-9a-f]{32}\.pbbackup", ident):
+                    raise ValueError("备份标识无效。")
+                local_backup.completed("manual", ident)
+                return self.json({"saved": True})
             if route.path == "/api/data/transfer/export":
                 with MUTEX:
                     state = load(DATA / "state.json", {})
-                    records, skipped = [], []
-                    for book in library()["books"]:
-                        if book.get("deletedAt"):
+                    collection = library()["books"]
+                    plan = library_transfer.preview(collection, path_for)
+                    if not plan["canExport"]:
+                        raise ValueError("迁移包超过 1 GB 或没有可迁移书籍，请分批整理书库后重试。")
+                    records, skipped = [], [item["title"] for item in plan["skipped"]]
+                    eligible = set(plan["ids"])
+                    for book in collection:
+                        if book["id"] not in eligible:
                             continue
                         source = path_for(book["originalUrl"])
-                        if source.suffix.lower().lstrip(".") not in library_transfer.FORMATS:
-                            skipped.append(book["title"])
-                            continue
                         record = {"title": book["title"], "author": book.get("author", ""), "position": library_transfer.position(state.get("positions", {}).get(book["id"], {})), "bookmarks": [{"title": m["label"], "position": library_transfer.position(m["position"])} for m in state.get("bookmarks", []) if m["book"] == book["id"]]}
                         records.append((record, source))
                 ident = uuid.uuid4().hex + ".pbtransfer"
@@ -940,13 +986,8 @@ class Handler(SimpleHTTPRequestHandler):
                     raise
                 return self.json({"id": ident, "download": "/api/downloads/" + ident, "name": "页间迁移.pbtransfer", "books": count, "skipped": skipped})
             if route.path == "/api/data/backup":
-                with MUTEX, ai_tutor.LOCK:
-                    snapshot = {
-                        "library.json": library(),
-                        "state.json": load(DATA / "state.json", {}),
-                        "ai-conversations.json": ai_tutor.records(),
-                    }
-                result = library_data.backup(snapshot)
+                with book_margins.LOCK:
+                    result = library_data.backup(backup_snapshot())
                 prune_exports(CACHE)
                 return self.json(
                     {**result, "download": "/api/downloads/" + result["id"]}
@@ -1194,6 +1235,9 @@ class Handler(SimpleHTTPRequestHandler):
                     )
                     if isinstance(payload.get("prefs"), dict):
                         state.setdefault("prefs", {}).update(payload["prefs"])
+                    for ident, preferences in payload.get("bookPrefs", {}).items():
+                        if isinstance(preferences, dict) and book_for(ident):
+                            state.setdefault("bookPrefs", {}).setdefault(ident, {}).update(preferences)
                     for ident, position in payload.get("positions", {}).items():
                         if isinstance(position, dict) and position.get(
                             "updatedAt", 0
@@ -1250,18 +1294,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if "reparse" in payload and type(payload["reparse"]) is not bool:
                     raise ValueError("重试选项无效。")
                 if "pageOffset" in payload:
-                    offset = int(payload["pageOffset"])
-                    if abs(offset) > book.get("pages", 0):
-                        raise ValueError("页码偏移无效。")
-                    patch["pageOffset"] = offset
-                    for entry in flatten_toc(book.get("toc", [])):
-                        if isinstance(entry.get("printed"), int):
-                            entry["index"] = (
-                                entry["printed"] + offset
-                                if 1 <= entry["printed"] + offset <= book["pages"]
-                                else None
-                            )
-                    patch["toc"] = book["toc"]
+                    patch.update(page_offset_patch(book, payload["pageOffset"]))
                 result = update_book(ident, patch)
                 if (
                     payload.get("reparse")
@@ -1350,6 +1383,11 @@ def resume_pending_jobs():
             start_job(book["id"])
 
 
+def backup_snapshot():
+    with MUTEX, ai_tutor.LOCK:
+        return {"library.json": library(), "state.json": load(DATA / "state.json", {}), "ai-conversations.json": ai_tutor.records()}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8779 if DEMO else 8778)
@@ -1409,6 +1447,15 @@ def main():
         print(json.dumps({"ready": True, "port": server.server_port}), flush=True)
     else:
         print(f"页间：http://127.0.0.1:{server.server_port}/", flush=True)
+    def scheduled_backups():
+        while True:
+            try:
+                if not RUNNING and not any(task["status"] in {"downloading", "importing"} for task in list(SOURCE_TASKS.values())):
+                    local_backup.automatic(backup_snapshot)
+            except (OSError, ValueError):
+                pass
+            time.sleep(60)
+    threading.Thread(target=scheduled_backups, daemon=True).start()
     server.serve_forever()
 
 

@@ -13,6 +13,28 @@ MAX_FILE = 200 * 1024**2
 MAX_TOTAL = 1024**3
 
 
+def preview(books, path_for):
+    ids, skipped, total = [], [], 0
+    for book in books:
+        if book.get("deletedAt"):
+            continue
+        source = path_for(book["originalUrl"])
+        reason = None
+        if source.suffix.lower().lstrip(".") not in FORMATS:
+            reason = "手机暂不支持此格式"
+        elif not source.is_file():
+            reason = "原文件缺失"
+        elif not 0 < source.stat().st_size <= MAX_FILE:
+            reason = "单书超过 200 MB 或文件为空"
+        if reason:
+            skipped.append({"title": book["title"], "reason": reason})
+        else:
+            ids.append(book["id"])
+            total += source.stat().st_size
+    return {"books": len(ids), "ids": ids, "bytes": total, "skipped": skipped,
+            "canExport": bool(ids) and len(ids) <= 5000 and total <= MAX_TOTAL}
+
+
 def position(value):
     if not isinstance(value, dict):
         raise ValueError('迁移位置无效。')

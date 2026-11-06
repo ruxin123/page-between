@@ -56,6 +56,26 @@ export function createBookSourceSettings({ api, post, toast }) {
         form.querySelector("[data-test]").disabled = true;
       };
       form.querySelector("[data-test]").onclick = () => run(false);
+      if (config.hasPassword || config.email) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "service-reset";
+        remove.textContent = "退出账号";
+        form.querySelector(".service-actions").append(remove);
+        remove.onclick = async () => {
+          form.querySelector("fieldset").disabled = true;
+          try {
+            await post("/api/book-source/settings", { removePassword: true });
+            loading = false;
+            await show();
+            toast("已退出账号。", { kind: "success" });
+          } catch (error) {
+            message(error.message, "error");
+          } finally {
+            form.querySelector("fieldset").disabled = false;
+          }
+        };
+      }
       panel.querySelector("[data-install]").onclick = async (event) => {
         const button = event.currentTarget;
         button.disabled = true;

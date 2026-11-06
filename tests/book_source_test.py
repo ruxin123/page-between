@@ -11,6 +11,15 @@ import book_source as source
 
 
 class BookSource(unittest.TestCase):
+    def test_logout_removes_password_and_legacy_reference(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(source, "SETTINGS", Path(folder) / "settings.json"), patch.object(source.CLIENT, "close") as close:
+            source.save(source.SETTINGS, {"email": "reader@example.invalid", "password": "old-secret", "keyRef": "legacy"})
+            result = source.configure({"removePassword": True})
+            self.assertEqual(source.configuration(), {})
+            self.assertEqual(result["email"], "")
+            self.assertFalse(result["hasPassword"])
+            close.assert_called_once()
+
     def test_known_oversize_is_rejected_before_requesting_download(self):
         for size in [200.01, "201"]:
             with tempfile.TemporaryDirectory() as directory, patch.object(source.CLIENT, "call", return_value={"format": "pdf", "size_mb": size}) as call:

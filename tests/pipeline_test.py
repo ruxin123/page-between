@@ -244,6 +244,21 @@ class SharedState(unittest.TestCase):
                     http.server_close()
                     worker.join()
 
+    def test_finishing_pdf_job_respects_the_latest_page_mapping_choice(self):
+        for mode, offset, expected in [("manual", 12, 12), ("auto", None, 5)]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                queued = []
+                def processed(book, progress):
+                    server.update_book("a", {"pageOffsetMode": mode, "pageOffset": offset})
+                    return {"toc": [{"title": "Original", "printed": 1, "index": 6}], "automaticPageOffset": 5, "pageOffset": 5, "pageOffsetMode": "auto", "processing": "ready"}
+                with patch.object(server, "DATA", root), patch.object(server, "BOOK_ROOT", root / "books"), patch.object(server, "RUNNING", set()), patch.object(server.WORKERS, "submit", side_effect=queued.append), patch.object(server, "build_contents", side_effect=processed):
+                    server.save(root / "library.json", {"books": [{"id": "a", "title": "Original", "type": "pdf", "pages": 100, "parseEnabled": True}], "jobs": []})
+                    server.start_job("a")
+                    queued.pop()()
+                    self.assertEqual(server.book_for("a")["pageOffset"], expected)
+                    self.assertEqual(server.book_for("a")["toc"][0]["index"], expected + 1)
+
     def test_failed_job_retry_replaces_history_and_returns_book_to_ready(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

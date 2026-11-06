@@ -7,7 +7,7 @@ import time
 
 from storage import load
 
-EXPORT_NAME = re.compile(r"[0-9a-f]{32}\.(?:epub|pbbackup|pbtransfer)")
+EXPORT_NAME = re.compile(r"[0-9a-f]{32}\.(?:epub|pbbackup|pbtransfer|json|zip)")
 
 
 def discard_export(cache, name):

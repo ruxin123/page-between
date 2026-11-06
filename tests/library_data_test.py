@@ -20,6 +20,21 @@ from storage import load, save
 
 
 class LibraryRecovery(unittest.TestCase):
+    def test_excerpts_and_per_book_preferences_survive_full_backup_restore(self):
+        path = self.library / "books" / self.book["id"] / "margins.json"
+        excerpt = {"id": "b" * 32, "source": {"quote": "Original $x^2$", "position": {"index": 1}}, "createdAt": 123.0, "note": "A short thought"}
+        save(path, {"items": [excerpt]})
+        self.snapshot["state.json"]["bookPrefs"] = {self.book["id"]: {"fontSize": 19, "tocOpen": False}}
+        package = self.package()
+        path.unlink()
+        data.prepare_restore(package)
+        data.approve_restore()
+        data.apply_pending_restore()
+        self.assertEqual(load(path, {})["items"], [excerpt])
+        self.assertEqual(load(self.library / "state.json", {})["bookPrefs"][self.book["id"]]["fontSize"], 19)
+        with zipfile.ZipFile(package) as archive:
+            self.assertNotIn("services.json", " ".join(archive.namelist()))
+
     def test_folders_survive_backup_and_restore(self):
         path = self.library / "library.json"
         collection = load(path, {})

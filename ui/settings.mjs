@@ -8,25 +8,31 @@ export function createServiceSettings({ document, api, post, toast }) {
   const $ = (id) => document.getElementById(id);
   let saved, loading;
   const tabs = [...document.querySelectorAll("[data-settings-tab]")];
-  for (const [index, tab] of tabs.entries()) {
+  let lastService = "ai";
+  for (const group of document.querySelectorAll("[data-settings-group]")) {
+    group.onclick = () => { window.location.hash = "#/settings/" + (group.dataset.settingsGroup === "services" ? lastService : group.dataset.settingsGroup); };
+  }
+  for (const tab of tabs) {
     tab.onclick = () => {
       window.location.hash = "#/settings/" + tab.dataset.settingsTab;
     };
     tab.onkeydown = (event) => {
+      const visible = tabs.filter(item => !item.hidden && !item.parentElement.hidden);
+      const index = visible.indexOf(tab);
       const target =
         event.key === "ArrowRight"
-          ? (index + 1) % tabs.length
+          ? (index + 1) % visible.length
           : event.key === "ArrowLeft"
-            ? (index + tabs.length - 1) % tabs.length
+            ? (index + visible.length - 1) % visible.length
             : event.key === "Home"
               ? 0
               : event.key === "End"
-                ? tabs.length - 1
+                ? visible.length - 1
                 : -1;
       if (target < 0) return;
       event.preventDefault();
-      tabs[target].click();
-      tabs[target].focus();
+      visible[target].click();
+      visible[target].focus();
     };
   }
   function render(service) {
@@ -114,6 +120,11 @@ export function createServiceSettings({ document, api, post, toast }) {
       )
     )
       section = "reading";
+    const group = section === "reading" || section === "data" ? section : "services";
+    if (group === "services") lastService = section;
+    $("settings-service-tabs").hidden = group !== "services";
+    for (const button of document.querySelectorAll("[data-settings-group]"))
+      button.setAttribute("aria-current", String(button.dataset.settingsGroup === group));
     for (const tab of tabs) {
       const selected = tab.dataset.settingsTab === section;
       tab.setAttribute("aria-selected", String(selected));

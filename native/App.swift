@@ -468,7 +468,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func saveExport(path: String, name: String) {
     guard
-      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer)$", options: .regularExpression)
+      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer|json|zip)$", options: .regularExpression)
         != nil,
       base != nil
     else { return }
@@ -482,7 +482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         do {
           try await self.writeExport(path: path, destination: destination)
           _ = try? await self.web.evaluateJavaScript(
-            "window.dispatchEvent(new Event('native-file-saved'))")
+            "window.dispatchEvent(new CustomEvent('native-file-saved',{detail:{path:'\(path)'}}))")
         } catch {
           let alert = NSAlert()
           alert.messageText = "文件未能保存"
@@ -495,7 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func writeExport(path: String, destination: URL) async throws {
     guard destination.isFileURL,
-      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer)$", options: .regularExpression)
+      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer|json|zip)$", options: .regularExpression)
         != nil,
       let base = base, let url = URL(string: path, relativeTo: base)?.absoluteURL
     else {

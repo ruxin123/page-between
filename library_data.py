@@ -250,6 +250,8 @@ def validate(root):
         if not (root / "books" / ident / "book.json").is_file():
             raise ValueError("备份缺少书籍记录。")
         validate_navigation(book)
+        import book_margins
+        book_margins.validate(book, root / "books")
         if (
             book["type"] == "txt"
             and not book.get("contentUrl")

@@ -25,6 +25,8 @@ public struct MobileBook: Codable, Identifiable, Equatable, Sendable {
     public var pinned: Bool = false
     public var deletedAt: Date?
     public var bookmarks: [ReadingBookmark] = []
+    public var appearance: ReadingAppearance?
+    public var excerpts: [SavedExcerpt]?
     public var parseEnabled: Bool?
     public var shouldPrepare: Bool { parseEnabled ?? ["pdf", "txt"].contains(format) }
 }
@@ -102,6 +104,15 @@ public actor LibraryRepository {
     }
 
     public func update(_ book: MobileBook) throws {
+        guard let latest = catalog.books.first(where: { $0.id == book.id }) else { throw LibraryFailure.missingBook }
+        var value = book
+        // Metadata screens may hold an older book snapshot while the reader saves records.
+        value.appearance = latest.appearance
+        value.excerpts = latest.excerpts
+        try replace(value)
+    }
+
+    private func replace(_ book: MobileBook) throws {
         guard let index = catalog.books.firstIndex(where: { $0.id == book.id }) else { throw LibraryFailure.missingBook }
         var next = catalog; next.books[index] = book
         try persist(next)
@@ -116,6 +127,26 @@ public actor LibraryRepository {
         guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         book.parseEnabled = enabled
         try update(book)
+    }
+
+    public func saveAppearance(_ id: UUID, value: ReadingAppearance) throws {
+        guard value.isValid else { throw LibraryFailure.invalidFile }
+        guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
+        book.appearance = value
+        try replace(book)
+    }
+
+    public func saveExcerpt(_ id: UUID, excerpt: SavedExcerpt) throws {
+        guard excerpt.isValid else { throw LibraryFailure.invalidFile }
+        guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
+        var items = book.excerpts ?? []
+        if let index = items.firstIndex(where: { $0.id == excerpt.id }) { items[index] = excerpt }
+        else {
+            guard items.count < 10000 else { throw LibraryFailure.tooLarge }
+            items.insert(excerpt, at: 0)
+        }
+        book.excerpts = items
+        try replace(book)
     }
 
     public func saveLocation(_ id: UUID, locator: String, progress: Double, chapter: String) throws {

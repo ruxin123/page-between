@@ -19,6 +19,7 @@ struct AssistantSelection: Identifiable {
     @Published var contents: [ReadiumShared.Link] = []
     @Published var chapter = ""
     @Published var progress = 0.0
+    @Published var notice: String?
     @Published var failure: String?
     @Published var selection: AssistantSelection?
     @Published var lastSelection: AssistantSelection?
@@ -52,6 +53,14 @@ struct AssistantSelection: Identifiable {
         theme = defaults.string(forKey: "reading.theme") ?? "paper"
         let key = book.format == "pdf" ? "reading.pdfScroll" : "reading.textScroll"
         scroll = defaults.object(forKey: key) == nil ? book.format == "pdf" : defaults.bool(forKey: key)
+        if let saved = book.appearance, saved.isValid {
+            fontScale = saved.fontScale
+            lineHeight = saved.lineHeight
+            pageMargins = saved.pageMargins
+            fontFamily = saved.fontFamily
+            theme = saved.theme
+            scroll = saved.scroll
+        }
     }
     func load() async {
         guard !loaded else { return }; loaded = true
@@ -60,7 +69,7 @@ struct AssistantSelection: Identifiable {
             self.publication = publication
             contents = (try? await publication.tableOfContents().get()) ?? []
             let locator = try book.locator.flatMap { try Locator(jsonString: $0) }
-            let actions = [EditingAction.lookup, .share, EditingAction(title: "复制", action: #selector(ReaderHost.copySelection)), EditingAction(title: "提问", action: #selector(ReaderHost.askSelection)), EditingAction(title: "翻译", action: #selector(ReaderHost.translateSelection))]
+            let actions = [EditingAction.lookup, .share, EditingAction(title: "复制", action: #selector(ReaderHost.copySelection)), EditingAction(title: "提问", action: #selector(ReaderHost.askSelection)), EditingAction(title: "翻译", action: #selector(ReaderHost.translateSelection)), EditingAction(title: "保存到页边", action: #selector(ReaderHost.saveExcerpt))]
             let view: UIViewController & Navigator
             if publication.conforms(to: .pdf) {
                 let pdf = try MobilePDFNavigator(publication: publication, book: book, source: await store.repository.file(book, name: book.originalName), location: locator, continuous: scroll, preparation: store.preparation, delegate: self)
@@ -68,6 +77,7 @@ struct AssistantSelection: Identifiable {
                 pdf.onJump = { [weak self] locator in self?.history.append(locator) }
                 pdf.onCopy = { [weak self] in self?.copySelection() }
                 pdf.onCopyImage = { [weak self] in self?.copySourceImage() }
+                pdf.onSave = { [weak self] in self?.saveExcerpt() }
                 pdf.onAsk = { [weak self] in self?.ask(translate: $0) }
                 view = pdf
             } else if publication.conforms(to: .epub) || publication.conforms(to: .divina) {
@@ -107,9 +117,11 @@ struct AssistantSelection: Identifiable {
         EPUBPreferences(columnCount: .one, fontFamily: fontFamily.isEmpty ? nil : FontFamily(rawValue: fontFamily), fontSize: fontScale / 100, lineHeight: lineHeight, pageMargins: pageMargins, publisherStyles: fontFamily.isEmpty && lineHeight == 1.85 && pageMargins == 1, scroll: scroll, theme: theme == "night" ? .dark : theme == "sepia" ? .sepia : .light)
     }
     func apply() {
-        let defaults = UserDefaults.standard
-        defaults.set(lineHeight, forKey: "reading.lineHeight"); defaults.set(pageMargins, forKey: "reading.pageMargins")
-        defaults.set(fontScale, forKey: "reading.fontScale"); defaults.set(fontFamily, forKey: "reading.fontFamily"); defaults.set(theme, forKey: "reading.theme"); defaults.set(scroll, forKey: book.format == "pdf" ? "reading.pdfScroll" : "reading.textScroll")
+        let appearance = ReadingAppearance(fontScale: fontScale, lineHeight: lineHeight, pageMargins: pageMargins, fontFamily: fontFamily, theme: theme, scroll: scroll)
+        Task {
+            do { try await store.repository.saveAppearance(book.id, value: appearance); await store.refresh() }
+            catch { failure = error.localizedDescription }
+        }
         (navigator as? EPUBNavigatorViewController)?.submitPreferences(preferences())
         (navigator as? MobilePDFNavigator)?.applyScroll(scroll)
     }
@@ -182,6 +194,20 @@ struct AssistantSelection: Identifiable {
             } catch { failure = error.localizedDescription }
         }
     }
+    func saveExcerpt() {
+        Task {
+            do {
+                let source = try await selectedSource(translate: false)
+                guard await publication?.rights.copy(text: source.quote) == true else { throw ServiceError.message("本书不允许保存此选段。") }
+                let excerpt = SavedExcerpt(quote: source.quote, markdown: source.markdown, locator: source.locator, chapter: chapter, objects: source.objects)
+                try await store.repository.saveExcerpt(book.id, excerpt: excerpt)
+                lastSelection = source
+                notice = "已保存到页边"
+                Task { try? await Task.sleep(for: .seconds(2)); notice = nil }
+                await store.refresh()
+            } catch { failure = error.localizedDescription }
+        }
+    }
     func copySelection() {
         Task {
             do {
@@ -230,7 +256,8 @@ struct AssistantSelection: Identifiable {
         var actions: [UIMenuElement] = [
             UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in self?.reader?.copySelection() },
             UIAction(title: "提问", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.reader?.ask(translate: false) },
-            UIAction(title: "翻译", image: UIImage(systemName: "character.bubble")) { [weak self] _ in self?.reader?.ask(translate: true) }
+            UIAction(title: "翻译", image: UIImage(systemName: "character.bubble")) { [weak self] _ in self?.reader?.ask(translate: true) },
+            UIAction(title: "保存到页边", image: UIImage(systemName: "text.badge.plus")) { [weak self] _ in self?.reader?.saveExcerpt() }
         ]
         if let text = (navigator as? SelectableNavigator)?.currentSelection?.locator.text.highlight, text.count <= 100 {
             actions.append(UIAction(title: "查询", image: UIImage(systemName: "book.closed")) { [weak self] _ in self?.present(UIReferenceLibraryViewController(term: text), animated: true) })
@@ -251,6 +278,7 @@ struct AssistantSelection: Identifiable {
     }
     @objc func askSelection() { reader?.ask(translate: false) }
     @objc func translateSelection() { reader?.ask(translate: true) }
+    @objc func saveExcerpt() { reader?.saveExcerpt() }
     @objc func copySelection() { reader?.copySelection() }
 }
 
@@ -268,6 +296,7 @@ struct ReaderScreen: View {
     @State private var appearance = false
     @State private var bookmarkTab = false
     @State private var chapterQuery = ""
+    @State private var excerpts = false
     @State private var conversations = false
     @State private var processing = false
     init(book: MobileBook, store: LibraryStore) { _reader = StateObject(wrappedValue: MobileReader(book: book, store: store)) }
@@ -278,6 +307,7 @@ struct ReaderScreen: View {
                 else if let failure = reader.failure { ContentUnavailableView("暂时无法打开", systemImage: "book.closed", description: Text(failure)) }
                 else { ProgressView("正在打开书籍…") }
             }
+            .overlay(alignment: .bottom) { if let notice = reader.notice { Text(notice).font(.callout).padding(12).background(.regularMaterial, in: Capsule()).padding(.bottom, 64).accessibilityAddTraits(.updatesFrequently) } }
             .navigationTitle(reader.book.title).navigationBarTitleDisplayMode(.inline)
             .toolbar(reader.chromeVisible || reader.controller == nil || reader.failure != nil ? .visible : .hidden, for: .navigationBar, .bottomBar)
             .statusBarHidden(!reader.chromeVisible && reader.controller != nil && reader.failure == nil)
@@ -288,6 +318,7 @@ struct ReaderScreen: View {
                     Button("目录", systemImage: "list.bullet") { toc = true }
                     Menu {
                         Section("阅读记录") {
+                            Button("页边", systemImage: "text.badge.plus") { excerpts = true }
                             Button("书签", systemImage: "bookmark") { bookmarkTab = true; toc = true }
                             Button("答疑记录", systemImage: "text.bubble") { conversations = true }
                         }
@@ -312,6 +343,7 @@ struct ReaderScreen: View {
             .sheet(isPresented: $appearance) { appearanceSheet }
             .sheet(item: $reader.selection) { selection in AssistantScreen(selection: selection, title: reader.book.title, repository: reader.store.repository, openSource: { raw in Task { await reader.goSource(raw) } }) }
             .sheet(isPresented: $conversations) { ConversationHistoryScreen(book: reader.book, repository: reader.store.repository, openSource: { raw in conversations = false; Task { await reader.goSource(raw) } }) }
+            .sheet(isPresented: $excerpts) { ExcerptsScreen(book: reader.book, repository: reader.store.repository, openSource: { raw in excerpts = false; Task { await reader.goSource(raw) } }) }
             .sheet(isPresented: $processing) { DocumentPreparationScreen(book: reader.book, store: reader.store) }
             .task { await reader.load() }
             .onChange(of: phase) { if phase != .active { reader.store.preparation.pauseAll(); Task { await reader.flush() } } }
@@ -333,6 +365,15 @@ struct ReaderScreen: View {
                 }
                 if reader.book.format != "pdf" {
                     Section {
+                        HStack {
+                            ForEach(["沉浸", "舒展", "紧凑"], id: \.self) { title in
+                                let size = title == "沉浸" ? 95.0 : title == "舒展" ? 100.0 : 90.0
+                                let line = title == "沉浸" ? 1.8 : title == "舒展" ? 1.95 : 1.7
+                                Button(title) { reader.fontScale = size; reader.lineHeight = line; reader.pageMargins = 1; reader.apply() }
+                                    .buttonStyle(.bordered).tint(reader.fontScale == size && reader.lineHeight == line ? MobilePalette.accent : .secondary)
+                                    .accessibilityAddTraits(reader.fontScale == size && reader.lineHeight == line ? .isSelected : [])
+                            }
+                        }
                         appearanceSlider("字号", value: $reader.fontScale, range: 70...200, step: 10, display: "\(Int(reader.fontScale))%")
                         Picker("字体", selection: $reader.fontFamily) { Text("原书").tag(""); Text("宋体").tag("Songti SC"); Text("苹方").tag("PingFang SC"); Text("Georgia").tag("Georgia") }.onChange(of: reader.fontFamily) { reader.apply() }
                         appearanceSlider("行距", value: $reader.lineHeight, range: 1.4...2.2, step: 0.05, display: String(format: "%.2f", reader.lineHeight))

@@ -11,9 +11,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import book_import
 import server
 from storage import load, save
+from pdf_enhancement import page_offset_patch
 
 
 class PdfOutline(unittest.TestCase):
+    def test_manual_offset_reset_restores_automatic_mapping_and_preserves_source_positions(self):
+        book = {"pages": 100, "automaticPageOffset": 12, "pageOffset": 12,
+                "toc": [{"title": "Original", "printed": 3, "index": 15, "pdfY": .2,
+                         "children": [{"title": "Native destination", "index": 17, "pdfY": .6}]}]}
+        manual = page_offset_patch(book, 20)
+        self.assertEqual(manual["toc"][0]["index"], 23)
+        self.assertEqual(book["toc"][0]["index"], 15)
+        restored = page_offset_patch({**book, **manual}, None)
+        self.assertEqual(restored["pageOffsetMode"], "auto")
+        self.assertEqual(restored["pageOffset"], 12)
+        self.assertEqual(restored["toc"], book["toc"])
+        for invalid in [True, "3", 3.5, 101]:
+            with self.assertRaises(ValueError): page_offset_patch(book, invalid)
+
+    def test_legacy_auto_reset_recovers_ocr_mapping_without_replacing_toc(self):
+        book = {"pages": 100, "pageOffset": 20, "tocSource": "ocr-contents", "tocPages": [3, 5],
+                "toc": [{"title": "User title", "printed": 3, "index": 23, "pdfY": .4}]}
+        with patch("pdf_enhancement.automatic_page_offset", return_value=(12, 1)) as recover:
+            restored = page_offset_patch(book, None)
+        recover.assert_called_once_with(book, 5)
+        self.assertEqual(restored["automaticPageOffset"], 12)
+        self.assertEqual(restored["toc"][0], {"title": "User title", "printed": 3, "index": 15, "pdfY": .4})
+
     def test_destinations_preserve_same_page_positions_crop_and_rotation(self):
         with tempfile.TemporaryDirectory() as folder:
             writer = PdfWriter()

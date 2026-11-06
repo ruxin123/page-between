@@ -107,8 +107,7 @@ final class ReadingFlowTests: XCTestCase {
         let formula = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "g(x) = x2")).firstMatch
         XCTAssertTrue(formula.waitForExistence(timeout: 20), app.debugDescription)
         formula.tap()
-        let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "复制 LaTeX")).firstMatch
-        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription); copy.tap()
+        tapSelectionAction("复制 LaTeX", in: app)
         app.buttons["reader.more"].tap(); app.buttons["提问最近选段"].tap()
         XCTAssertTrue(app.webViews["markdown.preview"].waitForExistence(timeout: 10))
         let renderedFormula = app.webViews["markdown.preview"].descendants(matching: .any).matching(NSPredicate(format: "label == %@", "g(x)=x^2")).firstMatch
@@ -118,22 +117,20 @@ final class ReadingFlowTests: XCTestCase {
         app.buttons["完成"].tap()
         let damaged = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "a + b")).firstMatch
         XCTAssertTrue(damaged.waitForExistence(timeout: 5), app.debugDescription); damaged.tap()
-        let ask = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "提问")).firstMatch
-        XCTAssertTrue(ask.waitForExistence(timeout: 5), app.debugDescription); ask.tap()
+        tapSelectionAction("提问", in: app)
         XCTAssertTrue(app.images["原书公式"].waitForExistence(timeout: 15), app.debugDescription)
         capture(app, "original-formula-fallback")
         app.buttons["完成"].tap()
         let table = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "f(x)")).firstMatch
         XCTAssertTrue(table.waitForExistence(timeout: 5), app.debugDescription); table.tap()
-        XCTAssertTrue(ask.waitForExistence(timeout: 5), app.debugDescription); ask.tap()
+        tapSelectionAction("提问", in: app)
         XCTAssertTrue(app.webViews["markdown.preview"].staticTexts["f(x)"].waitForExistence(timeout: 15), app.debugDescription)
         capture(app, "complete-table")
         app.buttons["完成"].tap()
         let diagram = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Original diagram")).firstMatch
         XCTAssertTrue(diagram.waitForExistence(timeout: 5), app.debugDescription)
         diagram.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 5)).tap()
-        let copyImage = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "复制原图")).firstMatch
-        XCTAssertTrue(copyImage.waitForExistence(timeout: 5), app.debugDescription); copyImage.tap()
+        tapSelectionAction("复制原图", in: app)
         app.buttons["reader.more"].tap()
         XCTAssertFalse(app.buttons["翻译最近选段"].exists)
         app.buttons["提问最近选段"].tap()
@@ -148,7 +145,17 @@ final class ReadingFlowTests: XCTestCase {
         let note = app.descendants(matching: .any).matching(identifier: "excerpt.note").firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 10)); note.tap(); note.typeText("Original thought")
         app.buttons["保存笔记"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original thought")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(excerpt.waitForExistence(timeout: 10)); excerpt.tap()
+        XCTAssertTrue(note.waitForExistence(timeout: 10)); XCTAssertTrue((note.value as? String ?? "").contains("Original thought"))
+        app.buttons["删除"].tap()
+        XCTAssertTrue(app.buttons["撤销删除"].waitForExistence(timeout: 10)); app.buttons["撤销删除"].tap()
+        XCTAssertTrue(excerpt.waitForExistence(timeout: 10))
+        app.buttons["导出"].tap(); app.buttons["JSON"].tap()
+        XCTAssertTrue(app.buttons["存储或分享导出"].waitForExistence(timeout: 15), app.debugDescription)
         capture(app, "saved-image-excerpt")
+        excerpt.tap(); app.buttons["返回原文"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "reader.pdf").firstMatch.waitForExistence(timeout: 10))
     }
     @MainActor func testTransferImportProgressBookmarksAndExport() throws {
         let app = XCUIApplication()
@@ -265,6 +272,16 @@ final class ReadingFlowTests: XCTestCase {
         app.buttons["reader.more"].tap()
         app.buttons["提问最近选段"].tap()
         XCTAssertTrue(app.navigationBars["书内答疑"].waitForExistence(timeout: 5))
+    }
+    @MainActor private func tapSelectionAction(_ title: String, in app: XCUIApplication) {
+        let action = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", title)).firstMatch
+        for _ in 0..<4 {
+            if action.waitForExistence(timeout: 1), action.isHittable { action.tap(); return }
+            let forward = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "前进", "Forward")).firstMatch
+            guard forward.waitForExistence(timeout: 1) else { break }
+            forward.tap()
+        }
+        XCTFail("Selection menu action is unavailable: " + title + "\n" + app.debugDescription)
     }
     @MainActor private func openBook(_ book: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<5 {

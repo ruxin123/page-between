@@ -59,9 +59,9 @@ struct ExcerptsScreen: View {
     private func reload() async {
         items = await repository.books().first(where: { $0.id == book.id })?.excerpts?.filter { $0.deletedAt == nil } ?? []
     }
-    private func save(_ item: SavedExcerpt) async {
-        do { try await repository.saveExcerpt(book.id, excerpt: item); await reload() }
-        catch { self.error = error.localizedDescription }
+    @discardableResult private func save(_ item: SavedExcerpt) async -> Bool {
+        do { try await repository.saveExcerpt(book.id, excerpt: item); await reload(); return true }
+        catch { self.error = error.localizedDescription; return false }
     }
     private func remove(_ item: SavedExcerpt) async {
         var deleted = item
@@ -122,7 +122,7 @@ private struct ExcerptDetail: View {
     let book: MobileBook
     let repository: LibraryRepository
     @State var item: SavedExcerpt
-    let save: (SavedExcerpt) async -> Void
+    let save: (SavedExcerpt) async -> Bool
     let remove: () async -> Void
     let openSource: () -> Void
     @State private var images: [MarkdownSourceImage] = []
@@ -139,7 +139,7 @@ private struct ExcerptDetail: View {
                     if let answer = item.answer { MarkdownView(text: answer, images: images) }
                     TextField("笔记", text: $item.note, axis: .vertical).lineLimit(3...8).accessibilityIdentifier("excerpt.note").textFieldStyle(.roundedBorder)
                     HStack {
-                        Button("保存笔记") { Task { await save(item) } }.buttonStyle(.borderedProminent)
+                        Button("保存笔记") { Task { if await save(item) { dismiss() } else { error = "笔记未保存，请重试。" } } }.buttonStyle(.borderedProminent)
                         Button("返回原文") { dismiss(); openSource() }
                         Spacer()
                         Button("删除", role: .destructive) { Task { await remove(); dismiss() } }

@@ -203,10 +203,9 @@ private final class ReadingPDFView: PDFView {
     private func clearObject() { if let selectedObject { selectedObject.page.removeAnnotation(selectedObject.annotation) }; selectedObject = nil }
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
         guard let selectedObject else { return nil }
-        var actions: [UIMenuElement] = []
+        var actions: [UIMenuElement] = [UIAction(title: "提问", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.onAsk?(false) }]
         if !selectedObject.object.text.isEmpty { actions.append(UIAction(title: selectedObject.object.type == "equation" ? "复制 LaTeX" : "复制", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in self?.onCopy?() }) }
         actions.append(UIAction(title: "复制原图", image: UIImage(systemName: "photo")) { [weak self] _ in self?.onCopyImage?() })
-        actions.append(UIAction(title: "提问", image: UIImage(systemName: "text.bubble")) { [weak self] _ in self?.onAsk?(false) })
         if selectedObject.object.type != "equation", !selectedObject.object.text.isEmpty { actions.append(UIAction(title: "翻译", image: UIImage(systemName: "character.bubble")) { [weak self] _ in self?.onAsk?(true) }) }
         actions.append(UIAction(title: "保存到页边", image: UIImage(systemName: "text.badge.plus")) { [weak self] _ in self?.onSave?() })
         return UIMenu(children: actions)

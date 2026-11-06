@@ -156,6 +156,8 @@ final class ReadingFlowTests: XCTestCase {
         capture(app, "saved-image-excerpt")
         excerpt.tap(); app.buttons["返回原文"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "reader.pdf").firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.navigationBars["页边"].exists)
+        XCTAssertFalse(app.navigationBars["选段"].exists)
     }
     @MainActor func testTransferImportProgressBookmarksAndExport() throws {
         let app = XCUIApplication()

@@ -35,12 +35,16 @@ private struct MarkdownWebView: UIViewRepresentable {
         configuration.websiteDataStore = Self.dataStore
         configuration.userContentController.add(context.coordinator, name: "markdownReady")
         configuration.setURLSchemeHandler(MarkdownResources(), forURLScheme: MarkdownResources.scheme)
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = MarkdownBrowser(frame: .zero, configuration: configuration)
         view.accessibilityIdentifier = "markdown.preview"
         view.isOpaque = false; view.backgroundColor = .clear; view.scrollView.isScrollEnabled = false
         view.navigationDelegate = context.coordinator
         context.coordinator.phase(view, "requested")
-        view.load(URLRequest(url: URL(string: "\(MarkdownResources.scheme)://bundle/markdown.html")!))
+        view.loadPreview = { [weak view, weak coordinator = context.coordinator] in
+            guard let view else { return }
+            coordinator?.phase(view, "attached")
+            view.load(URLRequest(url: URL(string: "\(MarkdownResources.scheme)://bundle/markdown.html")!))
+        }
         return view
     }
     func updateUIView(_ view: WKWebView, context: Context) { context.coordinator.parent = self; context.coordinator.render(view) }
@@ -98,6 +102,17 @@ private struct MarkdownWebView: UIViewRepresentable {
                 decisionHandler(url?.scheme == MarkdownResources.scheme && url?.host == "bundle" ? .allow : .cancel)
             }
         }
+    }
+}
+
+private final class MarkdownBrowser: WKWebView {
+    var loadPreview: (() -> Void)?
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        let load = loadPreview
+        loadPreview = nil
+        load?()
     }
 }
 

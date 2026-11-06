@@ -331,11 +331,11 @@ struct ReaderScreen: View {
                 }
                 ToolbarItem(placement: .bottomBar) {
                     HStack(spacing: 8) {
-                        Button { Task { _ = await reader.navigator?.goBackward(options: .animated) } } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }.accessibilityLabel("上一页")
+                        Button { Task { _ = await reader.navigator?.goBackward(options: .animated) } } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("上一页")
                         VStack(spacing: 3) { Text(reader.chapter).lineLimit(1).font(.caption); Text("\(Int(reader.progress * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }.frame(maxWidth: .infinity).accessibilityElement(children: .combine).accessibilityIdentifier("reader.position")
-                        Button { Task { await reader.bookmark() } } label: { Image(systemName: reader.bookmarked ? "bookmark.fill" : "bookmark").frame(width: 44, height: 44) }.accessibilityIdentifier("reader.bookmark").accessibilityLabel(reader.bookmarked ? "移除书签" : "添加书签")
-                        Button { appearance = true } label: { Image(systemName: "textformat.size").frame(width: 44, height: 44) }.accessibilityIdentifier("reader.appearance").accessibilityLabel("阅读设置")
-                        Button { Task { _ = await reader.navigator?.goForward(options: .animated) } } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }.accessibilityLabel("下一页")
+                        Button { Task { await reader.bookmark() } } label: { Image(systemName: reader.bookmarked ? "bookmark.fill" : "bookmark").frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityIdentifier("reader.bookmark").accessibilityLabel(reader.bookmarked ? "移除书签" : "添加书签")
+                        Button { appearance = true } label: { Image(systemName: "textformat.size").frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityIdentifier("reader.appearance").accessibilityLabel("阅读设置")
+                        Button { Task { _ = await reader.navigator?.goForward(options: .animated) } } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("下一页")
                     }.buttonStyle(.plain).frame(maxWidth: .infinity)
                 }
             }

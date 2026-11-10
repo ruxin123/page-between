@@ -9,6 +9,7 @@ export function translationSettingsMarkup(config, saved) {
    <div data-ai-options ${config.provider === "ai" ? "" : "hidden"}>
     <label class="setting-check">沿用 AI 答疑的模型<input name="useChatModel" type="checkbox" ${inherited ? "checked" : ""}></label>
     <a data-inherited-note data-configured="${saved.services.ai.ready}" href="#/settings/ai" ${inherited && !saved.services.ai.ready ? "" : "hidden"}>配置答疑模型</a>
+    <details><summary>自定义提示词</summary><label class="service-field"><span class="visually-hidden">翻译偏好</span><textarea name="customPrompt" maxlength="4000" rows="5" placeholder="例如：数学术语后保留英文原词">${escapeHTML(config.customPrompt || "")}</textarea></label></details>
    </div>
    <fieldset data-translation-model ${inherited || config.provider === "google" ? "disabled hidden" : ""}>
     <legend class="visually-hidden">翻译模型</legend>

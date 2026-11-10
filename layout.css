@@ -859,7 +859,8 @@ kbd {
   font-size: 12px;
 }
 .service-field input,
-.service-field select {
+.service-field select,
+.service-field textarea {
   width: 100%;
   min-width: 0;
   height: 44px;
@@ -869,6 +870,13 @@ kbd {
   background: var(--surface);
   color: var(--ink);
   font: inherit;
+}
+.service-field textarea {
+  height: auto;
+  min-height: 120px;
+  padding: 12px;
+  line-height: 1.6;
+  resize: vertical;
 }
 .service-field input::placeholder {
   color: var(--secondary);

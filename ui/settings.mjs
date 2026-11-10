@@ -47,6 +47,7 @@ export function createServiceSettings({ document, api, post, toast }) {
         <label class="service-field">服务地址<input name="baseUrl" type="url" maxlength="2048" required spellcheck="false" autocomplete="off" placeholder="${ai ? "https://…/v1" : "https://mineru.net/api/v4"}" value="${escapeHTML(config.baseUrl)}"></label>
         <label class="service-field">${ai ? "模型名称" : "解析模型"}${ai ? `<input name="model" type="text" maxlength="200" required spellcheck="false" autocomplete="off" placeholder="模型 ID" value="${escapeHTML(config.model)}">` : `<select name="model"><option value="vlm" ${config.model === "vlm" ? "selected" : ""}>VLM</option><option value="pipeline" ${config.model === "pipeline" ? "selected" : ""}>Pipeline</option></select>`}</label>
         ${ai ? `<label class="setting-check">支持图像输入<input name="supportsImages" type="checkbox" ${config.supportsImages ? "checked" : ""}></label>` : ""}
+        ${ai ? `<details><summary>自定义提示词</summary><label class="service-field"><span class="visually-hidden">答疑偏好</span><textarea name="customPrompt" maxlength="4000" rows="5" placeholder="例如：先给提示，再逐步解释证明">${escapeHTML(config.customPrompt || "")}</textarea></label></details>` : ""}
         <label class="service-field">${ai ? "API Key" : "API Token"}<input name="key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="${config.hasKey ? "已保存，留空保持现有凭据" : ai ? "填写 Key；本机模型可留空" : "填写 MinerU Token"}"></label>
         ${config.hasKey ? '<label class="setting-check remove-key">移除已保存的凭据<input type="checkbox" name="removeKey"></label>' : ""}
         <div class="service-actions"><button type="submit" class="primary-button">保存设置</button><button type="button" class="secondary-button" data-test>${ai ? "测试连接" : "检查配置"}</button><button type="button" class="service-reset" data-reset>还原修改</button></div>
@@ -81,6 +82,8 @@ export function createServiceSettings({ document, api, post, toast }) {
     }
     if (service === "ai")
       config.supportsImages = form.elements.supportsImages.checked;
+    if (service === "ai" || service === "translation")
+      config.customPrompt = form.elements.customPrompt.value;
     const result = form.querySelector("[data-result]");
     form.dataset.busy = "true";
     form.setAttribute("aria-busy", "true");

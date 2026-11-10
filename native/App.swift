@@ -336,6 +336,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       return
     }
     if action == "translate" { showTranslation(body, from: message.webView); return }
+    if action == "lookup", let text = body["text"] as? String, !text.isEmpty, text.utf16.count <= 100, let source = message.webView {
+      let x = (body["x"] as? Double) ?? source.bounds.midX
+      let y = (body["y"] as? Double) ?? source.bounds.midY
+      guard x.isFinite, y.isFinite else { return }
+      let point = NSPoint(x: min(source.bounds.maxX, max(0, x)), y: source.isFlipped ? min(source.bounds.maxY, max(0, y)) : source.bounds.height - min(source.bounds.maxY, max(0, y)))
+      source.showDefinition(for: NSAttributedString(string: text), at: point)
+      return
+    }
     if action == "bookSource" { openBookSource(); return }
     if action == "tutor" { showTutor(body, from: message.webView); return }
     if action == "ready" {

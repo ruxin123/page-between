@@ -7,6 +7,7 @@ struct ServiceProfile: Codable, Equatable {
     var baseURL = "https://api.openai.com/v1"
     var model = ""
     var supportsImages: Bool?
+    var customPrompt: String?
 }
 
 enum LocalCredentials {
@@ -87,6 +88,7 @@ private let readingNetwork: URLSession = {
         #endif
     }
     func save(aiKey: String, translationKey: String, mineruKey: String) throws {
+        guard [ai.customPrompt, translation.customPrompt].allSatisfy({ ($0?.count ?? 0) <= 4000 }) else { throw ServiceError.message("自定义提示词请控制在 4000 字以内。") }
         _ = try Self.endpoint(ai.baseURL)
         if separateTranslation { _ = try Self.endpoint(translation.baseURL) }
         try mineru.validate()
@@ -109,7 +111,7 @@ private let readingNetwork: URLSession = {
         #else
         key = try LocalCredentials.read(dedicated ? "translation" : "ai")
         #endif
-        return try ServiceRequests.ai(base: profile.baseURL, model: profile.model, key: key, quote: quote, question: question, translate: translate, history: history, images: images, stream: stream)
+        return try ServiceRequests.ai(base: profile.baseURL, model: profile.model, key: key, quote: quote, question: question, translate: translate, history: history, images: images, stream: stream, customPrompt: (translate ? translation.customPrompt : ai.customPrompt) ?? "")
     }
     func stream(quote: String, question: String, history: [MobileTurn], images: [Data], onDelta: @escaping @MainActor @Sendable (String) async -> Void) async throws -> String {
         let request = try request(quote: quote, question: question, translate: false, history: history, images: images, stream: true)

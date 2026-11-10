@@ -15,6 +15,28 @@ from server import Handler
 
 
 class Settings(unittest.TestCase):
+    def test_custom_prompts_persist_independently_when_translation_inherits_model(self):
+        settings.update("ai", {**self.config, "customPrompt": "先给提示\n再展开证明"})
+        settings.update("translation", {"useChatModel": True, "customPrompt": "保留术语的英文原词"})
+        chat = settings.ai_configuration()
+        translated = settings.ai_configuration("translation")
+        self.assertEqual(chat["customPrompt"], "先给提示\n再展开证明")
+        self.assertEqual(translated["customPrompt"], "保留术语的英文原词")
+        self.assertEqual(chat["key"], translated["key"])
+        self.assertEqual(settings.personalized_prompt("format rules", translated), "用户偏好：\n保留术语的英文原词\n\nformat rules")
+        settings.update("ai", {**self.config, "key": ""})
+        self.assertEqual(settings.public_settings()["services"]["ai"]["customPrompt"], chat["customPrompt"])
+        settings.update("ai", {**self.config, "key": "", "customPrompt": ""})
+        self.assertEqual(settings.ai_configuration()["customPrompt"], "")
+
+    def test_custom_prompt_limits_reject_before_writing_configuration(self):
+        settings.update("ai", self.config)
+        before = settings.CONFIG.read_bytes()
+        for value in [None, [], "x" * 4001, "invalid\x00"]:
+            with self.assertRaises(settings.SettingsError):
+                settings.update("ai", {**self.config, "customPrompt": value})
+            self.assertEqual(settings.CONFIG.read_bytes(), before)
+
     def test_image_capability_is_explicit_persistent_and_does_not_change_credentials(
         self,
     ):

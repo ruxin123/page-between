@@ -13,11 +13,13 @@ struct MobileSettingsScreen: View {
                 Section("AI 答疑") {
                     profile($services.ai, key: $aiKey)
                     Toggle("支持图像输入", isOn: Binding(get: { services.ai.supportsImages == true }, set: { services.ai.supportsImages = $0 }))
+                    prompt($services.ai)
                 }
                 Section("划词翻译") {
                     Picker("默认服务", selection: $services.provider) { Text("Google").tag("google"); Text("AI").tag("ai") }
                     Toggle("单独配置翻译模型", isOn: $services.separateTranslation)
                     if services.separateTranslation { profile($services.translation, key: $translationKey) }
+                    if services.provider == "ai" { prompt($services.translation) }
                 }
                 Section("MinerU") {
                     TextField("解析服务地址", text: $services.mineru.baseURL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -37,6 +39,11 @@ struct MobileSettingsScreen: View {
                 translationKey = try LocalCredentials.read("translation")
                 mineruKey = try LocalCredentials.read("mineru")
             } catch { self.error = error.localizedDescription }
+        }
+    }
+    private func prompt(_ value: Binding<ServiceProfile>) -> some View {
+        DisclosureGroup("自定义提示词") {
+            TextField("回答或翻译偏好", text: Binding(get: { value.wrappedValue.customPrompt ?? "" }, set: { value.wrappedValue.customPrompt = $0 }), axis: .vertical).lineLimit(3...8)
         }
     }
     private func profile(_ value: Binding<ServiceProfile>, key: Binding<String>) -> some View {

@@ -2,6 +2,16 @@ import XCTest
 @testable import PageBetweenCore
 
 final class ServicesTests: XCTestCase {
+    func testCustomPromptKeepsSourceAndDefaultInstructions() throws {
+        let quote = #"$\sigma\in S_n$"#
+        let request = try ServiceRequests.ai(base: "https://example.org/v1", model: "original", key: "", quote: quote, question: "Explain", translate: false, customPrompt: "先给提示\n再展开证明")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        let messages = try XCTUnwrap(body["messages"] as? [[String: String]])
+        XCTAssertTrue(messages[0]["content"]!.contains("先给提示\n再展开证明"))
+        XCTAssertTrue(messages[0]["content"]!.contains("不编造本书结论或出处"))
+        XCTAssertEqual(messages[1]["content"], "原文：\n" + quote)
+        XCTAssertThrowsError(try ServiceRequests.ai(base: "https://example.org/v1", model: "original", key: "", quote: quote, question: "", translate: true, customPrompt: String(repeating: "x", count: 4001)))
+    }
     func testRequestsPreserveRawMathAndSeparateCredentialsFromContent() throws {
         let quote = #"Since an element $\sigma$ of $S_{n}$ is a function."#
         let request = try ServiceRequests.ai(base: "https://example.org/v1", model: "original-model", key: "synthetic-test-key", quote: quote, question: "Explain", translate: false)

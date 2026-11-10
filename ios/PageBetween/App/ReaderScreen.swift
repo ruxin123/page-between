@@ -79,6 +79,7 @@ struct AssistantSelection: Identifiable {
                 pdf.onCopyImage = { [weak self] in self?.copySourceImage() }
                 pdf.onSave = { [weak self] in self?.saveExcerpt() }
                 pdf.onAsk = { [weak self] in self?.ask(translate: $0) }
+                pdf.onLookup = { [weak self] in self?.lookupSelection() }
                 view = pdf
             } else if publication.conforms(to: .epub) || publication.conforms(to: .divina) {
                 let epub = try EPUBNavigatorViewController(publication: publication, initialLocation: locator, config: .init(preferences: preferences(), editingActions: actions))
@@ -205,6 +206,16 @@ struct AssistantSelection: Identifiable {
                 notice = "已保存到页边"
                 Task { try? await Task.sleep(for: .seconds(2)); notice = nil }
                 await store.refresh()
+            } catch { failure = error.localizedDescription }
+        }
+    }
+    func lookupSelection() {
+        Task {
+            do {
+                let source = try await selectedSource(translate: false)
+                let term = source.quote.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !term.isEmpty, term.count <= 100 else { throw ServiceError.message("请选择一个词或短语。") }
+                controller?.present(UIReferenceLibraryViewController(term: term), animated: true)
             } catch { failure = error.localizedDescription }
         }
     }

@@ -420,7 +420,7 @@ def run(book, prepared, config, job):
             translated["translation"] = restored["translation"]
             raw = json.dumps(translated)
         else:
-            raw = ai_tutor.complete(config, [{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}],
+            raw = ai_tutor.complete(config, [{"role": "system", "content": service_settings.personalized_prompt(SYSTEM, config)}, {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}],
                                     max_tokens=6000, on_delta=lambda _: None, control=job["control"])
         decoded = decode(raw, formulas)
         item = {**prepared, **decoded, "id": uuid.uuid4().hex, "createdAt": time.time(), "favorite": False, "model": config["model"], "provider": config["provider"]}

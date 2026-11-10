@@ -9,12 +9,16 @@ private final class ReadingPDFView: PDFView {
     var askSource: (() -> Void)?
     var saveSource: (() -> Void)?
     var translateSource: (() -> Void)?
+    var lookupSource: (() -> Void)?
     var resolveDestination: ((PDFDestination) -> PDFDestination)?
     override func copy(_ sender: Any?) { copySource?() }
     override func go(to destination: PDFDestination) { super.go(to: resolveDestination?(destination) ?? destination) }
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
-        let actions = [UIAction(title: "保存到页边") { [weak self] _ in self?.saveSource?() }, UIAction(title: "提问") { [weak self] _ in self?.askSource?() }, UIAction(title: "翻译") { [weak self] _ in self?.translateSource?() }]
+        var actions = [UIAction(title: "保存到页边") { [weak self] _ in self?.saveSource?() }, UIAction(title: "提问") { [weak self] _ in self?.askSource?() }, UIAction(title: "翻译") { [weak self] _ in self?.translateSource?() }]
+        if let text = currentSelection?.string, !text.isEmpty, text.count <= 100 {
+            actions.append(UIAction(title: "本机词典") { [weak self] _ in self?.lookupSource?() })
+        }
         builder.insertChild(UIMenu(options: .displayInline, children: actions), atStartOfMenu: .standardEdit)
     }
 }
@@ -30,6 +34,7 @@ private final class ReadingPDFView: PDFView {
     var onSave: (() -> Void)?
     var onCopyImage: (() -> Void)?
     var onAsk: ((Bool) -> Void)?
+    var onLookup: (() -> Void)?
     private let pdf = ReadingPDFView()
     private let document: PDFKit.PDFDocument
     private let initial: Locator?
@@ -72,6 +77,7 @@ private final class ReadingPDFView: PDFView {
         pdf.saveSource = { [weak self] in self?.onSave?() }
         pdf.askSource = { [weak self] in self?.onAsk?(false) }
         pdf.translateSource = { [weak self] in self?.onAsk?(true) }
+        pdf.lookupSource = { [weak self] in self?.onLookup?() }
         pdf.resolveDestination = { [weak self] in self?.destination($0) ?? $0 }
         applyScroll(continuous)
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))

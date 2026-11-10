@@ -22,8 +22,8 @@ CONFIG = (
 )
 LOCK = threading.RLock()
 DEFAULTS = {
-    "ai": {"baseUrl": "", "model": "", "supportsImages": False},
-    "translation": {"baseUrl": "", "model": "", "provider": "ai", "useChatModel": True},
+    "ai": {"baseUrl": "", "model": "", "supportsImages": False, "customPrompt": ""},
+    "translation": {"baseUrl": "", "model": "", "provider": "ai", "useChatModel": True, "customPrompt": ""},
     "mineru": {"baseUrl": "https://mineru.net/api/v4", "model": "vlm"},
 }
 ENV = {
@@ -139,10 +139,15 @@ def validated(service, config, *, require_key=False):
     model = text(config.get("model", ""), "模型名称", 200)
     key = text(config.get("key", ""), "凭据", 4096)
     extra = {}
+    if service in {"ai", "translation"}:
+        prompt = config.get("customPrompt", "")
+        if not isinstance(prompt, str) or len(prompt) > 4000 or any(ord(c) < 32 and c not in "\n\r\t" for c in prompt):
+            raise SettingsError("自定义提示词请控制在 4000 字以内。")
+        extra["customPrompt"] = prompt.strip()
     if service == "translation":
         if not isinstance(config.get("provider", "ai"), str) or config.get("provider", "ai") not in {"ai", "google"} or type(config.get("useChatModel", True)) is not bool:
             raise SettingsError("翻译服务选项无效。")
-        extra = {"provider": config.get("provider", "ai"), "useChatModel": config.get("useChatModel", True)}
+        extra.update(provider=config.get("provider", "ai"), useChatModel=config.get("useChatModel", True))
         if not base and not model and (extra["useChatModel"] or extra["provider"] == "google"):
             return {"baseUrl": "", "model": "", "key": key, "host": "", **extra}
     try:
@@ -180,7 +185,9 @@ def ai_configuration(service="ai"):
     config = effective(service)
     if service == "translation":
         if config["useChatModel"]:
-            return ai_configuration("ai")
+            inherited = ai_configuration("ai")
+            inherited["customPrompt"] = validated("translation", config)["customPrompt"]
+            return inherited
         config = {**config, "provider": "ai"}
     if not config["baseUrl"] or not config["model"]:
         raise SettingsError("请先在设置中配置 AI 答疑或翻译专用模型。")
@@ -194,7 +201,13 @@ def ai_configuration(service="ai"):
         "key": result["key"],
         "host": result["host"],
         "supportsImages": result.get("supportsImages", False),
+        "customPrompt": result.get("customPrompt", ""),
     }
+
+
+def personalized_prompt(default, config):
+    custom = config.get("customPrompt", "")
+    return ("用户偏好：\n" + custom + "\n\n" if custom else "") + default
 
 
 def public_settings():
@@ -214,6 +227,8 @@ def public_settings():
             name: config[name] for name in ("baseUrl", "model", "source", "hasKey")
         }
         services[service].update(ready=ready, message=message)
+        if service in {"ai", "translation"}:
+            services[service]["customPrompt"] = config.get("customPrompt", "")
         if service == "ai":
             services[service]["supportsImages"] = config.get("supportsImages", False)
         if service == "translation":
@@ -240,6 +255,8 @@ def candidate(service, payload, *, require_key=False):
         raise SettingsError("不能同时替换与移除凭据。")
     old = effective(service, read_key=False)
     draft = {**payload, "key": incoming}
+    if service in {"ai", "translation"}:
+        draft.setdefault("customPrompt", old.get("customPrompt", ""))
     if service == "translation":
         draft.setdefault("provider", old["provider"])
         draft.setdefault("useChatModel", old["useChatModel"])
@@ -275,6 +292,8 @@ def update(service, payload):
         }
         if service == "ai":
             data["services"][service]["supportsImages"] = config["supportsImages"]
+        if service in {"ai", "translation"}:
+            data["services"][service]["customPrompt"] = config["customPrompt"]
         if service == "translation":
             data["services"][service].update(provider=config["provider"], useChatModel=config["useChatModel"])
         try:

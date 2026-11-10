@@ -1376,11 +1376,12 @@ function showToolbar(rectangle) {
     !currentSelection.text?.trim();
   $("copy-image").hidden = !currentSelection.image;
   $("pin-selection").hidden = current.shelf !== "学习";
+  $("lookup-selection").hidden = !window.webkit?.messageHandlers?.appNative || currentSelection.kind !== "text" || !currentSelection.text?.trim() || currentSelection.text.trim().length > 100;
   $("chapter-start").hidden =
     current.type !== "txt" ||
     !current.parseEnabled ||
     !Number.isFinite(currentSelection.position?.sourceOffset);
-  $("selection-more-toggle").hidden = $("chapter-start").hidden && $("pin-selection").hidden;
+  $("selection-more-toggle").hidden = $("chapter-start").hidden && $("pin-selection").hidden && $("lookup-selection").hidden;
   $("copy-label").textContent =
     currentSelection.format === "latex"
       ? "复制 LaTeX"
@@ -4058,6 +4059,13 @@ $("selection-more-toggle").onclick = () => {
 $("copy-selection").onclick = () =>
   currentSelection && copyText(currentSelection.text);
 $("copy-image").onclick = copyImage;
+$("lookup-selection").onclick = () => {
+  const text = currentSelection?.text?.trim();
+  if (!text || text.length > 100) return;
+  const box = $("selection-toolbar").getBoundingClientRect();
+  $("selection-more-menu").hidePopover();
+  window.webkit?.messageHandlers?.appNative?.postMessage({ action: "lookup", text, x: box.left, y: box.top });
+};
 $("save-selection").onclick = () => {
   const context = tutorContext(currentSelection);
   if (context && currentSelection) margins.save(context);

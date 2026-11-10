@@ -19,9 +19,9 @@ public enum ServiceRequests {
         guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { throw ServiceRequestFailure.invalidURL }
         return url
     }
-    public static func ai(base: String, model: String, key: String, quote: String, question: String, translate: Bool, history: [MobileTurn] = [], images: [Data] = [], stream: Bool = false) throws -> URLRequest {
+    public static func ai(base: String, model: String, key: String, quote: String, question: String, translate: Bool, history: [MobileTurn] = [], images: [Data] = [], stream: Bool = false, customPrompt: String = "") throws -> URLRequest {
         guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ServiceRequestFailure.missingModel }
-        guard quote.count <= 12000, question.count <= 6000 else { throw ServiceRequestFailure.selectionTooLong }
+        guard quote.count <= 12000, question.count <= 6000, customPrompt.count <= 4000 else { throw ServiceRequestFailure.selectionTooLong }
         guard images.count <= 4, images.reduce(0, { $0 + $1.count }) <= 6 * 1024 * 1024, images.allSatisfy({ $0.starts(with: [137,80,78,71,13,10,26,10]) }), !translate || images.isEmpty else { throw ServiceRequestFailure.selectionTooLong }
         guard history.count <= 40, history.reduce(0, { $0 + $1.content.count }) <= 80000, history.allSatisfy({ ["user", "assistant"].contains($0.role) }) else { throw ServiceRequestFailure.conversationTooLong }
         let base = try endpoint(base)
@@ -34,7 +34,9 @@ public enum ServiceRequests {
         if !images.isEmpty {
             source = [["type": "text", "text": "原文：\n" + quote] as [String: Any]] + images.map { ["type": "image_url", "image_url": ["url": "data:image/png;base64," + $0.base64EncodedString()]] as [String: Any] }
         }
-        let messages: [[String: Any]] = [["role": "system", "content": system], ["role": "user", "content": source]] + (translate ? [] : history.map { ["role": $0.role, "content": $0.content] }) + (question.isEmpty ? [] : [["role": "user", "content": question]])
+        let preference = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let instruction = (preference.isEmpty ? "" : "用户偏好：\n" + preference + "\n\n") + system
+        let messages: [[String: Any]] = [["role": "system", "content": instruction], ["role": "user", "content": source]] + (translate ? [] : history.map { ["role": $0.role, "content": $0.content] }) + (question.isEmpty ? [] : [["role": "user", "content": question]])
         request.httpBody = try JSONSerialization.data(withJSONObject: ["model": model, "messages": messages, "stream": stream])
         return request
     }

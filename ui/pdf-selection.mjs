@@ -93,6 +93,65 @@ export function mergeSelectionRects(rects) {
   return result;
 }
 
+function selectionBands(layer, range) {
+  const box = layer.getBoundingClientRect();
+  const sx = box.width / layer.clientWidth,
+    sy = box.height / layer.clientHeight;
+  const rects = [];
+  if (box.width && box.height && range?.intersectsNode(layer)) {
+    for (const node of layer.querySelectorAll("span")) {
+      if (node.firstChild?.nodeType !== 3 || !range.intersectsNode(node))
+        continue;
+      const selected = layer.ownerDocument.createRange();
+      selected.selectNodeContents(node);
+      if (node.contains(range.startContainer))
+        selected.setStart(range.startContainer, range.startOffset);
+      if (node.contains(range.endContainer))
+        selected.setEnd(range.endContainer, range.endOffset);
+      if (selected.collapsed) continue;
+      const bounds = selected.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) continue;
+      const rect = {
+        left: (bounds.left - box.left) / sx,
+        right: (bounds.right - box.left) / sx,
+        top: (bounds.top - box.top) / sy,
+        bottom: (bounds.bottom - box.top) / sy,
+        chars: selected.toString().length,
+      };
+      const font = layer._selectionGeometry?.get(node);
+      if (font && Math.abs(Math.sin(font.angle)) < 0.001) {
+        const normal = Math.cos(font.angle);
+        const first = font.y - normal * font.height * font.ascent;
+        const last = font.y + normal * font.height * font.descent;
+        rect.top = Math.min(first, last);
+        rect.bottom = Math.max(first, last);
+      } else if (font && Math.abs(Math.cos(font.angle)) < 0.001) {
+        const normal = Math.sin(font.angle);
+        const first = font.x + normal * font.height * font.ascent;
+        const last = font.x - normal * font.height * font.descent;
+        rect.left = Math.min(first, last);
+        rect.right = Math.max(first, last);
+      }
+      rects.push(rect);
+    }
+  }
+  return mergeSelectionRects(rects);
+}
+
+export function pdfSelectionRects(range, root) {
+  const result = [];
+  for (const layer of root.querySelectorAll(".textLayer")) {
+    if (!range.intersectsNode(layer)) continue;
+    const page = Number(layer.closest(".pdf-page")?.dataset.page);
+    if (!page || !layer.clientWidth || !layer.clientHeight) continue;
+    for (const rect of selectionBands(layer, range)) {
+      const bbox = [rect.left / layer.clientWidth, rect.top / layer.clientHeight, rect.right / layer.clientWidth, rect.bottom / layer.clientHeight].map(value => Math.max(0, Math.min(1, value)));
+      if (bbox[0] < bbox[2] && bbox[1] < bbox[3]) result.push({page, bbox});
+    }
+  }
+  return result;
+}
+
 export function paintNativeSelection(root, selection) {
   const range =
     selection?.rangeCount && !selection.isCollapsed
@@ -114,48 +173,7 @@ export function paintNativeSelection(root, selection) {
       );
       layer.before(overlay);
     }
-    const box = layer.getBoundingClientRect();
-    const sx = box.width / layer.clientWidth,
-      sy = box.height / layer.clientHeight;
-    const rects = [];
-    if (box.width && box.height && range?.intersectsNode(layer)) {
-      for (const node of layer.querySelectorAll("span")) {
-        if (node.firstChild?.nodeType !== 3 || !range.intersectsNode(node))
-          continue;
-        const selected = layer.ownerDocument.createRange();
-        selected.selectNodeContents(node);
-        if (node.contains(range.startContainer))
-          selected.setStart(range.startContainer, range.startOffset);
-        if (node.contains(range.endContainer))
-          selected.setEnd(range.endContainer, range.endOffset);
-        if (selected.collapsed) continue;
-        const bounds = selected.getBoundingClientRect();
-        if (!bounds.width || !bounds.height) continue;
-        const rect = {
-          left: (bounds.left - box.left) / sx,
-          right: (bounds.right - box.left) / sx,
-          top: (bounds.top - box.top) / sy,
-          bottom: (bounds.bottom - box.top) / sy,
-          chars: selected.toString().length,
-        };
-        const font = layer._selectionGeometry?.get(node);
-        if (font && Math.abs(Math.sin(font.angle)) < 0.001) {
-          const normal = Math.cos(font.angle);
-          const first = font.y - normal * font.height * font.ascent;
-          const last = font.y + normal * font.height * font.descent;
-          rect.top = Math.min(first, last);
-          rect.bottom = Math.max(first, last);
-        } else if (font && Math.abs(Math.cos(font.angle)) < 0.001) {
-          const normal = Math.sin(font.angle);
-          const first = font.x + normal * font.height * font.ascent;
-          const last = font.x - normal * font.height * font.descent;
-          rect.left = Math.min(first, last);
-          rect.right = Math.max(first, last);
-        }
-        rects.push(rect);
-      }
-    }
-    const bands = mergeSelectionRects(rects);
+    const bands = selectionBands(layer, range);
     // One filled path paints overlapping runs once, without darker alpha seams.
     overlay.firstElementChild.setAttribute(
       "d",

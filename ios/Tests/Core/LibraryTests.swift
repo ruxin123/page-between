@@ -90,6 +90,7 @@ final class LibraryTests: XCTestCase {
         var conversation = MobileConversation(book: book.id, quote: #"A formula $x^2$."#, locator: #"{"href":"chapter-1.xhtml"}"#)
         conversation.previewQuote = #"A formula $x^2$."#
         conversation.sourceObjects = [PDFSourceObject(page: 3, box: PDFBox(0.1,0.2,0.3,0.4), type: "equation", text: #"$x^2$"#)]
+        conversation.sourceRects = [PDFSelectionRect(page: 3, box: PDFBox(0.1, 0.2, 0.3, 0.4))]
         conversation.turns = [MobileTurn(role: "user", content: "Explain"), MobileTurn(role: "assistant", content: #"Use $x^2$."#)]
         try await repository.saveConversation(conversation)
         try await repository.markDeleted(book.id, deleted: true)
@@ -104,6 +105,12 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(recovered.first?.turns[1].status, "stopped")
         XCTAssertEqual(recovered.first?.turns[1].content, conversation.turns[1].content)
         XCTAssertEqual(recovered.first?.sourceObjects, conversation.sourceObjects)
+        XCTAssertEqual(recovered.first?.sourceRects, conversation.sourceRects)
+        var invalid = conversation
+        invalid.sourceRects = [PDFSelectionRect(page: 3, box: PDFBox(0.4, 0.2, 0.1, 0.4))]
+        do { try await restarted.saveConversation(invalid); XCTFail("Invalid selection geometry must not overwrite a conversation") } catch {}
+        let unchanged = try await restarted.conversations(book.id)
+        XCTAssertEqual(unchanged.first?.sourceRects, conversation.sourceRects)
     }
 
     func testChaptersAndLongNovelPreserveEveryCharacter() {

@@ -62,7 +62,7 @@ def change(book, payload):
             if original.strip():
                 source["quote"] = original
             # Nearby context is for answering questions, not part of a saved excerpt.
-            source = {key: source[key] for key in ("quote", "position", "citation", "image") if key in source}
+            source = {key: source[key] for key in ("quote", "position", "citation", "image", "rects") if key in source}
             kind = payload["source"].get("kind")
             source["kind"] = kind if isinstance(kind, str) and kind in {"text", "table", "equation", "image"} else "text"
             item = {"id": ident, "source": source, "createdAt": time.time(), "note": ""}
@@ -130,6 +130,8 @@ def preview(book, item):
 
 
 def export(book, state, format):
+    if format == "pdf":
+        return export_pdf(book)
     if format not in {"json", "markdown"}:
         raise ValueError("请选择 JSON 或 Markdown。")
     import translation
@@ -193,3 +195,90 @@ def export(book, state, format):
     finally:
         path.unlink(missing_ok=True)
     return {"download": "/api/downloads/" + name, "name": "页边" + (".json" if format == "json" else ".zip")}
+
+
+def pdf_point(page, x, y):
+    """Normalized, rotated crop coordinates to the original PDF user space."""
+    crop = page.cropbox
+    left, bottom, width, height = float(crop.left), float(crop.bottom), float(crop.width), float(crop.height)
+    if width <= 0 or height <= 0 or not all(math.isfinite(n) for n in (left, bottom, width, height)):
+        raise ValueError("PDF 页面尺寸无效。")
+    rotation = page.rotation % 360
+    if rotation == 90:
+        x, y = y, 1 - x
+    elif rotation == 180:
+        x, y = 1 - x, 1 - y
+    elif rotation == 270:
+        x, y = 1 - y, x
+    elif rotation != 0:
+        raise ValueError("PDF 页面旋转无效。")
+    return left + x * width, bottom + (1 - y) * height
+
+
+def export_pdf(book):
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.annotations import Highlight, Text
+    from pypdf.generic import ArrayObject, FloatObject, NameObject, TextStringObject
+    from book_import import path_for
+    if book["type"] != "pdf":
+        raise ValueError("只有 PDF 书籍支持带注释导出。")
+    original = path_for(book["originalUrl"])
+    if original.stat().st_size > MAX_EXPORT:
+        raise ValueError("原 PDF 超过 200 MB，暂不支持带注释导出。")
+    with LOCK:
+        items = copy.deepcopy(validate(book, BOOK_ROOT)["items"])
+    reader = PdfReader(original)
+    if reader.is_encrypted or len(reader.pages) != book["pages"]:
+        raise ValueError("无法读取原 PDF 页面。")
+    writer = PdfWriter(clone_from=reader)
+    text_size = annotation_count = 0
+    for item in items:
+        if item.get("deletedAt"):
+            continue
+        source = item["source"]
+        contents = source["quote"]
+        for key, title in (("note", "笔记"), ("translation", "译文"), ("answer", "答疑")):
+            if item.get(key):
+                contents += "\n\n" + title + "\n" + item[key]
+        grouped = {}
+        for rect in source.get("rects", []):
+            grouped.setdefault(rect["page"], []).append(rect["bbox"])
+        # Old records carry a page anchor, not a precise selection rectangle.
+        if not grouped:
+            grouped[source["position"]["index"]] = []
+        text_size += len(contents.encode("utf-8")) * len(grouped)
+        annotation_count += len(grouped)
+        if text_size > MAX_EXPORT or annotation_count > 100000:
+            raise ValueError("注释较多，请减少导出记录。")
+        for number, boxes in grouped.items():
+            page = writer.pages[number - 1]
+            if boxes:
+                points = []
+                for x0, y0, x1, y1 in boxes:
+                    points.extend(pdf_point(page, x, y) for x, y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)))
+                bounds = (min(x for x, y in points), min(y for x, y in points), max(x for x, y in points), max(y for x, y in points))
+                annotation = Highlight(rect=bounds, quad_points=ArrayObject([FloatObject(n) for point in points for n in point]), highlight_color="82a997", printing=True)
+                annotation[NameObject("/CA")] = FloatObject(.28)
+            else:
+                x, y = pdf_point(page, .96, source["position"].get("pdfY", 0))
+                crop = page.cropbox
+                x = max(float(crop.left), min(x, float(crop.right) - 16))
+                y = max(float(crop.bottom), min(y, float(crop.top) - 16))
+                annotation = Text(rect=(x, y, x + 16, y + 16), text=contents)
+            annotation[NameObject("/Contents")] = TextStringObject(contents)
+            annotation[NameObject("/T")] = TextStringObject("页间")
+            annotation[NameObject("/NM")] = TextStringObject(f"page-between-{item['id']}-{number}")
+            writer.add_annotation(number - 1, annotation)
+    directory = CACHE / "exports"
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / (uuid.uuid4().hex + ".pdf")
+    partial = target.with_suffix(".part")
+    try:
+        writer.write(partial)
+        if partial.stat().st_size > MAX_EXPORT:
+            raise ValueError("注释 PDF 超过 200 MB，请减少导出记录。")
+        partial.replace(target)
+    finally:
+        partial.unlink(missing_ok=True)
+        writer.close()
+    return {"download": "/api/downloads/" + target.name, "name": "页边.pdf"}

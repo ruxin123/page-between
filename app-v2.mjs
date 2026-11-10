@@ -29,6 +29,7 @@ import {
   alignTextLayer,
   canonicalSelection,
   pdfSelectionPages,
+  pdfSelectionRects,
   canonicalPosition,
   prepareNativeHighlights,
   paintNativeSelection,
@@ -1481,6 +1482,7 @@ function captureSelection(doc = document) {
     document: doc,
     text,
     kind: "text",
+    ...(current.type === "pdf" ? { rects: pdfSelectionRects(range, root) } : {}),
     ...selectionDetails(position),
   };
   const rects = [...range.getClientRects()].filter(
@@ -1571,6 +1573,7 @@ function renderObjects(blocks, viewport, root, page) {
       currentSelection = {
         kind: block.type,
         text: block.text || "[完整图表]",
+        rects: [{ page, bbox: [...block.bbox] }],
         image: pdfObjectImage(root, block.bbox) || block.image,
         format: block.type === "equation" ? "latex" : null,
         position: {
@@ -4203,6 +4206,7 @@ function tutorContext(selection = null) {
       citation: details.source,
       image: selection?.image,
       kind: selection?.kind || "text",
+      ...(selection?.rects ? { rects: selection.rects } : {}),
     },
   };
 }

@@ -707,7 +707,7 @@ class Handler(SimpleHTTPRequestHandler):
             if route.path.startswith("/api/downloads/"):
                 prune_exports(CACHE)
                 name = route.path.removeprefix("/api/downloads/")
-                if not re.fullmatch(r"[0-9a-f]{32}\.(?:epub|pbbackup|pbtransfer|json|zip)", name):
+                if not re.fullmatch(r"[0-9a-f]{32}\.(?:epub|pbbackup|pbtransfer|json|zip|pdf)", name):
                     raise ValueError("导出文件地址无效。")
                 path = CACHE / "exports" / name
                 if not path.is_file():
@@ -717,7 +717,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "Content-Type",
                     "application/epub+zip"
                     if name.endswith(".epub")
-                    else "application/json" if name.endswith(".json") else "application/zip",
+                    else "application/pdf" if name.endswith(".pdf") else "application/json" if name.endswith(".json") else "application/zip",
                 )
                 self.send_header("Content-Length", str(path.stat().st_size))
                 self.send_header(

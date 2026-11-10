@@ -20,6 +20,13 @@ public struct ReadingAppearance: Codable, Equatable, Sendable {
     }
 }
 
+public struct PDFSelectionRect: Codable, Equatable, Sendable {
+    public var page: Int
+    public var box: PDFBox
+    public init(page: Int, box: PDFBox) { self.page = page; self.box = box }
+    public var isValid: Bool { (1...100000).contains(page) && box.isValid }
+}
+
 public struct SavedExcerpt: Codable, Identifiable, Equatable, Sendable {
     public var id = UUID()
     public var quote: String
@@ -27,18 +34,20 @@ public struct SavedExcerpt: Codable, Identifiable, Equatable, Sendable {
     public var locator: String
     public var chapter: String
     public var objects: [PDFSourceObject]
+    public var rects: [PDFSelectionRect]?
     public var note = ""
     public var answer: String?
     public var createdAt = Date()
     public var deletedAt: Date?
-    public init(quote: String, markdown: String?, locator: String, chapter: String, objects: [PDFSourceObject] = []) {
+    public init(quote: String, markdown: String?, locator: String, chapter: String, objects: [PDFSourceObject] = [], rects: [PDFSelectionRect] = []) {
         self.quote = quote
         self.markdown = markdown
         self.locator = locator
         self.chapter = chapter
         self.objects = objects
+        self.rects = rects.isEmpty ? nil : rects
     }
     public var isValid: Bool {
-        (!quote.isEmpty || !objects.isEmpty) && quote.count <= 12000 && (markdown?.count ?? 0) <= 24000 && locator.utf8.count <= 64000 && (try? JSONSerialization.jsonObject(with: Data(locator.utf8))) is [String: Any] && chapter.count <= 2000 && note.count <= 2000 && objects.count <= 100 && objects.allSatisfy(\.isValid) && (answer?.count ?? 0) <= 100000
+        (!quote.isEmpty || !objects.isEmpty) && quote.count <= 12000 && (markdown?.count ?? 0) <= 24000 && locator.utf8.count <= 64000 && (try? JSONSerialization.jsonObject(with: Data(locator.utf8))) is [String: Any] && chapter.count <= 2000 && note.count <= 2000 && objects.count <= 100 && objects.allSatisfy(\.isValid) && (rects?.count ?? 0) <= 1000 && rects?.allSatisfy(\.isValid) != false && (answer?.count ?? 0) <= 100000
     }
 }

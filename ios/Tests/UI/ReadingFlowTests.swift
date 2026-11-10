@@ -153,6 +153,10 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(excerpt.waitForExistence(timeout: 10))
         app.buttons["导出"].tap(); app.buttons["JSON"].tap()
         XCTAssertTrue(app.buttons["存储或分享导出"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["导出"].tap(); app.buttons["注释 PDF"].tap()
+        let annotated = app.buttons["存储或分享导出"]
+        expectation(for: NSPredicate(format: "value == %@", "页边.pdf"), evaluatedWith: annotated)
+        waitForExpectations(timeout: 20)
         capture(app, "saved-image-excerpt")
         excerpt.tap(); app.buttons["返回原文"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "reader.pdf").firstMatch.waitForExistence(timeout: 10))

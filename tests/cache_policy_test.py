@@ -27,6 +27,10 @@ class CachePolicy(unittest.TestCase):
             discard_export(root, f"{4:032x}.epub")
             prune_exports(root, now=10000)
             self.assertEqual(list(exports.iterdir()), [])
+            pdf = exports / ("f" * 32 + ".pdf")
+            pdf.write_bytes(b"temporary annotation export")
+            discard_export(root, pdf.name)
+            self.assertFalse(pdf.exists())
 
     def test_export_budget_keeps_only_the_latest_large_file(self):
         with tempfile.TemporaryDirectory() as temporary:

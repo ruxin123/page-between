@@ -476,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func saveExport(path: String, name: String) {
     guard
-      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer|json|zip)$", options: .regularExpression)
+      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer|json|zip|pdf)$", options: .regularExpression)
         != nil,
       base != nil
     else { return }
@@ -503,7 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
   func writeExport(path: String, destination: URL) async throws {
     guard destination.isFileURL,
-      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer|json|zip)$", options: .regularExpression)
+      path.range(of: "^/api/downloads/[0-9a-f]{32}\\.(epub|pbbackup|pbtransfer|json|zip|pdf)$", options: .regularExpression)
         != nil,
       let base = base, let url = URL(string: path, relativeTo: base)?.absoluteURL
     else {

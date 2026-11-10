@@ -115,14 +115,17 @@ private final class ReadingPDFView: PDFView {
             let object = selectedObject.object
             guard object.text.count <= 12000 else { throw ServiceRequestFailure.selectionTooLong }
             guard let locator = location(page: selectedObject.index, quote: object.text, y: object.box.top) else { throw LibraryFailure.invalidFile }
-            return AssistantSelection(book: book.id, quote: object.text, locator: try locator.jsonString(), translate: translate, markdown: object.markdown, objects: [object])
+            return AssistantSelection(book: book.id, quote: object.text, locator: try locator.jsonString(), translate: translate, markdown: object.markdown, objects: [object], rects: [PDFSelectionRect(page: object.page, box: object.box)])
         }
         guard let selection = pdf.currentSelection?.copy() as? PDFSelection, let native = selection.string, !native.isEmpty else { throw ServiceError.message("请先长按选择一段文字。") }
         guard native.count <= 12000 else { throw ServiceRequestFailure.selectionTooLong }
         let pages = selection.pages.map { (document.index(for: $0), $0) }.filter { $0.0 != NSNotFound }.sorted { $0.0 < $1.0 }
         guard let first = pages.first else { throw LibraryFailure.invalidFile }
-        var pieces: [PDFSelectedSource] = []
+        var pieces: [PDFSelectedSource] = [], rects: [PDFSelectionRect] = []
         for (index, page) in pages {
+            for line in selection.selectionsByLine() where line.pages.contains(page) {
+                if let box = PDFSourceContent.box(page, rectangle: line.bounds(for: page)) { rects.append(PDFSelectionRect(page: index + 1, box: box)) }
+            }
             var data = canonicalPages[index]
             if data == nil { data = try? await preparation.repository.pdfPage(book.id, page: index + 1) }
             if let data, data.mineruCompleted, let glyphs = PDFSourceContent.glyphs(selection, page: page) {
@@ -134,10 +137,10 @@ private final class ReadingPDFView: PDFView {
             }
         }
         let raw = pieces.map(\.raw).joined(separator: "\n\n"), markdown = pieces.map(\.markdown).joined(separator: "\n\n")
-        guard raw.count <= 12000, pieces.reduce(0, { $0 + $1.objects.count }) <= 32 else { throw ServiceRequestFailure.selectionTooLong }
+        guard raw.count <= 12000, rects.count <= 1000, pieces.reduce(0, { $0 + $1.objects.count }) <= 32 else { throw ServiceRequestFailure.selectionTooLong }
         let box = PDFSourceContent.box(first.1, rectangle: selection.bounds(for: first.1))
         guard let locator = location(page: first.0, quote: raw, y: box?.top) else { throw LibraryFailure.invalidFile }
-        return AssistantSelection(book: book.id, quote: raw, locator: try locator.jsonString(), translate: translate, markdown: markdown, objects: pieces.flatMap(\.objects))
+        return AssistantSelection(book: book.id, quote: raw, locator: try locator.jsonString(), translate: translate, markdown: markdown, objects: pieces.flatMap(\.objects), rects: rects)
     }
     var hasSelection: Bool { selectedObject != nil || !(pdf.currentSelection?.string ?? "").isEmpty }
     func applyScroll(_ continuous: Bool) {

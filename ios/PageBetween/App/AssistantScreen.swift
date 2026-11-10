@@ -64,7 +64,7 @@ struct AssistantScreen: View {
                     Button("保存到页边", systemImage: "text.badge.plus") {
                         Task {
                             do {
-                                var item = SavedExcerpt(quote: selection.quote, markdown: selection.markdown, locator: selection.locator, chapter: title, objects: selection.objects)
+                                var item = SavedExcerpt(quote: selection.quote, markdown: selection.markdown, locator: selection.locator, chapter: title, objects: selection.objects, rects: selection.rects)
                                 item.answer = selection.translate ? answer : turns.filter { $0.role == "assistant" && $0.status != "generating" }.map(\.content).joined(separator: "\n\n")
                                 try await repository.saveExcerpt(selection.book, excerpt: item)
                             } catch { self.error = error.localizedDescription }
@@ -97,6 +97,7 @@ struct AssistantScreen: View {
         guard !selection.translate else { return }
         var item = conversation ?? MobileConversation(book: selection.book, quote: selection.quote, locator: selection.locator)
         item.previewQuote = selection.markdown; item.sourceObjects = selection.objects
+        item.sourceRects = selection.rects.isEmpty ? nil : selection.rects
         item.turns = turns; item.updatedAt = Date(); conversation = item; lastSavedAt = Date()
         do { try await repository.saveConversation(item) }
         catch { self.error = "记录未保存：" + error.localizedDescription }

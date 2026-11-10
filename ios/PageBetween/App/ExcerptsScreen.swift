@@ -37,7 +37,7 @@ struct ExcerptsScreen: View {
                 if items.isEmpty { ContentUnavailableView("暂无保存选段", systemImage: "text.badge.plus") }
                 if let removed { Button("撤销删除") { Task { var item = removed; item.deletedAt = nil; await save(item); self.removed = nil } } }
                 if let error { Text(error).foregroundStyle(.secondary) }
-                if let exported { ShareLink("存储或分享导出", item: exported) }
+                if let exported { ShareLink("存储或分享导出", item: exported).accessibilityValue(exported.lastPathComponent) }
             }
             .navigationTitle("页边").navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -45,6 +45,7 @@ struct ExcerptsScreen: View {
                     Menu("导出", systemImage: "square.and.arrow.up") {
                         Button("Markdown") { Task { await export(markdown: true) } }
                         Button("JSON") { Task { await export(markdown: false) } }
+                        if book.format == "pdf" { Button("注释 PDF") { Task { await exportPDF() } } }
                     }.disabled(exporting || items.isEmpty)
                 }
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
@@ -69,8 +70,24 @@ struct ExcerptsScreen: View {
         do { try await repository.saveExcerpt(book.id, excerpt: deleted); removed = item; await reload() }
         catch { self.error = error.localizedDescription }
     }
+    private func exportPDF() async {
+        exporting = true
+        exported = nil
+        defer { exporting = false }
+        do {
+            let original = try await repository.file(book, name: book.originalName)
+            let chosen = items.filter { chapter.isEmpty || $0.chapter == chapter }
+            let bytes = try await Task.detached { try AnnotatedPDF.data(original: original, excerpts: chosen) }.value
+            let directory = folder.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let target = directory.appendingPathComponent("页边.pdf")
+            try bytes.write(to: target, options: .atomic)
+            exported = target
+        } catch { self.error = error.localizedDescription }
+    }
     private func export(markdown: Bool) async {
         exporting = true
+        exported = nil
         defer { exporting = false }
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

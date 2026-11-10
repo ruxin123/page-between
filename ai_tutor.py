@@ -219,6 +219,17 @@ def source_for(book, source, *, resource_root=None):
         "position": position,
         "citation": f"《{book['title']}》 · {label}",
     }
+    if "rects" in source:
+        rects = source["rects"]
+        if book["type"] != "pdf" or not isinstance(rects, list) or len(rects) > 1000:
+            raise TutorError("原文选区无效。")
+        for rect in rects:
+            if not isinstance(rect, dict) or type(rect.get("page")) is not int or not index <= rect["page"] <= position.get("endIndex", index):
+                raise TutorError("原文选区页码无效。")
+            box = rect.get("bbox")
+            if not isinstance(box, list) or len(box) != 4 or any(type(n) not in {int, float} or not 0 <= n <= 1 for n in box) or not (box[0] < box[2] and box[1] < box[3]):
+                raise TutorError("原文选区范围无效。")
+        result["rects"] = [{"page": rect["page"], "bbox": list(rect["bbox"])} for rect in rects]
     if "contextBefore" in source:
         if (
             not isinstance(source["contextBefore"], str)

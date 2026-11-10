@@ -20,6 +20,7 @@ public struct MobileConversation: Codable, Identifiable, Equatable, Sendable {
     public var updatedAt = Date()
     public var previewQuote: String?
     public var sourceObjects: [PDFSourceObject]?
+    public var sourceRects: [PDFSelectionRect]?
     public init(book: UUID, quote: String, locator: String) { self.book = book; self.quote = quote; self.locator = locator }
 }
 
@@ -27,6 +28,7 @@ extension LibraryRepository {
     public func saveConversation(_ conversation: MobileConversation) throws {
         guard let book = books(includingDeleted: true).first(where: { $0.id == conversation.book }), book.deletedAt == nil else { throw LibraryFailure.missingBook }
         guard conversation.quote.count <= 12000, (conversation.previewQuote?.count ?? 0) <= 16000, (conversation.sourceObjects?.count ?? 0) <= 32, conversation.sourceObjects?.allSatisfy(\.isValid) != false, conversation.locator.utf8.count <= 30000, conversation.turns.count <= 40,
+              (conversation.sourceRects?.count ?? 0) <= 1000, conversation.sourceRects?.allSatisfy(\.isValid) != false,
               conversation.turns.allSatisfy({ ["user", "assistant"].contains($0.role) && $0.content.count <= 50000 && ($0.status == nil || ["generating", "complete", "stopped", "error"].contains($0.status!)) && ($0.error?.count ?? 0) <= 2000 }) else { throw ServiceRequestFailure.selectionTooLong }
         let directory = try file(book, name: "conversations")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

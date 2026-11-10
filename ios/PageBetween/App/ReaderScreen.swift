@@ -11,6 +11,7 @@ struct AssistantSelection: Identifiable {
     let translate: Bool
     var markdown: String? = nil
     var objects: [PDFSourceObject] = []
+    var rects: [PDFSelectionRect] = []
 }
 
 @MainActor final class MobileReader: NSObject, ObservableObject, EPUBNavigatorDelegate, PDFNavigatorDelegate {
@@ -200,7 +201,7 @@ struct AssistantSelection: Identifiable {
             do {
                 let source = try await selectedSource(translate: false)
                 guard await publication?.rights.copy(text: source.quote) == true else { throw ServiceError.message("本书不允许保存此选段。") }
-                let excerpt = SavedExcerpt(quote: source.quote, markdown: source.markdown, locator: source.locator, chapter: chapter, objects: source.objects)
+                let excerpt = SavedExcerpt(quote: source.quote, markdown: source.markdown, locator: source.locator, chapter: chapter, objects: source.objects, rects: source.rects)
                 try await store.repository.saveExcerpt(book.id, excerpt: excerpt)
                 lastSelection = source
                 notice = "已保存到页边"
@@ -335,8 +336,8 @@ struct ReaderScreen: View {
                         }
                         if reader.book.format == "pdf" { Button("文档处理", systemImage: "doc.badge.gearshape") { processing = true } }
                         if let recent = reader.lastSelection {
-                            Button("提问最近选段", systemImage: "text.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: false, markdown: recent.markdown, objects: recent.objects) }
-                            if !recent.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Button("翻译最近选段", systemImage: "character.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: true, markdown: recent.markdown, objects: recent.objects) } }
+                            Button("提问最近选段", systemImage: "text.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: false, markdown: recent.markdown, objects: recent.objects, rects: recent.rects) }
+                            if !recent.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Button("翻译最近选段", systemImage: "character.bubble") { reader.selection = AssistantSelection(book: recent.book, quote: recent.quote, locator: recent.locator, translate: true, markdown: recent.markdown, objects: recent.objects, rects: recent.rects) } }
                         }
                     } label: { Image(systemName: "ellipsis") }.accessibilityIdentifier("reader.more")
                 }

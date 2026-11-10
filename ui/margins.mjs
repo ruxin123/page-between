@@ -8,6 +8,10 @@ export function createMargins({ api, post, toast, getBookmarks, openSource }) {
   dialog.className = "margins-dialog";
   dialog.innerHTML = `<header class="dialog-heading"><h2>页边</h2><button class="icon-button" data-close aria-label="关闭页边">${icon("close")}</button></header><div class="margins-tools"><select data-type aria-label="记录类型"><option value="excerpts">选段</option><option value="bookmarks">书签</option><option value="translations">翻译收藏</option><option value="conversations">答疑</option></select><select data-chapter aria-label="章节"><option value="">所有章节</option></select><details><summary>导出</summary><button data-export="markdown">Markdown</button><button data-export="json">JSON</button></details></div><div class="margin-undo" data-undo hidden><span>已删除选段</span><button class="secondary-button" data-restore>撤销</button></div><div data-list></div><section data-detail hidden></section><p role="status" data-status></p>`;
   document.body.append(dialog);
+  const pdfExport = document.createElement("button");
+  pdfExport.dataset.export = "pdf";
+  pdfExport.textContent = "注释 PDF";
+  dialog.querySelector("details").append(pdfExport);
   const $ = selector => dialog.querySelector(selector);
   let book, items = [], generation = 0;
   $("[data-close]").onclick = () => dialog.close();
@@ -139,6 +143,7 @@ export function createMargins({ api, post, toast, getBookmarks, openSource }) {
   return {
     async open(value, type = "excerpts") {
       book = value;
+      pdfExport.hidden = book.type !== "pdf";
       $("[data-undo]").hidden = true;
       $("[data-type]").value = type;
       if (!dialog.open) dialog.showModal();

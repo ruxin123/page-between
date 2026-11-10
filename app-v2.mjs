@@ -1408,7 +1408,7 @@ function showToolbar(rectangle) {
     !currentSelection.text?.trim();
   $("copy-image").hidden = !currentSelection.image;
   $("pin-selection").hidden = current.shelf !== "学习";
-  $("lookup-selection").hidden = reference || !window.webkit?.messageHandlers?.appNative || currentSelection.kind !== "text" || !currentSelection.text?.trim() || currentSelection.text.trim().length > 100;
+  $("lookup-selection").hidden = reference || !(window.webkit?.messageHandlers?.appNative || window.webkit?.messageHandlers?.readerNative) || currentSelection.kind !== "text" || !currentSelection.text?.trim() || currentSelection.text.trim().length > 100;
   $("chapter-start").hidden =
     current.type !== "txt" ||
     !current.parseEnabled ||
@@ -4102,7 +4102,7 @@ $("lookup-selection").onclick = () => {
   if (!text || text.length > 100) return;
   const box = $("selection-toolbar").getBoundingClientRect();
   $("selection-more-menu").hidePopover();
-  window.webkit?.messageHandlers?.appNative?.postMessage({ action: "lookup", text, x: box.left, y: box.top });
+  (window.webkit?.messageHandlers?.appNative || window.webkit?.messageHandlers?.readerNative)?.postMessage({ action: "lookup", text, x: box.left, y: box.top });
 };
 $("save-selection").onclick = () => {
   const context = tutorContext(currentSelection);

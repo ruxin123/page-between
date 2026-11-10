@@ -2,6 +2,18 @@ import AppKit
 import WebKit
 import Carbon
 
+extension WKWebView {
+    func showReaderDefinition(_ body: [String: Any]) {
+        guard let text = body["text"] as? String, !text.isEmpty, text.utf16.count <= 100 else { return }
+        let x = (body["x"] as? Double) ?? bounds.midX
+        let y = (body["y"] as? Double) ?? bounds.midY
+        guard x.isFinite, y.isFinite else { return }
+        let top = min(bounds.maxY, max(0, y))
+        showDefinition(for: NSAttributedString(string: text), at: NSPoint(
+            x: min(bounds.maxX, max(0, x)), y: isFlipped ? top : bounds.height - top))
+    }
+}
+
 final class ReaderPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -192,6 +204,7 @@ final class PalmDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
               message.frameInfo.securityOrigin.host == address.host,
               message.frameInfo.securityOrigin.port == address.port else { return }
         guard let body=message.body as? [String:Any],let action=body["action"] as? String else { return }
+        if action=="lookup" { message.webView?.showReaderDefinition(body);return }
         if action=="translate" { showTranslation?(body, message.webView);return }
         if action=="tutor" { showTutor?(body);return }
         if action=="close" { panel.performClose(nil) }

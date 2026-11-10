@@ -1,6 +1,7 @@
 """Service preferences and credentials in the App's private configuration directory."""
 
 import json
+import ipaddress
 import os
 import subprocess
 import sys
@@ -35,6 +36,18 @@ ENV = {
 
 class SettingsError(ValueError):
     pass
+
+
+def local_host(host):
+    if not host:
+        return False
+    if host in {"localhost", "::1"} or host.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.IPv4Address(host)
+    except ipaddress.AddressValueError:
+        return False
+    return any(address in ipaddress.IPv4Network(network) for network in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 
 
 def legacy():
@@ -153,7 +166,7 @@ def validated(service, config, *, require_key=False):
     try:
         address = urlsplit(base)
         address.port
-        local = address.hostname in {"127.0.0.1", "localhost", "::1"}
+        local = local_host(address.hostname)
         if (
             not address.hostname
             or address.username
@@ -165,7 +178,7 @@ def validated(service, config, *, require_key=False):
             raise ValueError()
     except ValueError:
         raise SettingsError(
-            "服务地址应使用 HTTPS；本地服务可使用回环 HTTP 地址。地址中不能包含凭据或查询参数。"
+            "请使用 HTTPS 或本机／局域网 HTTP 地址，地址不能包含凭据或查询参数。"
         ) from None
     if not model:
         raise SettingsError("请填写模型名称。")
@@ -208,6 +221,42 @@ def ai_configuration(service="ai"):
 def personalized_prompt(default, config):
     custom = config.get("customPrompt", "")
     return ("用户偏好：\n" + custom + "\n\n" if custom else "") + default
+
+
+def available_models(service, payload):
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, build_opener
+    from ai_tutor import NoRedirect
+    if not isinstance(service, str) or service not in {"ai", "translation"} or not isinstance(payload, dict):
+        raise SettingsError("模型服务无效。")
+    inherit = payload.get("useChatModel", effective("translation", read_key=False)["useChatModel"]) if service == "translation" else False
+    if service == "translation" and inherit is True:
+        config = effective("ai")
+        config = validated("ai", {**config, "model": config.get("model") or "discovery"})
+    else:
+        config = candidate(service, {**payload, "model": payload.get("model") or "discovery"})
+    base = config["baseUrl"].removesuffix("/chat/completions")
+    headers = {"Accept": "application/json"}
+    if config["key"]:
+        headers["Authorization"] = "Bearer " + config["key"]
+    try:
+        with build_opener(NoRedirect()).open(Request(base + "/models", headers=headers), timeout=15) as response:
+            body = response.read(1024 * 1024 + 1)
+        if len(body) > 1024 * 1024:
+            raise ValueError()
+        rows = json.loads(body).get("data")
+        if not isinstance(rows, list) or len(rows) > 1000:
+            raise ValueError()
+        if any(not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"].strip() for row in rows):
+            raise ValueError()
+        models = sorted({text(row["id"], "模型名称", 200) for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"].strip()})
+        return {"models": models}
+    except HTTPError as error:
+        raise SettingsError("无法读取模型，请检查服务地址与凭据。") from error
+    except (URLError, TimeoutError, OSError) as error:
+        raise SettingsError("无法连接模型服务，请确认服务已启动。") from error
+    except (ValueError, AttributeError) as error:
+        raise SettingsError("模型列表格式无效。") from error
 
 
 def public_settings():

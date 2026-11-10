@@ -4,7 +4,7 @@ public enum ServiceRequestFailure: LocalizedError {
     case invalidURL, missingModel, invalidReply, incompleteReply, selectionTooLong, conversationTooLong
     public var errorDescription: String? {
         switch self {
-        case .invalidURL: return "请输入完整的 HTTPS 服务地址。"
+        case .invalidURL: return "请输入 HTTPS 地址或本机／局域网 HTTP 地址。"
         case .missingModel: return "请先在设置中配置 AI 模型。"
         case .invalidReply: return "服务没有返回可读内容，请重试。"
         case .incompleteReply: return "回答未完整生成，可重新生成。"
@@ -15,16 +15,45 @@ public enum ServiceRequestFailure: LocalizedError {
 }
 
 public enum ServiceRequests {
-    public static func endpoint(_ value: String) throws -> URL {
-        guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { throw ServiceRequestFailure.invalidURL }
+    public static func endpoint(_ value: String, allowLocalHTTP: Bool = false) throws -> URL {
+        guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)), let host = url.host?.lowercased(), url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { throw ServiceRequestFailure.invalidURL }
+        let components = host.split(separator: ".")
+        let octets = components.compactMap { Int($0) }
+        let privateIPv4 = components.count == 4 && octets.count == 4
+            && octets.allSatisfy { (0...255).contains($0) }
+            && octets.map { String($0) }.joined(separator: ".") == host
+            && (octets[0] == 127 || octets[0] == 10
+                || octets[0] == 192 && octets[1] == 168
+                || octets[0] == 172 && (16...31).contains(octets[1]))
+        let local = host == "localhost" || host == "::1" || host == "[::1]" || host.hasSuffix(".local") || privateIPv4
+        guard url.scheme == "https" || allowLocalHTTP && url.scheme == "http" && local else { throw ServiceRequestFailure.invalidURL }
         return url
+    }
+    public static func models(base: String, key: String) throws -> URLRequest {
+        guard key.count <= 4096, !key.contains("\n"), !key.contains("\r") else { throw ServiceRequestFailure.invalidURL }
+        let url = try endpoint(base, allowLocalHTTP: true)
+        var root = url
+        if root.lastPathComponent == "completions" { root.deleteLastPathComponent(); root.deleteLastPathComponent() }
+        var request = URLRequest(url: root.appendingPathComponent("models"))
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if !key.isEmpty { request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization") }
+        return request
+    }
+    public static func modelNames(_ data: Data) throws -> [String] {
+        guard data.count <= 1024 * 1024, let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let rows = body["data"] as? [[String: Any]], rows.count <= 1000 else { throw ServiceRequestFailure.invalidReply }
+        let names = try rows.map { row -> String in
+            guard let name = row["id"] as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 200, name.unicodeScalars.allSatisfy({ $0.value >= 32 }) else { throw ServiceRequestFailure.invalidReply }
+            return name
+        }
+        return Array(Set(names)).sorted()
     }
     public static func ai(base: String, model: String, key: String, quote: String, question: String, translate: Bool, history: [MobileTurn] = [], images: [Data] = [], stream: Bool = false, customPrompt: String = "") throws -> URLRequest {
         guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ServiceRequestFailure.missingModel }
         guard quote.count <= 12000, question.count <= 6000, customPrompt.count <= 4000 else { throw ServiceRequestFailure.selectionTooLong }
         guard images.count <= 4, images.reduce(0, { $0 + $1.count }) <= 6 * 1024 * 1024, images.allSatisfy({ $0.starts(with: [137,80,78,71,13,10,26,10]) }), !translate || images.isEmpty else { throw ServiceRequestFailure.selectionTooLong }
         guard history.count <= 40, history.reduce(0, { $0 + $1.content.count }) <= 80000, history.allSatisfy({ ["user", "assistant"].contains($0.role) }) else { throw ServiceRequestFailure.conversationTooLong }
-        let base = try endpoint(base)
+        let base = try endpoint(base, allowLocalHTTP: true)
         let url = base.lastPathComponent == "chat" ? base.appendingPathComponent("completions") : base.lastPathComponent == "completions" ? base : base.appendingPathComponent("chat/completions")
         var request = URLRequest(url: url); request.httpMethod = "POST"; request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

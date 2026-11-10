@@ -15,6 +15,50 @@ from server import Handler
 
 
 class Settings(unittest.TestCase):
+    def test_local_model_addresses_are_bounded_to_local_hosts(self):
+        for host in ["localhost", "127.0.0.1", "10.1.2.3", "192.168.1.20", "172.31.1.1", "reader.local"]:
+            self.assertTrue(settings.local_host(host))
+            config = settings.validated("ai", {"baseUrl": "http://" + host + ":1234/v1", "model": "local", "key": ""}, require_key=True)
+            self.assertEqual(config["model"], "local")
+        for host in ["192.test.168.1.1", "172.32.0.1", "010.0.0.1", "example.org"]:
+            self.assertFalse(settings.local_host(host))
+            with self.assertRaises(settings.SettingsError):
+                settings.validated("ai", {"baseUrl": "http://" + host + "/v1", "model": "local", "key": ""})
+    def test_model_discovery_reads_actual_server_and_preserves_saved_configuration(self):
+        for service, config in [([], {}), (None, {}), ("ai", []), ("mineru", {})]:
+            with self.assertRaises(settings.SettingsError): settings.available_models(service, config)
+        received = []
+        reply = {"body": {"data": [{"id": "model-b"}, {"id": "model-a"}, {"id": "model-a"}]}, "redirect": False}
+        class Models(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                received.append((self.path, self.headers.get("Authorization")))
+                if reply["redirect"]:
+                    self.send_response(302); self.send_header("Location", "/unexpected"); self.end_headers(); return
+                body = json.dumps(reply["body"]).encode()
+                self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Models)
+        worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
+        try:
+            config = {**self.config, "baseUrl": f"http://127.0.0.1:{server.server_port}/v1"}
+            settings.update("ai", config)
+            before = settings.CONFIG.read_bytes()
+            self.assertEqual(settings.available_models("ai", {**config, "model": "", "key": ""})["models"], ["model-a", "model-b"])
+            self.assertEqual(received[-1], ("/v1/models", "Bearer example-credential"))
+            self.assertEqual(settings.available_models("translation", {"useChatModel": True})["models"], ["model-a", "model-b"])
+            self.assertEqual(settings.CONFIG.read_bytes(), before)
+            reply["body"] = {"data": []}
+            self.assertEqual(settings.available_models("ai", config)["models"], [])
+            for invalid in [{}, {"data": [None]}, {"data": [{"id": "x" * 201}]}]:
+                reply["body"] = invalid
+                with self.assertRaises(settings.SettingsError): settings.available_models("ai", config)
+            reply["redirect"] = True
+            with self.assertRaises(settings.SettingsError): settings.available_models("ai", config)
+            self.assertNotIn("/unexpected", [path for path, _ in received])
+            self.assertEqual(settings.CONFIG.read_bytes(), before)
+        finally:
+            server.shutdown(); server.server_close(); worker.join()
+
     def test_custom_prompts_persist_independently_when_translation_inherits_model(self):
         settings.update("ai", {**self.config, "customPrompt": "先给提示\n再展开证明"})
         settings.update("translation", {"useChatModel": True, "customPrompt": "保留术语的英文原词"})

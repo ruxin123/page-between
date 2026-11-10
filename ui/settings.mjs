@@ -53,6 +53,44 @@ export function createServiceSettings({ document, api, post, toast }) {
         <div class="service-actions"><button type="submit" class="primary-button">保存设置</button><button type="button" class="secondary-button" data-test>${ai ? "测试连接" : "检查配置"}</button><button type="button" class="service-reset" data-reset>还原修改</button></div>
       </fieldset><p class="service-result" data-result role="status" aria-live="polite"></p></form>`;
     const form = container.querySelector("form");
+    if (ai || service === "translation") {
+      const modelField = form.elements.model;
+      const list = document.createElement("datalist");
+      list.id = "models-" + service;
+      modelField.setAttribute("list", list.id);
+      modelField.after(list);
+      const choices = document.createElement("div");
+      choices.className = "service-actions";
+      choices.innerHTML = '<button type="button" data-local="http://localhost:11434/v1">Ollama</button><button type="button" data-local="http://localhost:1234/v1">LM Studio</button><button type="button" data-models>读取模型</button>';
+      modelField.closest("label").after(choices);
+      for (const button of choices.querySelectorAll("[data-local]")) button.onclick = () => {
+        form.elements.baseUrl.value = button.dataset.local;
+        form.elements.model.value = "";
+        list.replaceChildren();
+        form.dispatchEvent(new Event("input"));
+      };
+      choices.querySelector("[data-models]").onclick = async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        const result = form.querySelector("[data-result]");
+        result.dataset.kind = "";
+        result.textContent = "正在读取模型…";
+        const snapshot = {
+          baseUrl: form.elements.baseUrl.value.trim(), model: form.elements.model.value.trim(),
+          key: form.elements.key.value, removeKey: form.elements.removeKey?.checked || false,
+          ...(service === "translation" ? {provider: "ai", useChatModel: form.elements.useChatModel.checked} : {}),
+        };
+        try {
+          const data = await post("/api/settings/models", { service, config: snapshot });
+          if (!form.isConnected || form.elements.baseUrl.value.trim() !== snapshot.baseUrl || service === "translation" && (form.elements.useChatModel.checked !== snapshot.useChatModel || form.elements.provider.value !== snapshot.provider)) return;
+          list.replaceChildren(...data.models.map(name => { const option = document.createElement("option"); option.value = name; return option; }));
+          if (!modelField.value && data.models.length === 1) modelField.value = data.models[0];
+          result.textContent = data.models.length ? `找到 ${data.models.length} 个模型` : "服务中暂无可用模型";
+          modelField.focus();
+        } catch (error) { if (form.isConnected && form.elements.baseUrl.value.trim() === snapshot.baseUrl) result.textContent = error.message; }
+        finally { button.disabled = false; }
+      };
+    }
     form.onsubmit = (event) => {
       event.preventDefault();
       run(form, true);
@@ -61,7 +99,9 @@ export function createServiceSettings({ document, api, post, toast }) {
       if (form.reportValidity()) run(form, false);
     };
     form.querySelector("[data-reset]").onclick = () => render(service);
-    form.oninput = () => {
+    form.oninput = (event) => {
+      if (event.target.name === "baseUrl" || event.target.name === "useChatModel")
+        form.querySelector("datalist")?.replaceChildren();
       updateTranslationFields(form);
       form.querySelector("[data-result]").textContent = "未保存";
       form.querySelector("[data-result]").dataset.kind = "";

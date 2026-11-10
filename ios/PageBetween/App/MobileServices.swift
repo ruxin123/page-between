@@ -100,7 +100,18 @@ private let readingNetwork: URLSession = {
         defaults.set(provider, forKey: "services.provider")
         defaults.set(try JSONEncoder().encode(mineru), forKey: "services.mineru")
     }
-    static func endpoint(_ value: String) throws -> URL { try ServiceRequests.endpoint(value) }
+    static func endpoint(_ value: String) throws -> URL { try ServiceRequests.endpoint(value, allowLocalHTTP: true) }
+    func models(profile: ServiceProfile, key: String) async throws -> [String] {
+        let request = try ServiceRequests.models(base: profile.baseURL, key: key)
+        let (bytes, response) = try await readingNetwork.bytes(for: request)
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200 else { throw ServiceError.message("无法读取模型，请检查服务地址与凭据。") }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < 1024 * 1024 else { throw ServiceRequestFailure.invalidReply }
+            data.append(byte)
+        }
+        return try ServiceRequests.modelNames(data)
+    }
     private func request(quote: String, question: String, translate: Bool, history: [MobileTurn], images: [Data], stream: Bool) throws -> URLRequest {
         let dedicated = translate && separateTranslation && !translation.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let profile = dedicated ? translation : ai

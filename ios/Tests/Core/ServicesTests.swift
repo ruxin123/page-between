@@ -2,6 +2,25 @@ import XCTest
 @testable import PageBetweenCore
 
 final class ServicesTests: XCTestCase {
+    func testLocalModelsAndDiscoveryBounds() throws {
+        for url in ["http://localhost:11434/v1", "http://127.0.0.1:1234/v1", "http://192.168.1.20:11434/v1", "http://172.16.1.3/v1", "http://reader.local:1234/v1"] {
+            XCTAssertNoThrow(try ServiceRequests.endpoint(url, allowLocalHTTP: true))
+        }
+        for url in ["http://example.org/v1", "http://192.test.168.1.1/v1", "http://172.32.1.3/v1", "http://192.168.1.1.example.org/v1", "http://010.0.0.1/v1"] {
+            XCTAssertThrowsError(try ServiceRequests.endpoint(url, allowLocalHTTP: true))
+        }
+        let request = try ServiceRequests.models(base: "http://localhost:11434/v1/chat/completions", key: "")
+        XCTAssertEqual(request.url?.absoluteString, "http://localhost:11434/v1/models")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertEqual(try ServiceRequests.modelNames(Data(#"{"data":[{"id":"b"},{"id":"a"},{"id":"a"}]}"#.utf8)), ["a", "b"])
+        XCTAssertEqual(try ServiceRequests.modelNames(Data(#"{"data":[]}"#.utf8)), [])
+        XCTAssertThrowsError(try ServiceRequests.modelNames(Data("<html>unavailable</html>".utf8))) { error in
+            XCTAssertEqual(error.localizedDescription, ServiceRequestFailure.invalidReply.localizedDescription)
+        }
+        for invalid in [Data(#"{"data":[null]}"#.utf8), Data(repeating: 32, count: 1024 * 1024 + 1)] {
+            XCTAssertThrowsError(try ServiceRequests.modelNames(invalid))
+        }
+    }
     func testCustomPromptKeepsSourceAndDefaultInstructions() throws {
         let quote = #"$\sigma\in S_n$"#
         let request = try ServiceRequests.ai(base: "https://example.org/v1", model: "original", key: "", quote: quote, question: "Explain", translate: false, customPrompt: "先给提示\n再展开证明")

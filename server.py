@@ -1136,6 +1136,10 @@ class Handler(SimpleHTTPRequestHandler):
                     if ident in CANCELS:
                         CANCELS[ident].set()
                 return self.json({"paused": pausing})
+            if route.path == "/api/settings/models":
+                if not isinstance(payload, dict):
+                    raise ValueError("模型服务无效。")
+                return self.json(service_settings.available_models(payload.get("service"), payload.get("config")))
             if route.path in {"/api/settings/save", "/api/settings/test"}:
                 if not isinstance(payload, dict):
                     raise ValueError("服务配置无效。")

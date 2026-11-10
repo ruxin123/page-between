@@ -49,6 +49,7 @@ import { PageLayout, characterRect } from "/page-layout.mjs?v=2.54";
 import { renderPdfBitmap } from "/ui/pdf-render.mjs";
 import { PdfPreviewCache } from "/ui/pdf-preview.mjs";
 import { createReaderZoom } from "/ui/zoom.mjs";
+import { createComparison, transientStatePatch } from "/ui/comparison.mjs";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdf.worker.mjs";
 const $ = (id) => document.getElementById(id);
@@ -66,8 +67,9 @@ const fontFamilies = {
 };
 const query = new URLSearchParams(window.location.search);
 const palm = query.get("mode") === "palm";
-const native = !!window.webkit?.messageHandlers?.readerNative;
-const desktop = native || !!window.webkit?.messageHandlers?.appNative;
+const reference = query.get("mode") === "reference";
+const native = !reference && !!window.webkit?.messageHandlers?.readerNative;
+const desktop = !reference && (native || !!window.webkit?.messageHandlers?.appNative);
 const writer = crypto.randomUUID();
 const defaults = {
   theme: "paper",
@@ -145,7 +147,7 @@ let pagination,
 const pdfs = new Map(),
   ocrCache = new Map();
 document.body.dataset.readerBuild = "2.57";
-document.body.dataset.mode = palm ? "palm" : "standard";
+document.body.dataset.mode = reference ? "reference" : palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
 async function api(path, options = {}) {
@@ -166,6 +168,31 @@ function post(path, value) {
   });
 }
 const toast = createToasts($("toasts"));
+let comparisonTimer;
+const comparison = reference || palm ? null : createComparison({
+  getSeed: () => current && readerReady ? { book: current.id, position: makePosition(), prefs: { ...prefs } } : null,
+  layout: mutate => {
+    const position = readerReady ? makePosition() : location;
+    const book = current?.id;
+    if (!comparison.open) {
+      setTocOpen(false, false);
+      setReaderSettingsOpen(false);
+    }
+    // Browser scroll anchoring fires during the width change, before the redraw.
+    if (route === "reader" && position) {
+      location = structuredClone(position);
+      readerReady = false;
+      $("reading-viewport").setAttribute("aria-busy", "true");
+    }
+    restorePosition(mutate);
+    clearTimeout(comparisonTimer);
+    comparisonTimer = setTimeout(() => { if (route === "reader" && current?.id === book && position) renderCurrent(position); }, 90);
+  },
+  closed: reflow => {
+    if (reflow) { setTocOpen(prefs.tocOpen && innerWidth >= 1100, false); $("reading-viewport").focus({preventScroll:true}); }
+    else clearTimeout(comparisonTimer);
+  },
+});
 const readerZoom = createReaderZoom({
   roots: [$("reader-zoom"), $("palm-zoom")],
   getState: () => ({
@@ -266,6 +293,10 @@ const margins = createMargins({ api, post, toast, getBookmarks: () => bookmarks,
 const libraryView = createLibraryView(document);
 const folderView = createFolders({ post, refresh: refreshLibrary, changed: renderLibrary });
 function postState(patch) {
+  if (reference) {
+    patch = transientStatePatch(patch);
+    if (!Object.keys(patch).length) return Promise.resolve({revision: stateRevision, bookmarks});
+  }
   stateWrites++;
   stateQueue = stateQueue
     .catch(() => {})
@@ -1377,7 +1408,7 @@ function showToolbar(rectangle) {
     !currentSelection.text?.trim();
   $("copy-image").hidden = !currentSelection.image;
   $("pin-selection").hidden = current.shelf !== "学习";
-  $("lookup-selection").hidden = !window.webkit?.messageHandlers?.appNative || currentSelection.kind !== "text" || !currentSelection.text?.trim() || currentSelection.text.trim().length > 100;
+  $("lookup-selection").hidden = reference || !window.webkit?.messageHandlers?.appNative || currentSelection.kind !== "text" || !currentSelection.text?.trim() || currentSelection.text.trim().length > 100;
   $("chapter-start").hidden =
     current.type !== "txt" ||
     !current.parseEnabled ||
@@ -3135,7 +3166,7 @@ function goBack() {
 }
 function setTocOpen(open, reflow = true) {
   const position = readerReady && reflow ? makePosition() : null;
-  const docked = open && innerWidth >= 1100 && !palm;
+  const docked = open && innerWidth >= 1100 && !palm && !reference && !comparison?.open;
   const changed = $("reader").classList.contains("toc-docked") !== docked;
   $("reader-aside").hidden = !open;
   $("reader").classList.toggle("toc-docked", docked);
@@ -3149,6 +3180,7 @@ function setTocOpen(open, reflow = true) {
 async function readBook(id, sourcePosition) {
   const book = books.find((book) => book.id === id);
   if (!book) return;
+  if (current?.id !== book.id) comparison?.close(false);
   savePosition();
   current = book;
   revealReaderTools();
@@ -3159,7 +3191,7 @@ async function readBook(id, sourcePosition) {
     : initialLocation(book);
   history = [];
   $("toc-search").value = "";
-  setTocOpen(!palm && innerWidth >= 1100 && prefs.tocOpen, false);
+  setTocOpen(!palm && !reference && !comparison?.open && innerWidth >= 1100 && prefs.tocOpen, false);
   $("toc-tab").click();
   setReaderSettingsOpen(false);
   return renderCurrent(location);
@@ -3170,7 +3202,7 @@ function showRoute(sourcePosition) {
     if (requested[0] === "shelf") shelfFilter = "pinned";
     window.history.replaceState(null, "", "#/library");
   }
-  const next = palm
+  const next = palm || reference
     ? "reader"
     : requested[0] === "read"
       ? "reader"
@@ -3178,6 +3210,7 @@ function showRoute(sourcePosition) {
         ? requested[0]
         : "library";
   if (route === "reader" && next !== "reader") {
+    comparison?.close(false);
     if (current?.type !== "pdf" && readerReady) appearanceSample = { title: chapterTitle(), text: readingElements().map(element => element.textContent.trim()).filter(Boolean).join("\n\n").slice(0, 640) };
     leavePdfPreparation();
     savePosition(true);
@@ -3204,7 +3237,7 @@ function showRoute(sourcePosition) {
       a.setAttribute("aria-current", a.dataset.nav === next ? "page" : "false"),
     );
   if (next === "reader") {
-    const id = palm
+    const id = palm || reference
       ? query.get("book") || current?.id || books[0]?.id
       : requested[1];
     return readBook(
@@ -3911,6 +3944,8 @@ $("reader-home").onclick = () => {
   savePosition(true);
   window.location.hash = "#/library";
 };
+$("comparison-open").hidden = reference || palm;
+$("comparison-open").onclick = () => { $("reader-more").open = false; comparison?.show(); };
 $("reader-back").onclick = goBack;
 $("toc-toggle").onclick = () => {
   const open = $("reader-aside").hidden;
@@ -4217,7 +4252,7 @@ const tutor = createTutor({
   getContext: tutorContext,
   closeWindow: () => restoreSelectionAction(),
   openWindow:
-    window.webkit?.messageHandlers?.appNative || window.readerDetachedTutor
+    !reference && (window.webkit?.messageHandlers?.appNative || window.readerDetachedTutor)
       ? (request) =>
           (
             window.webkit.messageHandlers.appNative ||
@@ -4258,8 +4293,8 @@ const translator = createTranslation({
   toast,
   closeWindow: () => restoreSelectionAction(),
   openWindow:
-    window.webkit?.messageHandlers?.appNative ||
-    window.readerDetachedTranslation
+    !reference && (window.webkit?.messageHandlers?.appNative ||
+    window.readerDetachedTranslation)
       ? (request) =>
           (
             window.webkit.messageHandlers.appNative ||
@@ -4378,7 +4413,7 @@ window.addEventListener("resize", () => {
   const anchor = lastAnchor || captureAnchor();
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(async () => {
-    $("reader").classList.toggle("toc-docked", !$("reader-aside").hidden && innerWidth >= 1100 && !palm);
+    $("reader").classList.toggle("toc-docked", !$("reader-aside").hidden && innerWidth >= 1100 && !palm && !comparison?.open && !reference);
     applyPreferences();
     if (route !== "reader" || !current) return;
     if (current.type === "pdf") {
@@ -4394,6 +4429,16 @@ window.addEventListener("resize", () => {
   }, 80);
 });
 window.addEventListener("hashchange", showRoute);
+let referenceInitialized = false;
+window.addEventListener("message", async event => {
+  if (!reference || referenceInitialized || event.origin !== window.location.origin || event.source !== window.parent || event.data?.type !== "page-between-reference-init") return;
+  const seed = event.data.seed;
+  if (seed?.book !== query.get("book") || !books.some(book => book.id === seed.book) || !Number.isSafeInteger(seed.position?.index)) return;
+  referenceInitialized = true;
+  bookPrefs[seed.book] = {...validatePreferences(seed.prefs || {}), tocOpen:false};
+  await readBook(seed.book, seed.position);
+  window.parent.postMessage({type:"page-between-reference-opened"}, window.location.origin);
+});
 window.addEventListener("reader-selection-resume", () =>
   restoreSelectionAction(selectionAction, false),
 );
@@ -4416,7 +4461,8 @@ window.addEventListener("pagehide", () => {
       "/api/pdf/prepare",
       JSON.stringify({ action: "leave", client: writer }),
     );
-  if (current && readerReady) {
+  // This unload path bypasses postState; reference panes must stay transient here too.
+  if (!reference && current && readerReady) {
     const position = makePosition();
     navigator.sendBeacon(
       "/api/state",
@@ -4498,6 +4544,11 @@ async function poll(resume = false) {
       }
     }
     const state = await api("/api/state");
+    if (reference) {
+      bookmarks = state.bookmarks || bookmarks;
+      renderBookmarks();
+      return;
+    }
     if (stateWrites || state.revision < stateRevision) return;
     const remote = current && state.positions?.[current.id];
     const followingBook = current?.id;
@@ -4616,8 +4667,9 @@ try {
   renderSettings();
   renderJobs();
   $("startup").hidden = true;
-  showRoute();
-  window.webkit?.messageHandlers?.appNative?.postMessage({ action: "ready" });
+  await showRoute();
+  if (reference) window.parent.postMessage({type:"page-between-reference-ready"}, window.location.origin);
+  else window.webkit?.messageHandlers?.appNative?.postMessage({ action: "ready" });
   setInterval(updateTimer, 1000);
   setInterval(poll, 1800);
   window.addEventListener("focus", () => poll(true));

@@ -2,6 +2,51 @@ import XCTest
 
 final class ReadingFlowTests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
+    @MainActor func testReferenceReadingKeepsMainPositionAndAppearance() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["PAGE_BETWEEN_UI_TEST"] = "1"
+        app.launchEnvironment["PAGE_BETWEEN_PDF_UI_TEST"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let text = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Mobile reading sample")).firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 30)); openBook(text, in: app)
+        app.buttons["目录"].tap(); app.buttons["第二章 继续"].tap()
+        let primary = app.descendants(matching: .any).matching(identifier: "reader.position").firstMatch
+        XCTAssertTrue(primary.waitForExistence(timeout: 15)); XCTAssertTrue(primary.label.contains("第二章"))
+        app.buttons["reader.more"].tap(); app.buttons["对照阅读"].tap()
+        let reference = app.descendants(matching: .any).matching(identifier: "reader.reference").firstMatch
+        XCTAssertTrue(reference.waitForExistence(timeout: 20), app.debugDescription)
+        reference.buttons["目录"].tap(); app.buttons["第一章 开始"].tap()
+        let secondary = app.descendants(matching: .any).matching(identifier: "reference.position").firstMatch
+        let first = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "第一章"), object: secondary)
+        XCTAssertEqual(XCTWaiter.wait(for: [first], timeout: 20), .completed)
+        XCTAssertTrue(primary.label.contains("第二章"))
+        reference.buttons["阅读设置"].tap()
+        let size = app.sliders["字号比例"]
+        XCTAssertTrue(size.waitForExistence(timeout: 10)); size.adjust(toNormalizedSliderPosition: 0.75)
+        app.buttons["完成"].tap(); capture(app, "reference-text-reader")
+        reference.buttons["关闭对照"].tap()
+        XCTAssertTrue(primary.label.contains("第二章"))
+        app.buttons["书库"].tap(); XCTAssertTrue(text.waitForExistence(timeout: 10)); openBook(text, in: app)
+        XCTAssertTrue(primary.label.contains("第二章"), "Reference navigation overwrote the main reading location")
+        app.buttons["书库"].tap()
+        let pdf = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original scan sample")).firstMatch
+        XCTAssertTrue(pdf.waitForExistence(timeout: 10)); openBook(pdf, in: app)
+        app.buttons["下一页"].tap()
+        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 10))
+        app.buttons["reader.more"].tap(); app.buttons["对照阅读"].tap()
+        XCTAssertTrue(reference.waitForExistence(timeout: 15)); app.buttons["reference.previous"].tap()
+        let earlier = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "第 1 页"), object: secondary)
+        XCTAssertEqual(XCTWaiter.wait(for: [earlier], timeout: 15), .completed)
+        XCTAssertTrue(primary.label.contains("第 2 页"))
+        reference.buttons["阅读设置"].tap()
+        let zoom = app.sliders["缩放百分比"]
+        XCTAssertTrue(zoom.waitForExistence(timeout: 10)); zoom.adjust(toNormalizedSliderPosition: 0.6)
+        app.buttons["完成"].tap(); capture(app, "reference-pdf-reader")
+        reference.buttons["关闭对照"].tap(); XCTAssertTrue(primary.label.contains("第 2 页"))
+        app.buttons["书库"].tap(); XCTAssertTrue(pdf.waitForExistence(timeout: 10)); openBook(pdf, in: app)
+        XCTAssertTrue(primary.label.contains("第 2 页"), "Reference PDF changed the stored page")
+    }
     @MainActor func testImmersiveSwipeAppearanceAndChapterSearch() throws {
         let app = XCUIApplication()
         app.launchEnvironment["PAGE_BETWEEN_UI_TEST"] = "1"

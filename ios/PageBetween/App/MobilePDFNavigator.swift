@@ -50,6 +50,7 @@ private final class ReadingPDFView: PDFView {
     private var headings: [(Int, String)] = []
     private var canonicalPages: [Int: PDFPreparedPage] = [:]
     private var selectedObject: (index: Int, object: PDFSourceObject, page: PDFPage, annotation: PDFAnnotation)?
+    private var layoutDestination: (index: Int, point: CGPoint)?
     private lazy var objectMenu = UIEditMenuInteraction(delegate: self)
 
     init(publication: Publication, book: MobileBook, source: URL, location: Locator?, continuous: Bool, preparation: PDFPreparationStore, delegate: NavigatorDelegate) throws {
@@ -94,6 +95,27 @@ private final class ReadingPDFView: PDFView {
         super.viewDidAppear(animated)
         if let initial, !didOpen { didOpen = true; Task { _ = await go(to: initial, options: .none); changed() } }
         else { didOpen = true; changed() }
+    }
+    func prepareForLayoutChange() {
+        let index = currentIndex
+        guard let page = document.page(at: index) else { return }
+        let visible = pdf.convert(pdf.bounds, to: page).intersection(page.bounds(for: .cropBox))
+        let box = PDFSourceContent.box(page, rectangle: visible)
+        guard let point = try? AnnotatedPDF.point(box?.left ?? 0, box?.top ?? 0, on: page) else { return }
+        layoutDestination = (index, point)
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard let destination = layoutDestination else { return }
+        layoutDestination = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let page = self.document.page(at: destination.index) else { return }
+            self.programmatic = true
+            self.pdf.layoutDocumentView()
+            self.pdf.go(to: PDFDestination(page: page, at: destination.point))
+            self.programmatic = false
+            self.changed()
+        }
     }
     private var didOpen = false
     deinit { for observer in observers { NotificationCenter.default.removeObserver(observer) }; refreshTask?.cancel() }

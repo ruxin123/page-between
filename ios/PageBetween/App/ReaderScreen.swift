@@ -36,6 +36,7 @@ struct AssistantSelection: Identifiable {
     var navigator: Navigator?
     let store: LibraryStore
     let book: MobileBook
+    let isReference: Bool
     private var saveTask: Task<Void, Never>?
     private var loaded = false
     private var directionalNavigation: DirectionalNavigationAdapter?
@@ -43,8 +44,8 @@ struct AssistantSelection: Identifiable {
     private var selectionMenuTask: Task<Void, Never>?
     private var lastContentTap = 0.0
 
-    init(book: MobileBook, store: LibraryStore) {
-        self.book = book; self.store = store
+    init(book: MobileBook, store: LibraryStore, isReference: Bool = false) {
+        self.book = book; self.store = store; self.isReference = isReference
         super.init()
         let defaults = UserDefaults.standard
         fontScale = defaults.object(forKey: "reading.fontScale") == nil ? 100 : min(200, max(70, defaults.double(forKey: "reading.fontScale")))
@@ -120,10 +121,10 @@ struct AssistantSelection: Identifiable {
     }
     func apply() {
         let appearance = ReadingAppearance(fontScale: fontScale, lineHeight: lineHeight, pageMargins: pageMargins, fontFamily: fontFamily, theme: theme, scroll: scroll)
-        Task {
+        if !isReference { Task {
             do { try await store.repository.saveAppearance(book.id, value: appearance); await store.refresh() }
             catch { failure = error.localizedDescription }
-        }
+        } }
         (navigator as? EPUBNavigatorViewController)?.submitPreferences(preferences())
         (navigator as? MobilePDFNavigator)?.applyScroll(scroll)
     }
@@ -131,6 +132,7 @@ struct AssistantSelection: Identifiable {
         chapter = locator.title ?? book.title
         progress = locator.locations.totalProgression ?? locator.locations.progression ?? 0
         updateBookmarkState(locator)
+        guard !isReference else { return }
         saveTask?.cancel()
         saveTask = Task { try? await Task.sleep(for: .milliseconds(350)); guard !Task.isCancelled else { return }; await flush() }
     }
@@ -173,10 +175,20 @@ struct AssistantSelection: Identifiable {
         bookmarked = store.books.first(where: { $0.id == book.id })?.bookmarks.contains(where: { $0.locator == raw }) == true
     }
     func flush() async {
+        guard !isReference else { return }
         guard let locator = navigator?.currentLocation, let raw = try? locator.jsonString() else { return }
         do { try await store.repository.saveLocation(book.id, locator: raw, progress: progress, chapter: chapter); await store.refresh() }
         catch { failure = error.localizedDescription }
     }
+    func referenceReader() throws -> MobileReader {
+        guard let locator = navigator?.currentLocation else { throw LibraryFailure.invalidFile }
+        var copy = book
+        copy.locator = try locator.jsonString(); copy.progress = progress; copy.chapter = chapter
+        copy.appearance = ReadingAppearance(fontScale: fontScale, lineHeight: lineHeight, pageMargins: pageMargins, fontFamily: fontFamily, theme: theme, scroll: scroll)
+        prepareForLayoutChange()
+        return MobileReader(book: copy, store: store, isReference: true)
+    }
+    func prepareForLayoutChange() { (navigator as? MobilePDFNavigator)?.prepareForLayoutChange() }
     private func selectedSource(translate: Bool) async throws -> AssistantSelection {
         if let pdf = navigator as? MobilePDFNavigator { return try await pdf.selectedSource(translate: translate) }
         guard let selected = (navigator as? SelectableNavigator)?.currentSelection else { throw ServiceError.message("请先长按选择一段文字。") }
@@ -311,24 +323,39 @@ struct ReaderScreen: View {
     @State private var excerpts = false
     @State private var conversations = false
     @State private var processing = false
+    @State private var comparison: MobileReader?
     init(book: MobileBook, store: LibraryStore) { _reader = StateObject(wrappedValue: MobileReader(book: book, store: store)) }
     var body: some View {
         NavigationStack {
-            Group {
-                if let controller = reader.controller { NavigatorHost(controller: controller) }
-                else if let failure = reader.failure { ContentUnavailableView("暂时无法打开", systemImage: "book.closed", description: Text(failure)) }
-                else { ProgressView("正在打开书籍…") }
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    Group {
+                        if let controller = reader.controller { NavigatorHost(controller: controller) }
+                        else if let failure = reader.failure { ContentUnavailableView("暂时无法打开", systemImage: "book.closed", description: Text(failure)) }
+                        else { ProgressView("正在打开书籍…") }
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if let comparison {
+                        ReferenceReaderPane(reader: comparison, close: { reader.prepareForLayoutChange(); self.comparison = nil })
+                            .frame(height: geometry.size.height * 0.5)
+                    }
+                }
             }
             .overlay(alignment: .bottom) { if let notice = reader.notice { Text(notice).font(.callout).padding(12).background(.regularMaterial, in: Capsule()).padding(.bottom, 64).accessibilityAddTraits(.updatesFrequently) } }
             .navigationTitle(reader.book.title).navigationBarTitleDisplayMode(.inline)
-            .toolbar(reader.chromeVisible || reader.controller == nil || reader.failure != nil ? .visible : .hidden, for: .navigationBar, .bottomBar)
-            .statusBarHidden(!reader.chromeVisible && reader.controller != nil && reader.failure == nil)
+            .toolbar(comparison != nil || reader.chromeVisible || reader.controller == nil || reader.failure != nil ? .visible : .hidden, for: .navigationBar, .bottomBar)
+            .statusBarHidden(comparison == nil && !reader.chromeVisible && reader.controller != nil && reader.failure == nil)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("书库", systemImage: "chevron.left") { Task { await reader.flush(); dismiss() } } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if !reader.history.isEmpty { Button("返回原位置", systemImage: "arrow.uturn.backward") { Task { await reader.back() } } }
                     Button("目录", systemImage: "list.bullet") { toc = true }
                     Menu {
+                        if comparison == nil {
+                            Button("对照阅读", systemImage: "rectangle.split.2x1") {
+                                do { comparison = try reader.referenceReader() }
+                                catch { reader.failure = error.localizedDescription }
+                            }
+                        }
                         Section("阅读记录") {
                             Button("页边", systemImage: "text.badge.plus") { excerpts = true }
                             Button("书签", systemImage: "bookmark") { bookmarkTab = true; toc = true }

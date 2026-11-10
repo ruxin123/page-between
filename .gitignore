@@ -121,6 +121,7 @@ __pycache__/
 !/book_margins.py
 !/tests/margins_test.py
 !/tests/reading-preferences.test.mjs
+!/tests/comparison.test.mjs
 
 !/local_backup.py
 !/tests/local_backup_test.py

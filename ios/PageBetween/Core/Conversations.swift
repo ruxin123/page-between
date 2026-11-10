@@ -21,15 +21,18 @@ public struct MobileConversation: Codable, Identifiable, Equatable, Sendable {
     public var previewQuote: String?
     public var sourceObjects: [PDFSourceObject]?
     public var sourceRects: [PDFSelectionRect]?
+    public var isValid: Bool {
+        quote.count <= 12000 && (previewQuote?.count ?? 0) <= 16000 && (sourceObjects?.count ?? 0) <= 32 && sourceObjects?.allSatisfy(\.isValid) != false && locator.utf8.count <= 30000 && (try? JSONSerialization.jsonObject(with: Data(locator.utf8))) is [String: Any] && turns.count <= 40 &&
+        (sourceRects?.count ?? 0) <= 1000 && sourceRects?.allSatisfy(\.isValid) != false &&
+        turns.allSatisfy({ ["user", "assistant"].contains($0.role) && $0.content.count <= 50000 && ($0.status == nil || ["generating", "complete", "stopped", "error"].contains($0.status!)) && ($0.error?.count ?? 0) <= 2000 })
+    }
     public init(book: UUID, quote: String, locator: String) { self.book = book; self.quote = quote; self.locator = locator }
 }
 
 extension LibraryRepository {
     public func saveConversation(_ conversation: MobileConversation) throws {
         guard let book = books(includingDeleted: true).first(where: { $0.id == conversation.book }), book.deletedAt == nil else { throw LibraryFailure.missingBook }
-        guard conversation.quote.count <= 12000, (conversation.previewQuote?.count ?? 0) <= 16000, (conversation.sourceObjects?.count ?? 0) <= 32, conversation.sourceObjects?.allSatisfy(\.isValid) != false, conversation.locator.utf8.count <= 30000, conversation.turns.count <= 40,
-              (conversation.sourceRects?.count ?? 0) <= 1000, conversation.sourceRects?.allSatisfy(\.isValid) != false,
-              conversation.turns.allSatisfy({ ["user", "assistant"].contains($0.role) && $0.content.count <= 50000 && ($0.status == nil || ["generating", "complete", "stopped", "error"].contains($0.status!)) && ($0.error?.count ?? 0) <= 2000 }) else { throw ServiceRequestFailure.selectionTooLong }
+        guard conversation.isValid else { throw ServiceRequestFailure.selectionTooLong }
         let directory = try file(book, name: "conversations")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(conversation).write(to: directory.appendingPathComponent(conversation.id.uuidString + ".json"), options: .atomic)

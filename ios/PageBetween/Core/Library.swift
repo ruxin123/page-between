@@ -172,6 +172,57 @@ public actor LibraryRepository {
         try manager.removeItem(at: folder)
     }
 
+    public func backupSnapshot(to staging: URL) throws -> MobileBackupManifest {
+        try manager.createDirectory(at: staging, withIntermediateDirectories: true)
+        try JSONEncoder().encode(catalog).write(to: staging.appendingPathComponent("library.json"), options: .atomic)
+        var paths = ["library.json"]
+        var total = 0
+        for book in catalog.books {
+            let folder = root.appendingPathComponent("books/" + book.id.uuidString)
+            guard try folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true,
+                  let entries = manager.enumerator(at: folder.resolvingSymlinksInPath(), includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey], options: [.skipsHiddenFiles]) else { throw LibraryFailure.invalidFile }
+            for case let file as URL in entries {
+                let info = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey])
+                guard info.isSymbolicLink != true else { throw LibraryFailure.invalidPath }
+                if info.isDirectory == true { continue }
+                guard let base = file.path.range(of: folder.path + "/") else { throw LibraryFailure.invalidPath }
+                let path = "books/" + book.id.uuidString + "/" + file.path[base.upperBound...]
+                guard info.isRegularFile == true, MobileBackupManifest.validPath(path), let size = info.fileSize, size <= 300 * 1024 * 1024 else { throw LibraryFailure.invalidFile }
+                total += size
+                guard total <= MobileBackupManifest.maxTotal, paths.count < 100000 else { throw LibraryFailure.tooLarge }
+                let target = staging.appendingPathComponent(path)
+                try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try manager.copyItem(at: file, to: target)
+                paths.append(path)
+            }
+        }
+        let manifest = try MobileBackupManifest(files: paths.sorted().map { path in
+            let file = staging.appendingPathComponent(path)
+            return MobileBackupFile(path: path, size: try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0, sha256: try TransferManifest.hash(file))
+        })
+        _ = try manifest.catalog(at: staging)
+        return manifest
+    }
+
+    public func restoreBackup(_ manifest: MobileBackupManifest, from staging: URL) throws {
+        let next = try manifest.catalog(at: staging)
+        let previous = root.appendingPathComponent(".restore-" + UUID().uuidString)
+        let books = root.appendingPathComponent("books")
+        let incoming = staging.appendingPathComponent("books")
+        if !manager.fileExists(atPath: incoming.path) { try manager.createDirectory(at: incoming, withIntermediateDirectories: true) }
+        let hadBooks = manager.fileExists(atPath: books.path)
+        if hadBooks { try manager.moveItem(at: books, to: previous) }
+        do {
+            try manager.moveItem(at: incoming, to: books)
+            try persist(next)
+        } catch {
+            try? manager.removeItem(at: books)
+            if hadBooks { try? manager.moveItem(at: previous, to: books) }
+            throw error
+        }
+        try? manager.removeItem(at: previous)
+    }
+
     private func persist(_ next: MobileCatalog) throws {
         let data = try JSONEncoder().encode(next)
         try data.write(to: root.appendingPathComponent("library.json"), options: .atomic)

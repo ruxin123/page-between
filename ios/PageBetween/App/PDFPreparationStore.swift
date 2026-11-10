@@ -88,5 +88,11 @@ import PDFKit
     }
     private func cloudProgress(_ task: PDFPreparationTask) { mineruJobs[task.book] = task; revision += 1 }
     func pauseMinerU(_ id: UUID) { cloudRunning[id]?.cancel() }
+    var hasActiveWork: Bool { !running.isEmpty || !cloudRunning.isEmpty }
+    func pauseForDataChange() async {
+        pauseAll()
+        for task in Array(running.values) + Array(nearby.values) + Array(cloudRunning.values) { await task.value }
+    }
+    func reset() { jobs = [:]; mineruJobs = [:]; running = [:]; nearby = [:]; cloudRunning = [:]; revision += 1 }
     func pauseAll() { for task in running.values { task.cancel() }; for task in nearby.values { task.cancel() }; for task in cloudRunning.values { task.cancel() } }
 }

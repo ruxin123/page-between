@@ -13,11 +13,15 @@ struct MarkdownView: View {
     @State private var height: CGFloat = 80
     @State private var failed = false
     @State private var pending = true
+    @State private var attempt = 0
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            MarkdownWebView(text: text, images: images, height: $height, failed: $failed, pending: $pending).frame(height: failed ? 0 : height).accessibilityHidden(failed)
+            MarkdownWebView(text: text, images: images, height: $height, failed: $failed, pending: $pending).id(attempt).frame(height: failed ? 0 : height).accessibilityHidden(failed)
                 .overlay { if pending && !failed { ProgressView() } }
-            if failed { Text(text).font(.body).textSelection(.enabled) }
+            if failed {
+                Text(text).font(.body).textSelection(.enabled)
+                Button("重新加载预览") { failed = false; pending = true; attempt += 1 }.font(.callout)
+            }
         }
     }
 }
@@ -43,28 +47,56 @@ private struct MarkdownWebView: UIViewRepresentable {
         view.loadPreview = { [weak view, weak coordinator = context.coordinator] in
             guard let view else { return }
             coordinator?.phase(view, "attached")
-            view.load(URLRequest(url: URL(string: "\(MarkdownResources.scheme)://bundle/markdown.html")!))
+            let navigation = view.load(URLRequest(url: URL(string: "\(MarkdownResources.scheme)://bundle/markdown.html")!))
+            coordinator?.phase(view, navigation == nil ? "rejected" : "queued")
+            coordinator?.watchStartup(view)
         }
         return view
     }
     func updateUIView(_ view: WKWebView, context: Context) { context.coordinator.parent = self; context.coordinator.render(view) }
+    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+        coordinator.startup?.cancel()
+        coordinator.revision += 1
+        view.navigationDelegate = nil
+        view.stopLoading()
+        view.configuration.userContentController.removeScriptMessageHandler(forName: "markdownReady")
+    }
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var parent: MarkdownWebView
         var loaded = false
         var revision = 0
         var lastText: String?
         var lastImages: [MarkdownSourceImage] = []
+        var startup: Task<Void, Never>?
+        var started = false
         init(_ parent: MarkdownWebView) { self.parent = parent }
         func phase(_ view: WKWebView, _ name: String) {
             #if DEBUG
             view.accessibilityValue = ((view.accessibilityValue ?? "").split(separator: ">").suffix(7).map(String.init) + [name]).joined(separator: ">")
             #endif
         }
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { phase(webView, "started") }
+        func watchStartup(_ view: WKWebView) {
+            startup?.cancel()
+            startup = Task { @MainActor [weak self, weak view] in
+                for attempt in 0..<2 {
+                    do { try await Task.sleep(for: .seconds(attempt == 0 ? 3 : 7)) } catch { return }
+                    guard let self, let view, !self.loaded else { return }
+                    if attempt == 0 {
+                        if !self.started {
+                            self.phase(view, "retry-start")
+                            view.stopLoading()
+                            view.load(URLRequest(url: URL(string: "\(MarkdownResources.scheme)://bundle/markdown.html")!))
+                        }
+                    } else { self.parent.failed = true; self.parent.pending = false; return }
+                }
+            }
+        }
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { started = true; phase(webView, "started") }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { phase(webView, "committed") }
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "markdownReady", message.body as? String == "ready", message.frameInfo.isMainFrame, let view = message.webView else { return }
             phase(view, "script-ready")
+            startup?.cancel()
             loaded = true; lastText = nil; render(view)
         }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -94,6 +126,7 @@ private struct MarkdownWebView: UIViewRepresentable {
             }
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            phase(webView, "policy-" + (navigationAction.request.url?.scheme ?? "none"))
             if navigationAction.navigationType == .linkActivated {
                 if let url = navigationAction.request.url, ["https", "http"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }
                 decisionHandler(.cancel)
@@ -107,12 +140,27 @@ private struct MarkdownWebView: UIViewRepresentable {
 
 private final class MarkdownBrowser: WKWebView {
     var loadPreview: (() -> Void)?
+    private var loadScheduled = false
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil else { return }
-        let load = loadPreview
-        loadPreview = nil
-        load?()
+        loadWhenReady()
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        loadWhenReady()
+    }
+    private func loadWhenReady() {
+        guard window != nil, bounds.width > 0, bounds.height > 0, loadPreview != nil, !loadScheduled else { return }
+        loadScheduled = true
+        // Start after WebKit finishes attaching a sized view to the presentation window.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.loadScheduled = false
+            guard self.window != nil, self.bounds.width > 0, self.bounds.height > 0 else { return }
+            let load = self.loadPreview
+            self.loadPreview = nil
+            load?()
+        }
     }
 }
 

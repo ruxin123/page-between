@@ -109,6 +109,23 @@
 				</array>
 			</dict>
 		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>local.pagebetween.mobile-backup</string>
+			<key>UTTypeDescription</key>
+			<string>页间手机备份</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>pbmobilebackup</string>
+				</array>
+			</dict>
+		</dict>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>连接你配置的局域网模型服务，用于阅读答疑和翻译。</string>

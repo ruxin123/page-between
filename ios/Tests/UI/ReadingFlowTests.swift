@@ -2,6 +2,33 @@ import XCTest
 
 final class ReadingFlowTests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
+    @MainActor func testBackupRestoreReturnsDeletedBook() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["PAGE_BETWEEN_UI_TEST"] = "1"
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let book = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Mobile reading sample")).firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout: 30))
+        app.buttons["library.more"].tap(); app.buttons["书库备份"].tap()
+        app.buttons["新建备份"].tap()
+        let actions = app.buttons["备份操作"].firstMatch
+        XCTAssertTrue(actions.waitForExistence(timeout: 30), app.debugDescription)
+        capture(app, "mobile-backups")
+        app.buttons["完成"].tap()
+        book.press(forDuration: 1.2)
+        app.buttons["删除书籍"].tap()
+        app.buttons["删除书籍"].tap()
+        XCTAssertTrue(app.staticTexts["暂无书籍"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["library.more"].tap(); app.buttons["书库备份"].tap()
+        XCTAssertTrue(actions.waitForExistence(timeout: 10)); actions.tap()
+        app.buttons["恢复"].tap(); app.buttons["恢复书库"].tap()
+        XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 10))
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["完成"])
+        XCTAssertEqual(XCTWaiter.wait(for: [done], timeout: 30), .completed)
+        capture(app, "mobile-backup-restored")
+        app.buttons["完成"].tap()
+        XCTAssertTrue(book.waitForExistence(timeout: 10), app.debugDescription)
+    }
     @MainActor func testReferenceReadingKeepsMainPositionAndAppearance() throws {
         let app = XCUIApplication()
         app.launchEnvironment["PAGE_BETWEEN_UI_TEST"] = "1"

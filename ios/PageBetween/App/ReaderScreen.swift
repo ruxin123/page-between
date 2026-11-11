@@ -12,6 +12,7 @@ struct AssistantSelection: Identifiable {
     var markdown: String? = nil
     var objects: [PDFSourceObject] = []
     var rects: [PDFSelectionRect] = []
+    var attachments: [SourceAttachment] = []
 }
 
 @MainActor final class MobileReader: NSObject, ObservableObject, EPUBNavigatorDelegate, PDFNavigatorDelegate {
@@ -39,6 +40,9 @@ struct AssistantSelection: Identifiable {
     let isReference: Bool
     private var saveTask: Task<Void, Never>?
     private var loaded = false
+    private var startup: Task<Void, Never>?
+    private var startupRetries = 0
+    private var contentReady = false
     private var directionalNavigation: DirectionalNavigationAdapter?
     private var chromeTask: Task<Void, Never>?
     private var selectionMenuTask: Task<Void, Never>?
@@ -103,6 +107,31 @@ struct AssistantSelection: Identifiable {
             updateBookmarkState()
         } catch { failure = error.localizedDescription }
     }
+    func watchTextStartup(_ view: UIViewController & Navigator) {
+        guard view is EPUBNavigatorViewController, !contentReady else { return }
+        startup?.cancel()
+        startup = Task { @MainActor [weak self, weak view] in
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            guard let self, let view, self.navigator === view, !self.contentReady, view.viewIfLoaded?.window != nil else { return }
+            if self.startupRetries == 0 {
+                self.startupRetries = 1
+                await self.reopen()
+            } else {
+                self.controller = nil; self.navigator = nil; self.loaded = false
+                self.failure = "正文未能加载，请重试。"
+            }
+        }
+    }
+    private func reopen() async {
+        controller = nil; navigator = nil; directionalNavigation = nil
+        loaded = false; contentReady = false; failure = nil
+        await Task.yield()
+        await load()
+    }
+    func retry() async {
+        startup?.cancel(); startupRetries = 0
+        await reopen()
+    }
     private func contentTapped() {
         guard !hasContentSelection else { return }
         let now = ProcessInfo.processInfo.systemUptime
@@ -129,6 +158,8 @@ struct AssistantSelection: Identifiable {
         (navigator as? MobilePDFNavigator)?.applyScroll(scroll)
     }
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        guard self.navigator === navigator else { return }
+        contentReady = true; startup?.cancel()
         chapter = locator.title ?? book.title
         progress = locator.locations.totalProgression ?? locator.locations.progression ?? 0
         updateBookmarkState(locator)
@@ -263,8 +294,20 @@ struct AssistantSelection: Identifiable {
     required init?(coder: NSCoder) { fatalError("Storyboard is not used") }
     override func viewDidLoad() {
         super.viewDidLoad()
-        addChild(navigator); navigator.view.frame = view.bounds; navigator.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]; view.addSubview(navigator.view); navigator.didMove(toParent: self)
         view.addInteraction(selectionMenu)
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        mountNavigator()
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        mountNavigator()
+    }
+    private func mountNavigator() {
+        guard view.window != nil, !view.bounds.isEmpty, navigator.parent == nil else { return }
+        addChild(navigator); navigator.view.frame = view.bounds; navigator.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]; view.addSubview(navigator.view); navigator.didMove(toParent: self)
+        reader?.watchTextStartup(navigator)
     }
     private var selectionFrame: CGRect? {
         guard let frame = (navigator as? SelectableNavigator)?.currentSelection?.frame else { return nil }
@@ -330,8 +373,8 @@ struct ReaderScreen: View {
             GeometryReader { geometry in
                 VStack(spacing: 0) {
                     Group {
-                        if let controller = reader.controller { NavigatorHost(controller: controller) }
-                        else if let failure = reader.failure { ContentUnavailableView("暂时无法打开", systemImage: "book.closed", description: Text(failure)) }
+                        if let controller = reader.controller { NavigatorHost(controller: controller).id(ObjectIdentifier(controller)) }
+                        else if let failure = reader.failure { ReaderUnavailable(message: failure, retry: { await reader.retry() }) }
                         else { ProgressView("正在打开书籍…") }
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     if let comparison {
@@ -471,4 +514,15 @@ struct ReaderScreen: View {
         }
     }
     private func flatten(_ links: [ReadiumShared.Link], depth: Int = 0) -> [(link: ReadiumShared.Link, depth: Int)] { links.flatMap { [(link: $0, depth: depth)] + flatten($0.children, depth: depth+1) } }
+}
+
+struct ReaderUnavailable: View {
+    let message: String
+    let retry: () async -> Void
+    var body: some View {
+        ContentUnavailableView {
+            Label("暂时无法打开", systemImage: "book.closed")
+        } description: { Text(message) }
+        actions: { Button("重试") { Task { await retry() } }.buttonStyle(.borderedProminent) }
+    }
 }

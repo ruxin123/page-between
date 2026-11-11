@@ -146,15 +146,15 @@ def conversation(ident, book):
     return result
 
 
-def source_for(book, source, *, resource_root=None):
+def source_for(book, source, *, resource_root=None, quote_limit=6000):
     if (
         not isinstance(source, dict)
         or not isinstance(source.get("quote", ""), str)
         or not (source.get("quote", "").strip() or source.get("image"))
     ):
         raise TutorError("请先选择原文或打开当前页提问。")
-    if len(source.get("quote", "")) > 6000:
-        raise TutorError("选段超过 6000 字符，请缩小范围；原文不会被截断。")
+    if len(source.get("quote", "")) > quote_limit:
+        raise TutorError(f"选段超过 {quote_limit} 字符，请缩小范围；原文不会被截断。")
     position = source.get("position", {})
     if not isinstance(position, dict):
         raise TutorError("原文位置无效。")
@@ -244,14 +244,36 @@ def source_for(book, source, *, resource_root=None):
             )
         except (ValueError, OSError) as error:
             raise TutorError(str(error)) from None
+    if resource_root is not None:
+        from transfer_records import _box
+        markdown = source.get("transferMarkdown")
+        if markdown is not None:
+            if not isinstance(markdown, str) or len(markdown) > 24000: raise TutorError("保存的选段排版无效。")
+            result["transferMarkdown"] = markdown
+        images = source.get("transferImages", [])
+        if not isinstance(images, list) or len(images) > 100: raise TutorError("保存的原图引用无效。")
+        for image in images:
+            if not isinstance(image, dict) or not isinstance(image.get("raw"), str) or len(image["raw"]) > 12000: raise TutorError("保存的原图无效。")
+            book_images.stored_image(book, image.get("url"), root=resource_root)
+        if images: result["transferImages"] = images
+        objects = source.get("transferObjects", [])
+        if not isinstance(objects, list) or len(objects) > 100: raise TutorError("保存的原文对象无效。")
+        for obj in objects:
+            if not isinstance(obj, dict) or book["type"] != "pdf" or type(obj.get("page")) is not int or not 1 <= obj["page"] <= count or not _box(obj.get("box")) or obj.get("type") not in {"equation", "table", "image"} or not isinstance(obj.get("text"), str) or len(obj["text"]) > 500000: raise TutorError("保存的原文对象无效。")
+        if objects: result["transferObjects"] = objects
+        readium = source["position"].get("transferReadium")
+        if readium is not None:
+            from library_transfer import position as portable_position
+            result["position"]["transferReadium"] = portable_position({"readium":readium})["readium"]
+        if source.get("kind") in ("text", "equation", "table", "image"): result["kind"] = source["kind"]
     return result
 
 
-def source_preview(book, payload):
+def source_preview(book, payload, *, quote_limit=6000):
     quote = payload.get("quote")
-    if not isinstance(quote, str) or not quote.strip() or len(quote) > 6000:
+    if not isinstance(quote, str) or not quote.strip() or len(quote) > quote_limit:
         raise TutorError("选段内容无效或过长。")
-    source = source_for(book, {"quote": quote, "position": payload.get("position")})
+    source = source_for(book, {"quote": quote, "position": payload.get("position")}, quote_limit=quote_limit)
     blocks = (
         page_enrichment(book, source["position"]["index"], source["position"].get("endIndex"))
         if book["type"] == "pdf"

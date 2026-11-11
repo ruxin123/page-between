@@ -3,6 +3,11 @@ import { saveMargin } from "./saved-excerpts.mjs";
 import { downloadFile } from "./export.mjs";
 import { enablePanelDragging } from "./tutor.mjs";
 
+function imagesFor(source) {
+  const paths = Array.isArray(source.transferImages) ? source.transferImages.map(image => image.url) : [source.image];
+  return paths.filter(path => typeof path === "string" && /^\/(?:demo-)?data\/books\/[A-Za-z0-9_-]+\/attachments\/[0-9a-f]{64}\.(png|jpg)$/.test(path)).map(path => `<img src="${esc(path)}" alt="原文图像" loading="lazy">`).join("");
+}
+
 export function createMargins({ api, post, toast, getBookmarks, openSource }) {
   const dialog = document.createElement("dialog");
   dialog.className = "margins-dialog";
@@ -67,7 +72,7 @@ export function createMargins({ api, post, toast, getBookmarks, openSource }) {
       $("[data-detail]").hidden = false;
       $("[data-list]").hidden = true;
       $(".margins-tools").hidden = true;
-      $("[data-detail]").innerHTML = `<div class="margin-detail-actions"><button class="secondary-button" data-record-back>返回列表</button><button class="secondary-button" data-source>返回原文</button><button class="secondary-button" data-copy-source ${source(full).kind === "image" ? "hidden" : ""}>复制原文</button><button class="secondary-button" data-pin ${source(full).quote ? "" : "disabled"}>固定引用</button>${type === "excerpts" ? '<button class="secondary-button" data-remove>删除</button>' : ''}</div><p class="margin-citation">${esc(source(full).citation)}</p><div class="ai-markdown">${html || `<p>${esc(full.label)}</p>`}${source(full).image ? `<img src="${esc(source(full).image)}" alt="原文图像">` : ""}</div>${type === "excerpts" ? `<label class="margin-note">笔记<textarea maxlength="2000" rows="3">${esc(full.note || "")}</textarea></label><button class="secondary-button" data-save-note>保存笔记</button>` : type === "bookmarks" ? "" : `<button class="secondary-button" data-keep>保存到页边</button>`}`;
+      $("[data-detail]").innerHTML = `<div class="margin-detail-actions"><button class="secondary-button" data-record-back>返回列表</button><button class="secondary-button" data-source>返回原文</button><button class="secondary-button" data-copy-source ${source(full).kind === "image" ? "hidden" : ""}>复制原文</button><button class="secondary-button" data-pin ${source(full).quote ? "" : "disabled"}>固定引用</button>${type === "excerpts" ? '<button class="secondary-button" data-remove>删除</button>' : ''}</div><p class="margin-citation">${esc(source(full).citation)}</p><div class="ai-markdown">${html || `<p>${esc(full.label)}</p>`}${imagesFor(source(full))}</div>${type === "excerpts" ? `<label class="margin-note">笔记<textarea maxlength="2000" rows="3">${esc(full.note || "")}</textarea></label><button class="secondary-button" data-save-note>保存笔记</button>` : type === "bookmarks" ? "" : `<button class="secondary-button" data-keep>保存到页边</button>`}`;
       $("[data-record-back]").onclick = load;
       $("[data-copy-source]").onclick = async () => {
         try { await navigator.clipboard.writeText(source(full).quote); $("[data-status]").textContent = "已复制原文。"; }

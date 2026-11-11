@@ -23,7 +23,7 @@ export function createDataSettings({ api, post, toast }) {
           .map((item) => `${item.label} ${bytes(item.bytes)}`)
           .join(" · ") || "没有可清理的缓存。";
       const transfer = await api("/api/data/transfer/preview");
-      $("transfer-preview").textContent = `${transfer.books} 本 · 约 ${bytes(transfer.bytes)}` + (transfer.skipped.length ? ` · 跳过 ${transfer.skipped.length} 本` : "") + (transfer.bytes > 1024 ** 3 ? " · 超过 1 GB" : "");
+      $("transfer-preview").textContent = `${transfer.books} 本 · 原件约 ${bytes(transfer.bytes)}` + (transfer.skipped.length ? ` · 跳过 ${transfer.skipped.length} 本` : "") + (transfer.bytes > 1024 ** 3 ? " · 超过 1 GB" : "");
       $("transfer-export").disabled = !transfer.canExport;
       $("transfer-skipped").textContent = transfer.skipped.map(item => `${item.title} · ${item.reason}`).join("\n");
       $("transfer-skipped").parentElement.hidden = !transfer.skipped.length;
@@ -78,7 +78,8 @@ export function createDataSettings({ api, post, toast }) {
     run("正在检查并合并迁移包…", async () => {
       const result = await api("/api/data/transfer/import", {method:"POST", headers:{"Content-Type":"application/octet-stream"}, body:file});
       window.dispatchEvent(new Event("app-library-refresh"));
-      $("data-status").textContent = `已导入 ${result.added} 本，保留 ${result.duplicates} 本已有书籍。` + result.failures.map(item => `${item.title}：${item.error}`).join("；");
+      const merged = Object.values(result.merged || {}).reduce((total, count) => total + count, 0);
+      $("data-status").textContent = `已导入 ${result.added} 本，保留 ${result.duplicates} 本已有书籍。` + (merged ? `合并 ${merged} 条阅读记录。` : "") + result.failures.map(item => `${item.title}：${item.error}`).join("；");
     });
   };
   $("backup-frequency").onchange = event => run("正在保存…", async () => {

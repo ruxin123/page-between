@@ -13,14 +13,26 @@ enum UITestFixtures {
                 let original = folder.appendingPathComponent("original.txt")
                 try Data(("第一章 Transfer start\n\nOriginal transferred paragraph.\n第二章 Transfer continue\n\nOriginal transferred second paragraph.\n" + UUID().uuidString).utf8).write(to: original)
                 let hash = try TransferManifest.hash(original), path = "books/" + hash + ".txt"
-                let mark = TransferBookmark(title: "Transfer bookmark", position: TransferPosition(index: 1))
-                let book = TransferBook(title: "Original transfer sample " + String(repeating: "长标题", count: 35), author: "Original Author", file: path, sha256: hash, position: TransferPosition(index: 2, progress: 0.4, chapterFraction: 0.3), bookmarks: [mark])
-                let meta = folder.appendingPathComponent("manifest.json")
-                try JSONEncoder().encode(TransferManifest(books: [book])).write(to: meta)
+                var mark = TransferBookmark(title: "Transfer bookmark", position: TransferPosition(index: 1)); mark.id = "00000000000000000000000000000001"
+                var book = TransferBook(title: "Original transfer sample " + String(repeating: "长标题", count: 35), author: "Original Author", file: path, sha256: hash, position: TransferPosition(index: 2, progress: 0.4, chapterFraction: 0.3), bookmarks: [mark])
                 let file = folder.appendingPathComponent("original.pbtransfer")
                 let archive = try await Archive(url: file, accessMode: .create)
+                let writer = TransferWriter(archive: archive, folder: folder)
+                let png = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 32)).image { _ in UIColor.systemGreen.setFill(); UIRectFill(CGRect(x: 4, y: 4, width: 40, height: 24)) }.pngData()!
+                let asset = try await writer.add(png, prefix: "images", suffix: "png")
+                let source = TransferSource(quote: "Original transferred paragraph.", position: TransferPosition(index: 1), chapter: "Transfer start", images: [TransferImage(file: asset.file)])
+                let excerpt = TransferExcerpt(id: "00000000000000000000000000000002", source: source, note: "Original transferred note", createdAt: 1794000000)
+                let translation = TransferTranslation(id: "00000000000000000000000000000003", source: source, text: source.quote, translation: "原创迁移译文。", explanation: "", provider: "google", model: "", sourceLanguage: "en", targetLanguage: "zh", detectedLanguage: "en", createdAt: 1794000001)
+                let turn = TransferTurn(id: "00000000000000000000000000000004", role: "user", content: "An original transfer question")
+                let conversation = TransferConversation(id: "00000000000000000000000000000005", source: source, messages: [turn], createdAt: 1794000002, updatedAt: 1794000002)
+                let appearance = TransferAppearance(fontScale: 95, lineHeight: 1.8, pageMargins: 1, fontFamily: "Georgia", theme: "paper", scroll: false)
+                let records = TransferRecords(excerpts: [excerpt], translations: [translation], conversations: [conversation], appearance: appearance)
+                book.records = try await writer.add(JSONEncoder().encode(records), prefix: "records", suffix: "json")
+                var manifest = TransferManifest(books: [book]); manifest.images = [asset]
+                let meta = folder.appendingPathComponent("manifest.json")
+                try JSONEncoder().encode(manifest).write(to: meta)
                 try await archive.addEntry(with: "manifest.json", fileURL: meta)
-                try await archive.addEntry(with: path, fileURL: original)
+                try await writer.add(original, as: path, size: try original.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
                 store.incomingTransfer = file
             } catch { store.error = error.localizedDescription }
         }

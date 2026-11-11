@@ -10,6 +10,9 @@ struct ExcerptsScreen: View {
     @State private var selected: SavedExcerpt?
     @State private var removed: SavedExcerpt?
     @State private var chapter = ""
+    @State private var translationsOnly = false
+    private var records: [SavedExcerpt] { items.filter { ($0.translationDetails != nil) == translationsOnly } }
+    private var visibleItems: [SavedExcerpt] { records.filter { chapter.isEmpty || $0.chapter == chapter } }
     @State private var error: String?
     @State private var exported: URL?
     @State private var exporting = false
@@ -17,13 +20,17 @@ struct ExcerptsScreen: View {
     var body: some View {
         NavigationStack {
             List {
-                if !items.isEmpty {
+                if translationsOnly || items.contains(where: { $0.translationDetails != nil }) {
+                    Picker("记录类型", selection: $translationsOnly) { Text("选段").tag(false); Text("翻译收藏").tag(true) }.pickerStyle(.segmented)
+                        .onChange(of: translationsOnly) { chapter = "" }
+                }
+                if !records.isEmpty {
                     Picker("章节", selection: $chapter) {
                         Text("全部章节").tag("")
-                        ForEach(Array(Set(items.map(\.chapter))).sorted(), id: \.self) { Text($0).tag($0) }
+                        ForEach(Array(Set(records.map(\.chapter))).sorted(), id: \.self) { Text($0).tag($0) }
                     }
                 }
-                ForEach(items.filter { chapter.isEmpty || $0.chapter == chapter }) { item in
+                ForEach(visibleItems) { item in
                     Button { selected = item } label: {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(item.quote.isEmpty ? "原文图像" : item.quote).lineLimit(3).foregroundStyle(.primary)
@@ -34,7 +41,7 @@ struct ExcerptsScreen: View {
                         Button("删除", role: .destructive) { Task { await remove(item) } }
                     }
                 }
-                if items.isEmpty { ContentUnavailableView("暂无保存选段", systemImage: "text.badge.plus") }
+                if visibleItems.isEmpty { ContentUnavailableView(translationsOnly ? "暂无翻译收藏" : "暂无保存选段", systemImage: translationsOnly ? "star" : "text.badge.plus") }
                 if let removed { Button("撤销删除") { Task { var item = removed; item.deletedAt = nil; await save(item); self.removed = nil } } }
                 if let error { Text(error).foregroundStyle(.secondary) }
                 if let exported { ShareLink("存储或分享导出", item: exported).accessibilityValue(exported.lastPathComponent) }
@@ -46,7 +53,7 @@ struct ExcerptsScreen: View {
                         Button("Markdown") { Task { await export(markdown: true) } }
                         Button("JSON") { Task { await export(markdown: false) } }
                         if book.format == "pdf" { Button("注释 PDF") { Task { await exportPDF() } } }
-                    }.disabled(exporting || items.isEmpty)
+                    }.disabled(exporting || visibleItems.isEmpty)
                 }
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
             }
@@ -76,7 +83,7 @@ struct ExcerptsScreen: View {
         defer { exporting = false }
         do {
             let original = try await repository.file(book, name: book.originalName)
-            let chosen = items.filter { chapter.isEmpty || $0.chapter == chapter }
+            let chosen = visibleItems
             let bytes = try await Task.detached { try AnnotatedPDF.data(original: original, excerpts: chosen) }.value
             let directory = folder.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -91,9 +98,8 @@ struct ExcerptsScreen: View {
         defer { exporting = false }
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let original = try await repository.file(book, name: book.originalName)
-            let chosen = items.filter { chapter.isEmpty || $0.chapter == chapter }
-            var size = chosen.reduce(0) { $0 + $1.quote.utf8.count + $1.note.utf8.count + ($1.answer?.utf8.count ?? 0) }
+            let chosen = visibleItems
+            var size = chosen.reduce(0) { $0 + $1.quote.utf8.count + $1.note.utf8.count + ($1.answer?.utf8.count ?? 0) + ($1.translation?.utf8.count ?? 0) }
             guard size <= (markdown ? 200 : 50) * 1024 * 1024 else { throw ServiceError.message("记录较多，请按章节导出。") }
             var data = try JSONSerialization.jsonObject(with: JSONEncoder().encode(chosen)) as? [[String: Any]] ?? []
             var lines = ["# " + book.title, ""]
@@ -104,8 +110,9 @@ struct ExcerptsScreen: View {
             for (index, item) in chosen.enumerated() {
                 lines += ["## " + item.chapter, "", item.markdown ?? item.quote, ""]
                 var images: [String] = []
-                for (offset, object) in item.objects.enumerated() {
-                    let bytes = try PDFSourceContent.image(object, original: original)
+                let previews = try await PDFSourceContent.previews(book: book, objects: item.objects, attachments: item.attachments ?? [], repository: repository)
+                for (offset, image) in previews.enumerated() {
+                    let bytes = image.data
                     size += markdown ? bytes.count : bytes.count * 4 / 3
                     guard size <= (markdown ? 200 : 50) * 1024 * 1024 else { throw ServiceError.message("原图较多，请减少导出范围或改用 Markdown 文件包。") }
                     if !markdown { images.append("data:image/png;base64," + bytes.base64EncodedString()) }
@@ -119,7 +126,8 @@ struct ExcerptsScreen: View {
                 }
                 data[index]["images"] = images
                 if !item.note.isEmpty { lines += ["### 笔记", "", item.note, ""] }
-                if let answer = item.answer { lines += ["### 译文或答疑", "", answer, ""] }
+                if let translation = item.translation { lines += ["### 译文", "", translation, ""] }
+                if let answer = item.answer { lines += ["### 答疑", "", answer, ""] }
             }
             if let archive {
                 let file = folder.appendingPathComponent("页边.md")
@@ -152,11 +160,13 @@ private struct ExcerptDetail: View {
                     if loading { ProgressView() }
                     else {
                         Text(item.chapter).font(.caption).foregroundStyle(.secondary)
-                        let source = item.markdown ?? item.quote
+                        let source = item.translationDetails?.originalText ?? item.markdown ?? item.quote
                         if !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { MarkdownView(text: source, images: images) }
-                        ForEach(Array(item.objects.enumerated()), id: \.offset) { index, object in
-                            if object.type == "image", index < images.count, let image = UIImage(data: images[index].data) { Image(uiImage: image).resizable().scaledToFit() }
+                        ForEach(Array(images.enumerated()), id: \.offset) { index, entry in
+                            if !(item.attachments ?? []).isEmpty || (item.objects.indices.contains(index) && item.objects[index].type == "image"), let image = UIImage(data: entry.data) { Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("原文图像") }
                         }
+                        if let translation = item.translation, !translation.isEmpty { MarkdownView(text: translation, images: images) }
+                        if let explanation = item.translationDetails?.explanation, !explanation.isEmpty { MarkdownView(text: explanation) }
                         if let answer = item.answer, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { MarkdownView(text: answer, images: images) }
                         TextField("笔记", text: $item.note, axis: .vertical).lineLimit(3...8).accessibilityIdentifier("excerpt.note").textFieldStyle(.roundedBorder)
                         HStack {
@@ -174,8 +184,7 @@ private struct ExcerptDetail: View {
             .task {
                 defer { loading = false }
                 do {
-                    let original = try await repository.file(book, name: book.originalName)
-                    images = try item.objects.map { MarkdownSourceImage(raw: PDFTextAlignment.standaloneFormula($0.text) ?? $0.text, data: try PDFSourceContent.image($0, original: original)) }
+                    images = try await PDFSourceContent.previews(book: book, objects: item.objects, attachments: item.attachments ?? [], repository: repository)
                 } catch { self.error = error.localizedDescription }
             }
         }

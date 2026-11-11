@@ -27,6 +27,8 @@ public struct MobileBook: Codable, Identifiable, Equatable, Sendable {
     public var bookmarks: [ReadingBookmark] = []
     public var appearance: ReadingAppearance?
     public var excerpts: [SavedExcerpt]?
+    public var transferredPosition: TransferPosition?
+    public var transferredAppearance: TransferAppearance?
     public var parseEnabled: Bool?
     public var shouldPrepare: Bool { parseEnabled ?? ["pdf", "txt"].contains(format) }
 }
@@ -109,6 +111,8 @@ public actor LibraryRepository {
         // Metadata screens may hold an older book snapshot while the reader saves records.
         value.appearance = latest.appearance
         value.excerpts = latest.excerpts
+        value.transferredAppearance = latest.transferredAppearance
+        value.transferredPosition = latest.transferredPosition
         try replace(value)
     }
 
@@ -133,6 +137,9 @@ public actor LibraryRepository {
         guard value.isValid else { throw LibraryFailure.invalidFile }
         guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         book.appearance = value
+        if let old = book.transferredAppearance {
+            book.transferredAppearance = TransferAppearance(fontScale: value.fontScale, lineHeight: value.lineHeight, pageMargins: value.pageMargins, fontFamily: value.fontFamily, theme: value.theme, scroll: value.scroll, desktop: old.desktop)
+        }
         try replace(book)
     }
 
@@ -152,8 +159,8 @@ public actor LibraryRepository {
     public func saveLocation(_ id: UUID, locator: String, progress: Double, chapter: String) throws {
         guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         book.locator = locator; book.progress = progress.isFinite ? min(1, max(0, progress)) : 0
-        book.chapter = chapter; book.lastOpened = Date()
-        try update(book)
+        book.chapter = chapter; book.lastOpened = Date(); book.transferredPosition = nil
+        try replace(book)
     }
 
     public func toggleBookmark(_ id: UUID, title: String, locator: String) throws {
@@ -170,6 +177,54 @@ public actor LibraryRepository {
         var next = catalog; next.books.removeAll { $0.id == id }
         try persist(next)
         try manager.removeItem(at: folder)
+    }
+
+    public func mergeReadingRecords(_ id: UUID, incoming: ImportedReadingRecords) throws -> Int {
+        guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
+        guard incoming.excerpts.allSatisfy(\.isValid), incoming.conversations.allSatisfy({ $0.book == id && $0.isValid }), incoming.appearance?.isValid != false else { throw LibraryFailure.invalidFile }
+        var excerpts = book.excerpts ?? [], excerptIDs = Set(excerpts.map(\.id))
+        let added = incoming.excerpts.filter { excerptIDs.insert($0.id).inserted }
+        var marks = Set(book.bookmarks.map(\.id))
+        let bookmarks = incoming.bookmarks.filter { marks.insert($0.id).inserted }
+        guard excerpts.count + added.count <= 10000, book.bookmarks.count + bookmarks.count <= 10000 else { throw LibraryFailure.tooLarge }
+        excerpts += added
+        book.excerpts = excerpts.isEmpty ? nil : excerpts
+        book.bookmarks += bookmarks
+        if book.appearance == nil, let appearance = incoming.appearance {
+            book.appearance = appearance
+            book.transferredAppearance = incoming.portableAppearance
+        }
+        if let position = incoming.position { book.transferredPosition = position }
+        let directory = try file(book, name: "conversations")
+        let conversations = incoming.conversations.filter { !manager.fileExists(atPath: directory.appendingPathComponent($0.id.uuidString + ".json").path) }
+        let required = Set(added.flatMap { $0.attachments ?? [] }.map(\.file) + conversations.flatMap { $0.sourceAttachments ?? [] }.map(\.file))
+        var inserted: [URL] = []
+        var count = added.count + bookmarks.count
+        do {
+            for path in required {
+                let attachment = SourceAttachment(file: path)
+                guard attachment.isValid else { throw LibraryFailure.invalidPath }
+                let target = try file(book, name: path)
+                if !manager.fileExists(atPath: target.path) {
+                    try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    guard let source = incoming.attachments[path] else { throw LibraryFailure.invalidFile }
+                    inserted.append(target); try manager.copyItem(at: source, to: target)
+                }
+                _ = try self.attachment(book, item: attachment)
+            }
+            for conversation in conversations {
+                let target = directory.appendingPathComponent(conversation.id.uuidString + ".json")
+                if manager.fileExists(atPath: target.path) { continue }
+                try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+                try JSONEncoder().encode(conversation).write(to: target, options: .atomic)
+                inserted.append(target); count += 1
+            }
+            try replace(book)
+        } catch {
+            for target in inserted { try? manager.removeItem(at: target) }
+            throw error
+        }
+        return count
     }
 
     public func backupSnapshot(to staging: URL) throws -> MobileBackupManifest {
@@ -228,4 +283,15 @@ public actor LibraryRepository {
         try data.write(to: root.appendingPathComponent("library.json"), options: .atomic)
         catalog = next
     }
+}
+
+public struct ImportedReadingRecords: Sendable {
+    public var bookmarks: [ReadingBookmark] = []
+    public var excerpts: [SavedExcerpt] = []
+    public var conversations: [MobileConversation] = []
+    public var appearance: ReadingAppearance?
+    public var portableAppearance: TransferAppearance?
+    public var position: TransferPosition?
+    public var attachments: [String: URL] = [:]
+    public init() {}
 }

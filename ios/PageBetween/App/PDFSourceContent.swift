@@ -1,6 +1,7 @@
 import Foundation
 import PDFKit
 import ImageIO
+import UIKit
 
 enum PDFSourceContent {
     static func glyphs(_ selection: PDFSelection, page: PDFPage) -> [PDFSourceGlyph]? {
@@ -52,5 +53,27 @@ enum PDFSourceContent {
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination), data.length <= 6 * 1024 * 1024 else { throw LibraryFailure.tooLarge }
         return data as Data
+    }
+}
+
+extension PDFSourceContent {
+    static func previews(book: MobileBook, objects: [PDFSourceObject], attachments: [SourceAttachment], repository: LibraryRepository) async throws -> [MarkdownSourceImage] {
+        if !attachments.isEmpty {
+            var result: [MarkdownSourceImage] = []
+            for attachment in attachments {
+                let data = try await repository.attachment(book, item: attachment)
+                let image = try await Task.detached {
+                    if attachment.file.hasSuffix(".png") { return data }
+                    guard let converted = UIImage(data: data)?.pngData() else { throw LibraryFailure.invalidFile }
+                    return converted
+                }.value
+                result.append(MarkdownSourceImage(raw: PDFTextAlignment.standaloneFormula(attachment.raw) ?? attachment.raw, data: image))
+            }
+            return result
+        }
+        let original = try await repository.file(book, name: book.originalName)
+        return try await Task.detached {
+            try objects.map { MarkdownSourceImage(raw: PDFTextAlignment.standaloneFormula($0.text) ?? $0.text, data: try image($0, original: original)) }
+        }.value
     }
 }

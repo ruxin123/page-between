@@ -5,6 +5,8 @@ on:
     paths:
       - 'ios/**'
       - 'library_transfer.py'
+      - 'transfer_records.py'
+      - 'requirements.txt'
       - 'tests/transfer_test.py'
       - '.github/workflows/ios.yml'
 permissions:
@@ -14,13 +16,19 @@ concurrency:
   cancel-in-progress: true
 jobs:
   iphone:
+    name: iPhone ${{ matrix.flow }}
+    strategy:
+      fail-fast: false
+      matrix:
+        flow: [library, reader]
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Core tests
+        if: matrix.flow == 'library'
         run: swift test --package-path ios --scratch-path "$RUNNER_TEMP/CoreTests"
       - name: Choose iPhone simulator
         run: |
@@ -37,16 +45,26 @@ jobs:
       - name: Build and run on iPhone
         run: |
           set -o pipefail
+          library_tests=(testBackupRestoreReturnsDeletedBook testImportOptionsAndIllustratedFB2 testTransferImportProgressBookmarksAndExport)
+          selector=skip-testing
+          if [[ "${{ matrix.flow }}" == "library" ]]; then selector=only-testing; fi
+          arguments=()
+          for test in "${library_tests[@]}"; do
+            arguments+=("-$selector:PageBetweenUITests/ReadingFlowTests/$test")
+          done
           xcodebuild test -project ios/PageBetween.xcodeproj -scheme PageBetween \
             -destination "platform=iOS Simulator,id=$IPHONE_SIMULATOR" -parallel-testing-enabled NO \
-            -collect-test-diagnostics never \
+            -collect-test-diagnostics never "${arguments[@]}" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -resultBundlePath "$RUNNER_TEMP/iPhone.xcresult" \
             CODE_SIGNING_ALLOWED=NO | tee "$RUNNER_TEMP/iphone-build.log"
       - name: Check packaged offline resources
+        if: matrix.flow == 'library'
         run: |
-          python3 -m unittest discover -s tests -p transfer_test.py
-          python3 ios/Tests/verify_transfer.py --zipfoundation "$RUNNER_TEMP/DerivedData/SourcePackages/checkouts/ZIPFoundation"
+          python3 -m venv "$RUNNER_TEMP/transfer-python"
+          "$RUNNER_TEMP/transfer-python/bin/python" -m pip install -r requirements.txt
+          "$RUNNER_TEMP/transfer-python/bin/python" -m unittest discover -s tests -p transfer_test.py
+          "$RUNNER_TEMP/transfer-python/bin/python" ios/Tests/verify_transfer.py --zipfoundation "$RUNNER_TEMP/DerivedData/SourcePackages/checkouts/ZIPFoundation"
           python3 ios/Tests/verify_ocr.py
           python3 ios/Tests/verify_mineru.py --zipfoundation "$RUNNER_TEMP/DerivedData/SourcePackages/checkouts/ZIPFoundation"
       - name: Check App resources
@@ -68,7 +86,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: iphone-results
+          name: iphone-results-${{ matrix.flow }}
           path: |
             ${{ runner.temp }}/iphone-build.log
             ${{ runner.temp }}/iPhone.xcresult

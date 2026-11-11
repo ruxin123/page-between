@@ -49,6 +49,7 @@ import book_index
 import epub_export
 import library_data
 import library_transfer
+import transfer_records
 import local_backup
 import chapter_edit
 import book_source
@@ -817,34 +818,47 @@ class Handler(SimpleHTTPRequestHandler):
                     self.receive_file(source, library_transfer.MAX_TOTAL)
                     incoming = library_transfer.read(source, folder)
                     added, duplicates, failures = 0, 0, []
+                    merged = {"excerpts": 0, "translations": 0, "conversations": 0, "bookmarks": 0}
                     for item in incoming:
                         with IMPORT_LOCKS[item["sha256"]], MUTEX:
                             collection = library()
                             state = load(DATA / "state.json", {})
                             positions = state.setdefault("positions", {})
                             marks = state.setdefault("bookmarks", [])
-                            if any(b.get("sourceHash") == item["sha256"] for b in collection["books"]):
-                                duplicates += 1
-                                continue
+                            book = next((b for b in collection["books"] if b.get("sourceHash") == item["sha256"]), None)
+                            existing = book is not None
+                            if existing: duplicates += 1
                             try:
-                                named_folder = Path(folder) / uuid.uuid4().hex
-                                named_folder.mkdir()
-                                title = re.sub(r"[/\\\x00]", "_", item.get("title", ""))[:40] or "书籍"
-                                named = named_folder / (title + item["source"].suffix)
-                                shutil.copyfile(item["source"], named)
-                                book = import_book(named, enabled=True)
-                                book["title"] = item.get("title") or book["title"]
-                                book["author"] = item.get("author") or book.get("author", "")
-                                save(BOOK_ROOT / book["id"] / "book.json", book)
-                                collection["books"].append(book)
-                                positions[book["id"]] = item["position"]
-                                marks.extend({"id": uuid.uuid4().hex, "book": book["id"], "label": mark["title"], "detail": "", "position": mark["position"]} for mark in item.get("bookmarks", []))
-                                save(DATA / "library.json", collection)
+                                if not existing:
+                                    named_folder = Path(folder) / uuid.uuid4().hex
+                                    named_folder.mkdir()
+                                    title = re.sub(r"[/\\\x00]", "_", item.get("title", ""))[:40] or "书籍"
+                                    named = named_folder / (title + item["source"].suffix)
+                                    shutil.copyfile(item["source"], named)
+                                    book = import_book(named, enabled=True)
+                                    book["title"] = item.get("title") or book["title"]
+                                    book["author"] = item.get("author") or book.get("author", "")
+                                    positions[book["id"]] = transfer_records.local_position(book, item["position"])
+                                if item.get("recordsData") is not None:
+                                    counts = transfer_records.import_book(book, item["recordsData"], item["imagesData"], state)
+                                    for key, number in counts.items(): merged[key] += number
+                                known = [mark for mark in marks if mark["book"] == book["id"]]
+                                for mark in item.get("bookmarks", []):
+                                    ident = mark.get("id") or uuid.uuid4().hex
+                                    pos = transfer_records.local_position(book, mark["position"])
+                                    if any(m["id"] == ident or (m["label"] == mark["title"] and library_transfer.position(m["position"]) == library_transfer.position(pos)) for m in known): continue
+                                    value = {"id": ident, "book": book["id"], "label": mark["title"], "detail": "", "position": pos}
+                                    if mark.get("createdAt") is not None: value["createdAt"] = mark["createdAt"]
+                                    marks.append(value); known.append(value); merged["bookmarks"] += 1
+                                if not existing:
+                                    save(BOOK_ROOT / book["id"] / "book.json", book)
+                                    collection["books"].append(book)
+                                    save(DATA / "library.json", collection)
+                                    added += 1
                                 save(DATA / "state.json", state)
-                                added += 1
                             except (ValueError, OSError) as error:
                                 failures.append({"title": item.get("title", ""), "error": str(error)})
-                    return self.json({"added": added, "duplicates": duplicates, "failures": failures})
+                    return self.json({"added": added, "duplicates": duplicates, "merged": merged, "failures": failures})
             if route.path == "/api/data/restore":
                 with (
                     RECOVERY_LOCK,
@@ -973,7 +987,7 @@ class Handler(SimpleHTTPRequestHandler):
                         if book["id"] not in eligible:
                             continue
                         source = path_for(book["originalUrl"])
-                        record = {"title": book["title"], "author": book.get("author", ""), "position": library_transfer.position(state.get("positions", {}).get(book["id"], {})), "bookmarks": [{"title": m["label"], "position": library_transfer.position(m["position"])} for m in state.get("bookmarks", []) if m["book"] == book["id"]]}
+                        record = {"title": book["title"], "author": book.get("author", ""), "position": transfer_records.portable_position(book, state.get("positions", {}).get(book["id"], {})), "bookmarks": [{"id": m["id"], "title": m["label"], "position": transfer_records.portable_position(book, m["position"]), **({"createdAt": m["createdAt"]} if m.get("createdAt") is not None else {})} for m in state.get("bookmarks", []) if m["book"] == book["id"]], **transfer_records.export_book(book, state)}
                         records.append((record, source))
                 ident = uuid.uuid4().hex + ".pbtransfer"
                 directory = CACHE / "exports"
@@ -1197,7 +1211,7 @@ class Handler(SimpleHTTPRequestHandler):
                 book = book_for(payload.get("book"))
                 if not book:
                     raise ValueError("找不到这本书。")
-                return self.json({"html": ai_tutor.source_preview(book, payload)})
+                return self.json({"html": ai_tutor.source_preview(book, payload, quote_limit=24000)})
             if route.path == "/api/ai/cancel":
                 book = book_for(payload.get("book"))
                 if not book:

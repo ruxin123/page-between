@@ -7,7 +7,7 @@ final class ReadingFlowTests: XCTestCase {
         app.launchEnvironment["PAGE_BETWEEN_UI_TEST"] = "1"
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        let book = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Mobile reading sample")).firstMatch
+        let book = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Mobile reading sample")).firstMatch
         XCTAssertTrue(book.waitForExistence(timeout: 30))
         app.buttons["library.more"].tap(); app.buttons["书库备份"].tap()
         app.buttons["新建备份"].tap()
@@ -18,7 +18,8 @@ final class ReadingFlowTests: XCTestCase {
         book.press(forDuration: 1.2)
         app.buttons["删除书籍"].tap()
         app.buttons["删除书籍"].tap()
-        XCTAssertTrue(app.staticTexts["暂无书籍"].waitForExistence(timeout: 10), app.debugDescription)
+        let deleted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: book)
+        XCTAssertEqual(XCTWaiter.wait(for: [deleted], timeout: 10), .completed)
         app.buttons["library.more"].tap(); app.buttons["书库备份"].tap()
         XCTAssertTrue(actions.waitForExistence(timeout: 10)); actions.tap()
         app.buttons["恢复"].tap(); app.buttons["恢复书库"].tap()
@@ -240,7 +241,7 @@ final class ReadingFlowTests: XCTestCase {
         app.launchEnvironment["PAGE_BETWEEN_TRANSFER_UI_TEST"] = "1"
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["已导入 1 本，保留 0 本已有书籍。"].waitForExistence(timeout: 45), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["已导入 1 本，保留 0 本已有书籍。合并 4 条阅读记录。"].waitForExistence(timeout: 45), app.debugDescription)
         capture(app, "transfer-import")
         app.buttons["完成"].tap()
         let book = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original transfer sample")).firstMatch
@@ -250,6 +251,20 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["Transfer bookmark"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["Transfer bookmark"].tap()
         XCTAssertTrue(app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original transferred paragraph")).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["reader.more"].tap(); app.buttons["页边"].tap()
+        let note = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original transferred note")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 10), app.debugDescription)
+        note.tap(); XCTAssertTrue(app.images["原文图像"].waitForExistence(timeout: 10), app.debugDescription)
+        capture(app, "transferred-excerpt")
+        app.buttons["完成"].tap(); app.buttons["翻译收藏"].tap()
+        let favorite = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original transferred paragraph.")).firstMatch
+        XCTAssertTrue(favorite.waitForExistence(timeout: 10)); favorite.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "原创迁移译文。")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        capture(app, "transferred-translation")
+        app.buttons["完成"].tap(); app.buttons["完成"].tap()
+        app.buttons["reader.more"].tap(); app.buttons["答疑记录"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "An original transfer question")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["完成"].tap()
         app.buttons["书库"].tap(); app.buttons["library.more"].tap(); app.buttons["设备迁移"].tap()
         app.buttons["导出迁移包"].tap()
         XCTAssertTrue(app.buttons["发送或存储迁移包"].waitForExistence(timeout: 45), app.debugDescription)
@@ -292,7 +307,7 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(ask.waitForExistence(timeout: 6), app.debugDescription)
         ask.tap()
         XCTAssertTrue(app.navigationBars["书内答疑"].waitForExistence(timeout: 5))
-        let previewReady = app.webViews["markdown.preview"].staticTexts.firstMatch.waitForExistence(timeout: 8)
+        let previewReady = app.staticTexts["markdown.plain"].waitForExistence(timeout: 8)
         capture(app, "scanned-selection")
         XCTAssertTrue(previewReady, app.debugDescription)
     }
@@ -340,7 +355,7 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(ask.waitForExistence(timeout: 5), app.debugDescription)
         ask.tap()
         XCTAssertTrue(app.navigationBars["书内答疑"].waitForExistence(timeout: 5), app.debugDescription)
-        let quote = app.webViews["markdown.preview"].staticTexts.firstMatch
+        let quote = app.staticTexts["markdown.plain"]
         let quoteRendered = quote.waitForExistence(timeout: 8)
         capture(app, "selection-preview-result")
         XCTAssertTrue(quoteRendered, "Selected text preview did not render: " + app.debugDescription)
@@ -370,7 +385,8 @@ final class ReadingFlowTests: XCTestCase {
         }
         book.tap()
         let content = app.descendants(matching: .any).matching(identifier: "reader.pdf").firstMatch
-        if !app.webViews.firstMatch.waitForExistence(timeout: 3) { XCTAssertTrue(content.waitForExistence(timeout: 20)) }
+        let navigator = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in content.exists || app.webViews.firstMatch.exists }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [navigator], timeout: 20), .completed, app.debugDescription)
         if !content.exists { XCTAssertTrue(app.webViews.staticTexts.firstMatch.waitForExistence(timeout: 30), "Reader content has not loaded") }
         XCTAssertFalse(app.buttons["目录"].isHittable, "A book should open without toolbars")
         capture(app, "immersive-reader")

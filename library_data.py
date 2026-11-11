@@ -505,7 +505,7 @@ def normalize_recovery(root):
             raise ValueError("备份中的对话结构无效。")
         book = books[item["book"]]
         original_source = item.get("source")
-        item["source"] = source_for(book, original_source, resource_root=root / "books")
+        item["source"] = source_for(book, original_source, resource_root=root / "books", quote_limit=12000)
         if (
             isinstance(original_source.get("citation"), str)
             and len(original_source["citation"]) <= 500

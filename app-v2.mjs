@@ -874,6 +874,7 @@ function makePosition() {
     ...location,
     blockOrder: undefined,
     blockOffset: undefined,
+    transferReadium: undefined,
     top:
       current.type === "pdf" ? pdfLocalTop() : $("reading-viewport").scrollTop,
     pdfY:

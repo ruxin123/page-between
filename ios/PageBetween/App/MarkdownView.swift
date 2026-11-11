@@ -14,13 +14,21 @@ struct MarkdownView: View {
     @State private var failed = false
     @State private var pending = true
     @State private var attempt = 0
+    private var plainText: Bool {
+        text.rangeOfCharacter(from: CharacterSet(charactersIn: "\\$*_`[]<>#~\r\n")) == nil &&
+        text.range(of: #"^\s*(?:[-+]|[0-9]+[.)])\s"#, options: .regularExpression) == nil
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            MarkdownWebView(text: text, images: images, height: $height, failed: $failed, pending: $pending).id(attempt).frame(height: failed ? 0 : height).accessibilityHidden(failed)
-                .overlay { if pending && !failed { ProgressView() } }
-            if failed {
-                Text(text).font(.body).textSelection(.enabled)
-                Button("重新加载预览") { failed = false; pending = true; attempt += 1 }.font(.callout)
+        if plainText {
+            Text(text).font(.body).textSelection(.enabled).accessibilityIdentifier("markdown.plain")
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                MarkdownWebView(text: text, images: images, height: $height, failed: $failed, pending: $pending).id(attempt).frame(height: failed ? 0 : height).accessibilityHidden(failed)
+                    .overlay { if pending && !failed { ProgressView() } }
+                if failed {
+                    Text(text).font(.body).textSelection(.enabled)
+                    Button("重新加载预览") { failed = false; pending = true; attempt += 1 }.font(.callout)
+                }
             }
         }
     }

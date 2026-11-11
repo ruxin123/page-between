@@ -36,14 +36,15 @@ public enum AnnotatedPDF {
                 guard let page = locations?["position"] as? Int, (1...document.pageCount).contains(page) else { throw LibraryFailure.invalidFile }
                 grouped[page] = []
             }
-            textSize += (item.quote.utf8.count + item.note.utf8.count + (item.answer?.utf8.count ?? 0) + 100) * grouped.count
+            textSize += (item.quote.utf8.count + item.note.utf8.count + (item.answer?.utf8.count ?? 0) + (item.translation?.utf8.count ?? 0) + 100) * grouped.count
             annotationCount += grouped.count
             guard textSize <= limit, annotationCount <= 100000 else { throw Failure.tooLarge }
             for (number, rects) in grouped {
                 guard (1...document.pageCount).contains(number), let page = document.page(at: number - 1) else { throw LibraryFailure.invalidFile }
                 var content = item.quote
                 if !item.note.isEmpty { content += "\n\n笔记\n" + item.note }
-                if let answer = item.answer, !answer.isEmpty { content += "\n\n译文或答疑\n" + answer }
+                if let translation = item.translation, !translation.isEmpty { content += "\n\n译文\n" + translation }
+                if let answer = item.answer, !answer.isEmpty { content += "\n\n答疑\n" + answer }
                 let annotation: PDFAnnotation
                 if !rects.isEmpty {
                     var points: [CGPoint] = []

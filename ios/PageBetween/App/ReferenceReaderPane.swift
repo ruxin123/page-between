@@ -21,8 +21,8 @@ struct ReferenceReaderPane: View {
                 Button("关闭对照", systemImage: "xmark") { close() }.labelStyle(.iconOnly)
             }.buttonStyle(.plain).padding(.horizontal, 16).frame(height: 44).background(.regularMaterial)
             Group {
-                if let controller = reader.controller { NavigatorHost(controller: controller) }
-                else if let failure = reader.failure { ContentUnavailableView("暂时无法打开", systemImage: "book.closed", description: Text(failure)) }
+                if let controller = reader.controller { NavigatorHost(controller: controller).id(ObjectIdentifier(controller)) }
+                else if let failure = reader.failure { ReaderUnavailable(message: failure, retry: { await reader.retry() }) }
                 else { ProgressView() }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack {

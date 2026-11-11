@@ -19,8 +19,11 @@ struct AssistantScreen: View {
     @State private var settings = false
     @State private var sourceImages: [MarkdownSourceImage] = []
     @State private var sendImage = false
+    @State private var translationDetails: TranslationDetails?
+    @State private var favoriteSaved = false
     @State private var lastSavedAt = Date.distantPast
     @FocusState private var questionFocused: Bool
+    private var hasImages: Bool { !selection.objects.isEmpty || !selection.attachments.isEmpty }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -28,14 +31,14 @@ struct AssistantScreen: View {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack { Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1); Spacer(); if let openSource { Button("返回原文", systemImage: "arrow.up.right.square") { request?.cancel(); dismiss(); openSource(selection.locator) }.labelStyle(.iconOnly) }; Button("复制原文", systemImage: "doc.on.doc") { UIPasteboard.general.string = selection.quote }.labelStyle(.iconOnly) }
                         if !selection.quote.isEmpty { MarkdownView(text: selection.markdown ?? selection.quote, images: sourceImages) }
-                        ForEach(Array(selection.objects.enumerated()), id: \.offset) { index, object in
-                            if object.type == "image", index < sourceImages.count, let image = UIImage(data: sourceImages[index].data) { Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("原书图像") }
+                        ForEach(Array(sourceImages.enumerated()), id: \.offset) { index, entry in
+                            if !selection.attachments.isEmpty || (selection.objects.indices.contains(index) && selection.objects[index].type == "image"), let image = UIImage(data: entry.data) { Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("原书图像") }
                         }
                     }.padding(16).background(MobilePalette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
                     if selection.translate {
                         Picker("翻译服务", selection: $services.provider) { Text("Google 翻译").tag("google"); Text("AI 翻译").tag("ai") }.pickerStyle(.segmented)
                     } else {
-                        if !selection.objects.isEmpty { Toggle("附带原图", isOn: $sendImage).disabled(services.ai.supportsImages != true) }
+                        if hasImages { Toggle("附带原图", isOn: $sendImage).disabled(services.ai.supportsImages != true) }
                         TextField("想问什么？", text: $question, axis: .vertical).focused($questionFocused).accessibilityIdentifier("assistant.question").lineLimit(2...6).padding(14).background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
                     }
                     HStack { Button(selection.translate ? "重新翻译" : "发送提问") { run() }.buttonStyle(.borderedProminent).disabled(busy || !selection.translate && question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty); if busy { ProgressView(); Button("停止") { request?.cancel() } }; Spacer(); if !answer.isEmpty || !turns.isEmpty { Button("复制结果", systemImage: "doc.on.doc") { UIPasteboard.general.string = selection.translate ? answer : turns.last(where: { $0.role == "assistant" })?.content }.labelStyle(.iconOnly) } }
@@ -48,6 +51,14 @@ struct AssistantScreen: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 if turn.imageAttached == true { Image(systemName: "photo").accessibilityLabel("已附原图") }
                                 if !turn.content.isEmpty { MarkdownView(text: turn.content, images: sourceImages) }
+                                if let references = turn.references, !references.isEmpty {
+                                    DisclosureGroup("引用") {
+                                        ForEach(Array(references.enumerated()), id: \.offset) { _, reference in
+                                            if let openSource { Button("[\(reference.number)] " + reference.citation) { request?.cancel(); dismiss(); openSource(reference.locator) } }
+                                            MarkdownView(text: reference.text)
+                                        }
+                                    }
+                                }
                                 if turn.status == "stopped" { Text("已停止").font(.caption).foregroundStyle(.secondary) }
                                 if let message = turn.error { Text(message).font(.caption).foregroundStyle(.secondary) }
                                 if turn.id == turns.last?.id, ["stopped", "error"].contains(turn.status ?? "") { Button("重新生成") { run(retry: true) }.disabled(busy) }
@@ -61,31 +72,30 @@ struct AssistantScreen: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("服务设置", systemImage: "gearshape") { settings = true } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("保存到页边", systemImage: "text.badge.plus") {
+                    Button(selection.translate ? (favoriteSaved ? "已收藏译文" : "收藏译文") : "保存到页边", systemImage: selection.translate ? (favoriteSaved ? "star.fill" : "star") : "text.badge.plus") {
                         Task {
                             do {
                                 var item = SavedExcerpt(quote: selection.quote, markdown: selection.markdown, locator: selection.locator, chapter: title, objects: selection.objects, rects: selection.rects)
-                                item.answer = selection.translate ? answer : turns.filter { $0.role == "assistant" && $0.status != "generating" }.map(\.content).joined(separator: "\n\n")
+                                item.attachments = selection.attachments
+                                item.transferredPosition = initialConversation?.transferredPosition
+                                if selection.translate { item.translation = answer; item.translationDetails = translationDetails }
+                                else { item.answer = turns.filter { $0.role == "assistant" && $0.status != "generating" }.map(\.content).joined(separator: "\n\n") }
                                 try await repository.saveExcerpt(selection.book, excerpt: item)
+                                if selection.translate { favoriteSaved = true }
                             } catch { self.error = error.localizedDescription }
                         }
-                    }.disabled(busy)
+                    }.disabled(busy || selection.translate && (answer.isEmpty || favoriteSaved))
                 }
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { request?.cancel(); dismiss() } }
             }
             .sheet(isPresented: $settings, onDismiss: { services.reload() }) { MobileSettingsScreen() }
             .task {
                 if let initialConversation { conversation = initialConversation; turns = initialConversation.turns }
-                if !selection.objects.isEmpty {
+                if hasImages {
                     do {
                         guard let book = await repository.books().first(where: { $0.id == selection.book }) else { throw LibraryFailure.missingBook }
-                        let original = try await repository.file(book, name: book.originalName)
-                        let objects = selection.objects
-                        let images = try await Task.detached {
-                            try objects.map { object in (PDFTextAlignment.standaloneFormula(object.text) ?? object.text, try PDFSourceContent.image(object, original: original)) }
-                        }.value
+                        sourceImages = try await PDFSourceContent.previews(book: book, objects: selection.objects, attachments: selection.attachments, repository: repository)
                         try Task.checkCancellation()
-                        sourceImages = images.map { MarkdownSourceImage(raw: $0.0, data: $0.1) }
                     } catch is CancellationError {} catch { self.error = "原图暂时无法读取，可返回原文查看。" }
                 }
                 if selection.translate { run() }
@@ -98,6 +108,7 @@ struct AssistantScreen: View {
         var item = conversation ?? MobileConversation(book: selection.book, quote: selection.quote, locator: selection.locator)
         item.previewQuote = selection.markdown; item.sourceObjects = selection.objects
         item.sourceRects = selection.rects.isEmpty ? nil : selection.rects
+        item.sourceAttachments = selection.attachments.isEmpty ? nil : selection.attachments
         item.turns = turns; item.updatedAt = Date(); conversation = item; lastSavedAt = Date()
         do { try await repository.saveConversation(item) }
         catch { self.error = "记录未保存：" + error.localizedDescription }
@@ -121,12 +132,15 @@ struct AssistantScreen: View {
             do {
                 let text: String
                 if !selection.translate && selection.quote.isEmpty && !sendImage { throw ServiceError.message("所选内容没有文字，请使用支持图像的模型并附带原图。") }
-                if sendImage && sourceImages.count != selection.objects.count { throw ServiceError.message("原图尚未准备完成。") }
+                if sendImage && sourceImages.count != (selection.attachments.isEmpty ? selection.objects.count : selection.attachments.count) { throw ServiceError.message("原图尚未准备完成。") }
                 if selection.translate {
-                    if services.provider == "google" { text = try await services.google(selection.quote) }
+                    let provider = services.provider
+                    if provider == "google" { text = try await services.google(selection.quote) }
                     else { text = try await services.complete(quote: selection.quote, question: sentQuestion, translate: true) }
                     try Task.checkCancellation()
                     let restored = MathText.restore(text, source: selection.quote)
+                    var details = TranslationDetails(); details.provider = provider
+                    translationDetails = details; favoriteSaved = false
                     answer = restored.text; formulaReview = restored.needsReview
                 } else {
                     var user = MobileTurn(role: "user", content: sentQuestion)

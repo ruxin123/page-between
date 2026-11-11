@@ -116,6 +116,7 @@ __pycache__/
 .DS_Store
 ._*
 !/library_transfer.py
+!/transfer_records.py
 !/tests/transfer_test.py
 
 !/book_margins.py

@@ -148,7 +148,7 @@ export function createTutor({
       pollAnswer();
   }
   async function showQuote(original) {
-    const key = JSON.stringify([book, original?.quote, original?.position]);
+    const key = JSON.stringify([book, original?.quote, original?.position, original?.transferMarkdown]);
     if (key === quoteKey) return;
     quoteKey = key;
     const version = ++quoteRevision,
@@ -163,7 +163,7 @@ export function createTutor({
     try {
       const data = await post("/api/ai/preview", {
         book,
-        quote,
+        quote: original.transferMarkdown || quote,
         position: original.position,
       });
       if (version === quoteRevision) element.innerHTML = data.html;

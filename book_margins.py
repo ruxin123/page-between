@@ -37,7 +37,7 @@ def validate(book, root):
             raise ValueError("页边记录格式无效。")
         seen.add(item["id"])
         source = item.get("source")
-        ai_tutor.source_for(book, source, resource_root=root)
+        ai_tutor.source_for(book, source, resource_root=root, quote_limit=12000)
         validate_position(source["position"], book)
         for name in ("translation", "answer"):
             if not isinstance(item.get(name, ""), str) or len(item.get(name, "")) > 100000:
@@ -125,6 +125,8 @@ def listing(book):
 
 def preview(book, item):
     source = item["source"]
+    if source.get("transferMarkdown") is not None or len(source["quote"]) > 6000 or not source["quote"].strip():
+        return ai_tutor.answer_html(source.get("transferMarkdown") or source["quote"], source=True)
     import translation
     return translation.preview(book, source, source["quote"])
 

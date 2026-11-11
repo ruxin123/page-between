@@ -256,12 +256,13 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(note.waitForExistence(timeout: 10), app.debugDescription)
         note.tap(); XCTAssertTrue(app.images["原文图像"].waitForExistence(timeout: 10), app.debugDescription)
         capture(app, "transferred-excerpt")
-        app.buttons["完成"].tap(); app.buttons["翻译收藏"].tap()
+        let detailDone = app.navigationBars["选段"].buttons["完成"]
+        detailDone.tap(); app.buttons["翻译收藏"].tap()
         let favorite = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original transferred paragraph.")).firstMatch
         XCTAssertTrue(favorite.waitForExistence(timeout: 10)); favorite.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "原创迁移译文。")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         capture(app, "transferred-translation")
-        app.buttons["完成"].tap(); app.buttons["完成"].tap()
+        detailDone.tap(); app.navigationBars["页边"].buttons["完成"].tap()
         app.buttons["reader.more"].tap(); app.buttons["答疑记录"].tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "An original transfer question")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["完成"].tap()

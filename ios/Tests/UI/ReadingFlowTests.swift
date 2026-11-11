@@ -170,7 +170,9 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["已停止"].waitForExistence(timeout: 10))
         app.buttons["重新生成"].tap()
         let result = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original completed")).firstMatch
-        XCTAssertTrue(result.waitForExistence(timeout: 15)); capture(app, "ai-completed")
+        let rendered = result.waitForExistence(timeout: 15)
+        capture(app, "ai-completed")
+        XCTAssertTrue(rendered, app.debugDescription)
         XCTAssertFalse(app.staticTexts["已停止"].exists)
     }
     @MainActor func testPDFCompleteObjectsAndOriginalFormulaFallback() throws {

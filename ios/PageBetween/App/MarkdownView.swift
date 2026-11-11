@@ -14,6 +14,7 @@ struct MarkdownView: View {
     @State private var failed = false
     @State private var pending = true
     @State private var attempt = 0
+    @State private var canRetryAutomatically = true
     private var plainText: Bool {
         text.rangeOfCharacter(from: CharacterSet(charactersIn: "\\$*_`[]<>#~\r\n")) == nil &&
         text.range(of: #"^\s*(?:[-+]|[0-9]+[.)])\s"#, options: .regularExpression) == nil
@@ -27,11 +28,22 @@ struct MarkdownView: View {
                     .overlay { if pending && !failed { ProgressView() } }
                 if failed {
                     Text(text).font(.body).textSelection(.enabled)
-                    Button("重新加载预览") { failed = false; pending = true; attempt += 1 }.font(.callout)
+                    let formulas = Set(MathText.spans(text).map { $0.expression.trimmingCharacters(in: .whitespacesAndNewlines) })
+                    ForEach(images.indices, id: \.self) { index in
+                        let image = images[index]
+                        if formulas.contains(image.raw.trimmingCharacters(in: .whitespacesAndNewlines)), let original = UIImage(data: image.data) {
+                            Image(uiImage: original).resizable().scaledToFit().accessibilityLabel("原书公式")
+                        }
+                    }
+                    Button("重新加载预览") { canRetryAutomatically = true; reload() }.font(.callout)
                 }
+            }
+            .onChange(of: failed) {
+                if failed && canRetryAutomatically { canRetryAutomatically = false; reload() }
             }
         }
     }
+    private func reload() { failed = false; pending = true; attempt += 1 }
 }
 
 private struct MarkdownWebView: UIViewRepresentable {
@@ -57,13 +69,14 @@ private struct MarkdownWebView: UIViewRepresentable {
             coordinator?.phase(view, "attached")
             let navigation = view.load(URLRequest(url: URL(string: "\(MarkdownResources.scheme)://bundle/markdown.html")!))
             coordinator?.phase(view, navigation == nil ? "rejected" : "queued")
-            coordinator?.watchStartup(view)
+            if navigation == nil { coordinator?.fail() }
+            else { coordinator?.watchRender() }
         }
         return view
     }
     func updateUIView(_ view: WKWebView, context: Context) { context.coordinator.parent = self; context.coordinator.render(view) }
     static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
-        coordinator.startup?.cancel()
+        coordinator.timeout?.cancel()
         coordinator.revision += 1
         view.navigationDelegate = nil
         view.stopLoading()
@@ -75,62 +88,67 @@ private struct MarkdownWebView: UIViewRepresentable {
         var revision = 0
         var lastText: String?
         var lastImages: [MarkdownSourceImage] = []
-        var startup: Task<Void, Never>?
-        var started = false
+        var timeout: Task<Void, Never>?
+        var invalid = false
         init(_ parent: MarkdownWebView) { self.parent = parent }
         func phase(_ view: WKWebView, _ name: String) {
             #if DEBUG
-            view.accessibilityValue = ((view.accessibilityValue ?? "").split(separator: ">").suffix(7).map(String.init) + [name]).joined(separator: ">")
+            view.accessibilityValue = name
             #endif
         }
-        func watchStartup(_ view: WKWebView) {
-            startup?.cancel()
-            startup = Task { @MainActor [weak self, weak view] in
-                for attempt in 0..<2 {
-                    do { try await Task.sleep(for: .seconds(attempt == 0 ? 3 : 7)) } catch { return }
-                    guard let self, let view, !self.loaded else { return }
-                    if attempt == 0 {
-                        if !self.started {
-                            self.phase(view, "retry-start")
-                            view.stopLoading()
-                            view.load(URLRequest(url: URL(string: "\(MarkdownResources.scheme)://bundle/markdown.html")!))
-                        }
-                    } else { self.parent.failed = true; self.parent.pending = false; return }
-                }
+        func watchRender() {
+            timeout?.cancel()
+            timeout = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                self?.fail()
             }
         }
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { started = true; phase(webView, "started") }
+        func fail() {
+            guard !invalid else { return }
+            invalid = true
+            timeout?.cancel()
+            revision += 1
+            parent.failed = true
+            parent.pending = false
+        }
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { phase(webView, "started") }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { phase(webView, "committed") }
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == "markdownReady", message.body as? String == "ready", message.frameInfo.isMainFrame, let view = message.webView else { return }
+            guard !invalid, message.name == "markdownReady", message.body as? String == "ready", message.frameInfo.isMainFrame, let view = message.webView else { return }
             phase(view, "script-ready")
-            startup?.cancel()
-            loaded = true; lastText = nil; render(view)
+            ready(view)
         }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !invalid, !loaded else { return }
             phase(webView, "loaded")
-            webView.evaluateJavaScript("typeof window.renderMarkdown === 'function'") { [weak self] value, _ in
-                if value as? Bool != true { self?.parent.failed = true }
+            webView.evaluateJavaScript("typeof window.renderMarkdown === 'function'") { [weak self, weak webView] value, _ in
+                if let webView, value as? Bool == true { self?.ready(webView) }
             }
         }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { parent.failed = true }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { parent.failed = true }
-        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { loaded = false; parent.failed = true }
+        private func ready(_ view: WKWebView) {
+            guard !invalid, !loaded else { return }
+            loaded = true
+            render(view)
+        }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { fail() }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { fail() }
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { fail() }
         func render(_ view: WKWebView) {
-            guard loaded, parent.text != lastText || parent.images != lastImages else { return }
+            guard !invalid, loaded, parent.text != lastText || parent.images != lastImages else { return }
             lastText = parent.text
             lastImages = parent.images
             phase(view, "rendering")
             revision += 1; let generation = revision
+            watchRender()
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let value = try? await view.callAsyncJavaScript("return await window.renderMarkdown(text, images)", arguments: ["text": self.parent.text, "images": self.parent.images.map(\.json)], in: nil, contentWorld: .page), generation == self.revision, let size = value as? Double {
                     let height = max(40, CGFloat(size))
-                    self.parent.failed = false
+                    self.timeout?.cancel()
                     self.parent.pending = false
                     self.phase(view, "rendered")
                     if abs(self.parent.height - height) > 1 { self.parent.height = height }
-                } else if generation == self.revision { self.parent.failed = true }
+                } else if generation == self.revision { self.fail() }
             }
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

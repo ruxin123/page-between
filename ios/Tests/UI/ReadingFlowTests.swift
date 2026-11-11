@@ -158,8 +158,8 @@ final class ReadingFlowTests: XCTestCase {
         let field = app.descendants(matching: .any)["assistant.question"]
         XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("Explain original streaming")
         app.buttons["发送提问"].tap()
-        let partial = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original streamed")).firstMatch
-        XCTAssertTrue(partial.waitForExistence(timeout: 10)); app.buttons["停止"].tap()
+        let partial = app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "markdown.plain", "Original streamed")).firstMatch
+        XCTAssertTrue(partial.waitForExistence(timeout: 10), app.debugDescription); app.buttons["停止"].tap()
         XCTAssertTrue(app.staticTexts["已停止"].waitForExistence(timeout: 10)); capture(app, "ai-stopped")
         app.buttons["完成"].tap(); app.buttons["reader.more"].tap(); app.buttons["答疑记录"].tap()
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Explain original streaming")).firstMatch

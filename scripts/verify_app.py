@@ -259,7 +259,7 @@ def verify(app, epubcheck=None, samples=()):
                     json.dumps(
                         {
                             "book": "demo-e",
-                            "quote": "x" * 6001,
+                            "quote": "x" * 24001,
                             "position": {"index": 1},
                         }
                     ).encode(),
@@ -568,6 +568,18 @@ def verify(app, epubcheck=None, samples=()):
                     with zipfile.ZipFile(io.BytesIO(content)) as package:
                         assert "页边.md" in package.namelist()
             assert json.loads(request("/api/data/transfer/preview")[2])["books"] > 0
+            transfer = json.loads(request("/api/data/transfer/export", b"{}", content_type="application/json")[2])
+            transfer_bytes = request(transfer["download"])[2]
+            with zipfile.ZipFile(io.BytesIO(transfer_bytes)) as migration:
+                meta = json.loads(migration.read("manifest.json"))
+                assert meta["schema"] == 2 and migration.testzip() is None
+                records = [json.loads(migration.read(item["records"]["file"])) for item in meta["books"] if item.get("records")]
+                assert any(any(row["note"] == "An original thought" for row in item["excerpts"]) for item in records)
+                assert any(item["translations"] for item in records)
+                assert any(item.get("appearance", {}).get("fontScale", 0) > 0 for item in records)
+            merged = json.loads(request("/api/data/transfer/import", transfer_bytes)[2])
+            assert merged["added"] == 0 and merged["duplicates"] == transfer["books"] and not any(merged["merged"].values()) and not merged["failures"], merged
+
             assert json.loads(request("/api/data/info")[2])["backup"]["frequency"] == "off"
             backup = json.loads(
                 request("/api/data/backup", b"{}", content_type="application/json")[2]

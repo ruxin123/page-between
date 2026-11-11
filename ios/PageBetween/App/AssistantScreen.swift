@@ -27,7 +27,7 @@ struct AssistantScreen: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack { Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1); Spacer(); if let openSource { Button("返回原文", systemImage: "arrow.up.right.square") { request?.cancel(); dismiss(); openSource(selection.locator) }.labelStyle(.iconOnly) }; Button("复制原文", systemImage: "doc.on.doc") { UIPasteboard.general.string = selection.quote }.labelStyle(.iconOnly) }
                         if !selection.quote.isEmpty { MarkdownView(text: selection.markdown ?? selection.quote, images: sourceImages) }

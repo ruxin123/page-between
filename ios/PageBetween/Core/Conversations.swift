@@ -33,11 +33,23 @@ public struct MobileConversation: Codable, Identifiable, Equatable, Sendable {
     public var sourceObjects: [PDFSourceObject]?
     public var sourceRects: [PDFSelectionRect]?
     public var sourceAttachments: [SourceAttachment]?
+    public var sourceContext: String?
+    public var sourceContextBefore: String?
     public var transferredPosition: TransferPosition?
     public var isValid: Bool {
-        quote.count <= 12000 && (previewQuote?.count ?? 0) <= 16000 && (sourceObjects?.count ?? 0) <= 32 && sourceObjects?.allSatisfy(\.isValid) != false && locator.utf8.count <= 30000 && (try? JSONSerialization.jsonObject(with: Data(locator.utf8))) is [String: Any] && turns.count <= 40 &&
-        (sourceRects?.count ?? 0) <= 1000 && sourceRects?.allSatisfy(\.isValid) != false && (sourceAttachments?.count ?? 0) <= 100 && sourceAttachments?.allSatisfy(\.isValid) != false &&
-        turns.allSatisfy({ ["user", "assistant"].contains($0.role) && $0.content.count <= 50000 && ($0.status == nil || ["generating", "complete", "stopped", "error"].contains($0.status!)) && ($0.error?.count ?? 0) <= 2000 && ($0.references?.count ?? 0) <= 30 && ($0.nearbyText?.count ?? 0) <= 18000 && ($0.citationWarning?.count ?? 0) <= 1000 })
+        guard quote.count <= 12000, (previewQuote?.count ?? 0) <= 24000,
+              locator.utf8.count <= 30000, (try? JSONSerialization.jsonObject(with: Data(locator.utf8))) is [String: Any],
+              turns.count <= 1000 else { return false }
+        guard (sourceContext?.count ?? 0) <= 18000, (sourceContextBefore?.count ?? 0) <= 18000,
+              (sourceObjects?.count ?? 0) <= 32, sourceObjects?.allSatisfy(\.isValid) != false,
+              (sourceRects?.count ?? 0) <= 1000, sourceRects?.allSatisfy(\.isValid) != false,
+              (sourceAttachments?.count ?? 0) <= 100, sourceAttachments?.allSatisfy(\.isValid) != false else { return false }
+        return turns.allSatisfy { turn in
+            guard ["user", "assistant"].contains(turn.role), turn.content.count <= 50000,
+                  (turn.error?.count ?? 0) <= 2000, (turn.references?.count ?? 0) <= 30,
+                  (turn.nearbyText?.count ?? 0) <= 18000, (turn.citationWarning?.count ?? 0) <= 1000 else { return false }
+            return turn.status.map { ["generating", "complete", "stopped", "error"].contains($0) } != false
+        }
     }
     public init(book: UUID, quote: String, locator: String) { self.book = book; self.quote = quote; self.locator = locator }
 }

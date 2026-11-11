@@ -99,7 +99,11 @@ struct ExcerptsScreen: View {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let chosen = visibleItems
-            var size = chosen.reduce(0) { $0 + $1.quote.utf8.count + $1.note.utf8.count + ($1.answer?.utf8.count ?? 0) + ($1.translation?.utf8.count ?? 0) }
+            var size = chosen.reduce(0) { total, item in
+                let answer = item.answer?.utf8.count ?? 0
+                let translation = item.translation?.utf8.count ?? 0
+                return total + item.quote.utf8.count + item.note.utf8.count + answer + translation
+            }
             guard size <= (markdown ? 200 : 50) * 1024 * 1024 else { throw ServiceError.message("记录较多，请按章节导出。") }
             var data = try JSONSerialization.jsonObject(with: JSONEncoder().encode(chosen)) as? [[String: Any]] ?? []
             var lines = ["# " + book.title, ""]

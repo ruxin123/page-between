@@ -134,6 +134,7 @@ extension TransferLocations {
             var value = SavedExcerpt(quote: source.quote, markdown: source.markdown, locator: try locator(source.position), chapter: source.chapter, objects: source.objects, rects: source.rects)
             value.id = try TransferRecords.uuid(id); value.createdAt = Date(timeIntervalSince1970: createdAt)
             value.attachments = attachments(source); value.transferredPosition = source.position
+            value.sourceContext = source.context; value.sourceContextBefore = source.contextBefore
             return value
         }
         for item in data.excerpts {
@@ -156,6 +157,7 @@ extension TransferLocations {
             value.id = try TransferRecords.uuid(item.id); value.createdAt = Date(timeIntervalSince1970: item.createdAt); value.updatedAt = Date(timeIntervalSince1970: item.updatedAt)
             value.previewQuote = item.source.markdown; value.sourceObjects = item.source.objects; value.sourceRects = item.source.rects
             value.sourceAttachments = attachments(item.source); value.transferredPosition = item.source.position
+            value.sourceContext = item.source.context; value.sourceContextBefore = item.source.contextBefore
             value.turns = try item.messages.map { message in
                 var turn = MobileTurn(role: message.role, content: message.content)
                 turn.id = try TransferRecords.uuid(message.id); turn.status = message.status == "generating" ? "stopped" : message.status; turn.imageAttached = message.imageAttached
@@ -180,7 +182,8 @@ extension TransferLocations {
         }
         for item in book.excerpts ?? [] {
             if item.translationDetails != nil, item.deletedAt != nil { continue }
-            let origin = source(quote: item.quote, markdown: item.markdown, locator: item.locator, chapter: item.chapter, objects: item.objects, rects: item.rects ?? [], stored: item.transferredPosition)
+            var origin = source(quote: item.quote, markdown: item.markdown, locator: item.locator, chapter: item.chapter, objects: item.objects, rects: item.rects ?? [], stored: item.transferredPosition)
+            origin.context = item.sourceContext; origin.contextBefore = item.sourceContextBefore
             let portable = try await writer.source(origin, attachments: item.attachments ?? [], original: original, repository: repository, book: book)
             if let details = item.translationDetails, let translation = item.translation {
                 if item.deletedAt == nil { data.translations.append(TransferTranslation(id: TransferRecords.id(item.id), source: portable, text: details.originalText ?? item.quote, translation: translation, explanation: details.explanation, provider: details.provider, model: details.model, sourceLanguage: details.sourceLanguage, targetLanguage: details.targetLanguage, detectedLanguage: details.detectedLanguage, createdAt: item.createdAt.timeIntervalSince1970)) }
@@ -192,7 +195,8 @@ extension TransferLocations {
         while true {
             let group = try await repository.conversations(book.id, offset: offset)
             for item in group {
-                let origin = source(quote: item.quote, markdown: item.previewQuote, locator: item.locator, chapter: book.chapter, objects: item.sourceObjects ?? [], rects: item.sourceRects ?? [], stored: item.transferredPosition)
+                var origin = source(quote: item.quote, markdown: item.previewQuote, locator: item.locator, chapter: book.chapter, objects: item.sourceObjects ?? [], rects: item.sourceRects ?? [], stored: item.transferredPosition)
+                origin.context = item.sourceContext; origin.contextBefore = item.sourceContextBefore
                 let portable = try await writer.source(origin, attachments: item.sourceAttachments ?? [], original: original, repository: repository, book: book)
                 let turns = item.turns.map { turn in
                     TransferTurn(id: TransferRecords.id(turn.id), role: turn.role, content: turn.content, status: turn.status, imageAttached: turn.imageAttached, error: turn.error, nearbyText: turn.nearbyText, citationWarning: turn.citationWarning, references: turn.references?.map { TransferReference(number: $0.number, citation: $0.citation, text: $0.text, position: self.portable($0.locator, quote: $0.text, stored: $0.transferredPosition)) })

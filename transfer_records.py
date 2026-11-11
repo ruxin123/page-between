@@ -29,6 +29,7 @@ def validate(data):
     def source(value):
         if not isinstance(value, dict) or not _text(value.get('quote'), 12000) or not _text(value.get('markdown') or '', 24000) or not _text(value.get('chapter'), 2000) or value.get('kind') not in {'text', 'equation', 'table', 'image'}:
             raise ValueError('迁移选段无效。')
+        if any(not _text(value.get(key) or '', 18000) for key in ('context','contextBefore')): raise ValueError('迁移原文上下文无效。')
         value['position'] = position(value.get('position', {}))
         for key, limit in (('images', 100), ('objects', 100), ('rects', 1000)):
             if not isinstance(value.get(key), list) or len(value[key]) > limit:
@@ -60,7 +61,7 @@ def validate(data):
                     raise ValueError('迁移翻译无效。')
             else:
                 messages = item.get('messages')
-                if not _date(item.get('updatedAt')) or not isinstance(messages, list) or not 1 <= len(messages) <= 40:
+                if not _date(item.get('updatedAt')) or not isinstance(messages, list) or not 1 <= len(messages) <= 1000:
                     raise ValueError('迁移对话无效。')
                 ids = set()
                 for message in messages:
@@ -140,6 +141,8 @@ def export_book(book, state):
     def source(raw):
         result = {'quote': raw.get('quote',''), 'position': portable_position(book, raw['position']), 'kind': raw.get('kind','text'), 'chapter': book_margins.chapter_for(book, raw['position']), 'images': [], 'objects': raw.get('transferObjects',[]), 'rects': [{'page':r['page'], 'box':dict(zip(('left','top','right','bottom'),r['bbox']))} for r in raw.get('rects',[])]}
         if raw.get('transferMarkdown') is not None: result['markdown'] = raw['transferMarkdown']
+        for key in ('context','contextBefore'):
+            if raw.get(key) is not None: result[key] = raw[key]
         if raw['position'].get('transferReadium'): result['position']['readium'] = raw['position']['transferReadium']
         paths = raw.get('transferImages') or ([{'url':raw['image'], 'raw':raw.get('quote','')}] if raw.get('image') else [])
         for item in paths:
@@ -158,7 +161,9 @@ def export_book(book, state):
         for item in ai_tutor.records()['conversations']:
             if item['book'] != book['id']: continue
             messages = [{k:m[k] for k in ('id','role','content','status','imageAttached','error','nearbyText','citationWarning','references') if k in m} for m in item['messages']]
-            for m in messages:
+            for index, m in enumerate(messages):
+                m.setdefault('id', hashlib.sha256(f"{item['id']}:{index}".encode()).hexdigest()[:32])
+                if m.get('status') == 'ready': m['status'] = 'complete'
                 if m.get('references'): m['references'] = [{k: ref[k] for k in ('number','citation','text')} | {'position':portable_position(book,ref['position'])} for ref in m['references']]
                 if m.get('status') == 'generating': m['status'] = 'stopped'
             data['conversations'].append({'id':item['id'], 'source':source(item['source']), 'messages':messages, 'createdAt':item['createdAt']/1000, 'updatedAt':item.get('updatedAt',item['createdAt'])/1000})
@@ -184,7 +189,8 @@ def import_book(book, data, image_paths, state):
     directory = BOOK_ROOT / book['id']
     def source(raw):
         pos = local_position(book, raw['position'])
-        result = {'quote':raw['quote'], 'position':pos, 'citation':f"《{book['title']}》 · {position_label(book,pos)}", 'kind':raw['kind']}
+        result = {'quote':raw['quote'], 'context':raw.get('context',''), 'position':pos, 'citation':f"《{book['title']}》 · {position_label(book,pos)}", 'kind':raw['kind']}
+        if raw.get('contextBefore') is not None: result['contextBefore'] = raw['contextBefore']
         if raw.get('markdown') is not None: result['transferMarkdown'] = raw['markdown']
         if raw['objects']: result['transferObjects'] = copy.deepcopy(raw['objects'])
         if raw['rects'] and (book['type'] != 'pdf' or any(not pos['index'] <= r['page'] <= pos.get('endIndex', pos['index']) for r in raw['rects'])): raise ValueError('迁移选区超出本书范围。')
@@ -220,6 +226,7 @@ def import_book(book, data, image_paths, state):
             item.update(book=book['id'],createdAt=item['createdAt']*1000,updatedAt=item['updatedAt']*1000)
             for message in item['messages']:
                 if message.get('status') == 'generating': message['status'] = 'stopped'
+                if message.get('status') == 'complete': message['status'] = 'ready'
                 if message.get('references'): message['references'] = [{**ref,'position':local_position(book,ref['position'])} for ref in message['references']]
         writes = [(directory/'margins.json', 'items', margins, excerpts), (directory/'translations.json', 'items', translated, favorites), (DATA/'ai-conversations.json', 'conversations', answered, conversations)]
         written, copied = [], []

@@ -146,7 +146,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.57";
+document.body.dataset.readerBuild = "2.58";
 document.body.dataset.mode = reference ? "reference" : palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -845,7 +845,7 @@ function reportNative() {
     window.webkit.messageHandlers.readerNative.postMessage({
       action: "reader-state",
       reader: {
-        build: "2.57",
+        build: "2.58",
         book: current.id,
         index: location.index,
         fontSize: actualSize(),

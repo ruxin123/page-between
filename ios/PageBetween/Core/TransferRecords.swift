@@ -20,6 +20,8 @@ public struct TransferImage: Codable, Equatable, Sendable {
 public struct TransferSource: Codable, Equatable, Sendable {
     public var quote: String
     public var markdown: String?
+    public var context: String?
+    public var contextBefore: String?
     public var position: TransferPosition
     public var kind: String
     public var chapter: String
@@ -31,6 +33,7 @@ public struct TransferSource: Codable, Equatable, Sendable {
     }
     public func validate() throws {
         try position.validate()
+        guard (context?.count ?? 0) <= 18000, (contextBefore?.count ?? 0) <= 18000 else { throw LibraryFailure.invalidFile }
         guard quote.count <= 12000, (markdown?.count ?? 0) <= 24000, ["text", "equation", "table", "image"].contains(kind), chapter.count <= 2000,
               images.count <= 100, objects.count <= 100, objects.allSatisfy(\.isValid), rects.count <= 1000, rects.allSatisfy(\.isValid),
               images.allSatisfy({ $0.file.range(of: "^images/[0-9a-f]{64}\\.(png|jpg)\\z", options: .regularExpression) != nil && $0.raw.count <= 12000 }) else { throw LibraryFailure.invalidFile }
@@ -144,9 +147,12 @@ public struct TransferRecords: Codable, Sendable {
         }
         for item in conversations {
             try item.source.validate()
-            guard Self.validID(item.id), date(item.createdAt), date(item.updatedAt), (1...40).contains(item.messages.count), Set(item.messages.map(\.id)).count == item.messages.count,
-                  item.messages.allSatisfy({ Self.validID($0.id) && ["user", "assistant"].contains($0.role) && $0.content.count <= 50000 && ($0.error?.count ?? 0) <= 2000 && ($0.nearbyText?.count ?? 0) <= 18000 && ($0.citationWarning?.count ?? 0) <= 1000 && ($0.references?.count ?? 0) <= 30 && ($0.status == nil || ["generating", "complete", "stopped", "error"].contains($0.status!)) }) else { throw LibraryFailure.invalidFile }
+            guard Self.validID(item.id), date(item.createdAt), date(item.updatedAt), (1...1000).contains(item.messages.count), Set(item.messages.map(\.id)).count == item.messages.count else { throw LibraryFailure.invalidFile }
             for turn in item.messages {
+                guard Self.validID(turn.id), ["user", "assistant"].contains(turn.role), turn.content.count <= 50000,
+                      (turn.error?.count ?? 0) <= 2000, (turn.nearbyText?.count ?? 0) <= 18000,
+                      (turn.citationWarning?.count ?? 0) <= 1000, (turn.references?.count ?? 0) <= 30,
+                      turn.status.map({ ["generating", "complete", "stopped", "error"].contains($0) }) != false else { throw LibraryFailure.invalidFile }
                 for reference in turn.references ?? [] {
                     guard (3...32).contains(reference.number), reference.citation.count <= 2000, reference.text.count <= 6000 else { throw LibraryFailure.invalidFile }
                     try reference.position.validate()

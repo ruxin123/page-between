@@ -36,7 +36,10 @@ public enum AnnotatedPDF {
                 guard let page = locations?["position"] as? Int, (1...document.pageCount).contains(page) else { throw LibraryFailure.invalidFile }
                 grouped[page] = []
             }
-            textSize += (item.quote.utf8.count + item.note.utf8.count + (item.answer?.utf8.count ?? 0) + (item.translation?.utf8.count ?? 0) + 100) * grouped.count
+            let originalBytes = item.quote.utf8.count + item.note.utf8.count
+            let answerBytes = item.answer?.utf8.count ?? 0
+            let translationBytes = item.translation?.utf8.count ?? 0
+            textSize += (originalBytes + answerBytes + translationBytes + 100) * grouped.count
             annotationCount += grouped.count
             guard textSize <= limit, annotationCount <= 100000 else { throw Failure.tooLarge }
             for (number, rects) in grouped {

@@ -13,15 +13,18 @@ struct ReferenceReaderPane: View {
             HStack(spacing: 12) {
                 Text("对照").font(.callout).foregroundStyle(.secondary)
                 Spacer()
-                Button("目录", systemImage: "list.bullet") { contents = true }.labelStyle(.iconOnly).disabled(reader.controller == nil)
+                Button("目录", systemImage: "list.bullet") { contents = true }.labelStyle(.iconOnly).disabled(!reader.canNavigateReference)
                 Button("阅读设置", systemImage: "textformat.size") {
                     if let pdf = reader.navigator as? MobilePDFNavigator { pdfZoom = pdf.zoomPercent }
                     appearance = true
-                }.labelStyle(.iconOnly).disabled(reader.controller == nil)
+                }.labelStyle(.iconOnly).disabled(!reader.canNavigateReference)
                 Button("关闭对照", systemImage: "xmark") { close() }.labelStyle(.iconOnly)
             }.buttonStyle(.plain).padding(.horizontal, 16).frame(height: 44).background(.regularMaterial)
             Group {
-                if let controller = reader.controller { NavigatorHost(controller: controller).id(ObjectIdentifier(controller)) }
+                if let controller = reader.controller {
+                    NavigatorHost(controller: controller).id(ObjectIdentifier(controller))
+                        .overlay { if !reader.canNavigateReference { ProgressView().allowsHitTesting(false) } }
+                }
                 else if let failure = reader.failure { ReaderUnavailable(message: failure, retry: { await reader.retry() }) }
                 else { ProgressView() }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -30,7 +33,7 @@ struct ReferenceReaderPane: View {
                 VStack(spacing: 2) { Text(reader.chapter).lineLimit(1); Text("\(Int(reader.progress * 100))%").monospacedDigit().foregroundStyle(.secondary) }.font(.caption).frame(maxWidth: .infinity).accessibilityElement(children: .combine).accessibilityIdentifier("reference.position")
                 if !reader.history.isEmpty { Button("返回原位置", systemImage: "arrow.uturn.backward") { Task { await reader.back() } }.labelStyle(.iconOnly).frame(width: 44, height: 44) }
                 Button("下一页", systemImage: "chevron.right") { Task { _ = await reader.navigator?.goForward(options: .animated) } }.labelStyle(.iconOnly).frame(width: 44, height: 44).accessibilityIdentifier("reference.next")
-            }.buttonStyle(.plain).disabled(reader.controller == nil).padding(.horizontal, 8).background(.regularMaterial)
+            }.buttonStyle(.plain).disabled(!reader.canNavigateReference).padding(.horizontal, 8).background(.regularMaterial)
         }
         .overlay(alignment: .top) { Rectangle().fill(MobilePalette.accent.opacity(0.3)).frame(height: 1) }
         .accessibilityElement(children: .contain).accessibilityIdentifier("reader.reference")

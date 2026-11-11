@@ -42,7 +42,7 @@ struct AssistantSelection: Identifiable {
     private var loaded = false
     private var startup: Task<Void, Never>?
     private var startupRetries = 0
-    private var contentReady = false
+    @Published private(set) var contentReady = false
     private var directionalNavigation: DirectionalNavigationAdapter?
     private var chromeTask: Task<Void, Never>?
     private var selectionMenuTask: Task<Void, Never>?
@@ -219,6 +219,7 @@ struct AssistantSelection: Identifiable {
         prepareForLayoutChange()
         return MobileReader(book: copy, store: store, isReference: true)
     }
+    var canNavigateReference: Bool { controller != nil && (contentReady || navigator is MobilePDFNavigator) }
     func prepareForLayoutChange() { (navigator as? MobilePDFNavigator)?.prepareForLayoutChange() }
     private func selectedSource(translate: Bool) async throws -> AssistantSelection {
         if let pdf = navigator as? MobilePDFNavigator { return try await pdf.selectedSource(translate: translate) }

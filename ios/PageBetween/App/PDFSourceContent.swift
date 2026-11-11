@@ -1,7 +1,9 @@
 import Foundation
 import PDFKit
 import ImageIO
+#if canImport(UIKit)
 import UIKit
+#endif
 
 enum PDFSourceContent {
     static func glyphs(_ selection: PDFSelection, page: PDFPage) -> [PDFSourceGlyph]? {
@@ -56,6 +58,7 @@ enum PDFSourceContent {
     }
 }
 
+#if canImport(UIKit)
 extension PDFSourceContent {
     static func previews(book: MobileBook, objects: [PDFSourceObject], attachments: [SourceAttachment], repository: LibraryRepository) async throws -> [MarkdownSourceImage] {
         if !attachments.isEmpty {
@@ -77,3 +80,4 @@ extension PDFSourceContent {
         }.value
     }
 }
+#endif

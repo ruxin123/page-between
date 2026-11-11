@@ -44,10 +44,13 @@ final class ReadingFlowTests: XCTestCase {
         app.buttons["reader.more"].tap(); app.buttons["对照阅读"].tap()
         let reference = app.descendants(matching: .any).matching(identifier: "reader.reference").firstMatch
         XCTAssertTrue(reference.waitForExistence(timeout: 20), app.debugDescription)
-        reference.buttons["目录"].tap(); app.buttons["第一章 开始"].tap()
+        let referenceTOC = reference.buttons["目录"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: referenceTOC)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 25), .completed, app.debugDescription)
+        referenceTOC.tap(); app.buttons["第一章 开始"].tap()
         let secondary = app.descendants(matching: .any).matching(identifier: "reference.position").firstMatch
         let first = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "第一章"), object: secondary)
-        XCTAssertEqual(XCTWaiter.wait(for: [first], timeout: 20), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [first], timeout: 20), .completed, app.debugDescription)
         XCTAssertTrue(primary.label.contains("第二章"))
         reference.buttons["阅读设置"].tap()
         let size = app.sliders["字号比例"]

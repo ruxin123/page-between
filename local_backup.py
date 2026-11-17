@@ -48,6 +48,7 @@ def automatic(snapshot):
             return False
         config["lastAttempt"] = now
         save(DATA.parent / (DATA.name + "-backup.json"), config)
+        created = False
         try:
             with book_margins.LOCK:
                 result = library_data.backup(snapshot())
@@ -58,12 +59,14 @@ def automatic(snapshot):
             target = directory / ("页间-" + time.strftime("%Y%m%d-%H%M%S") + "-" + result["id"])
             (CACHE / "exports" / result["id"]).replace(target)
             completed("auto", target.name)
+            created = True
             backups = sorted((path for path in directory.glob("页间-*.pbbackup") if re.fullmatch(r"页间-\d{8}-\d{6}-[0-9a-f]{32}\.pbbackup", path.name) and not path.is_symlink()), key=lambda path: path.stat().st_mtime, reverse=True)
             for old in backups[3:]:
                 if not old.is_symlink(): old.unlink()
             return True
         except (ValueError, OSError) as error:
             config = configuration()
-            config["error"] = "自动备份未完成，请检查存储空间或手动备份。"
+            config["error"] = ("备份已完成，旧备份暂时无法清理。" if created
+                               else "自动备份未完成，请检查存储空间或手动备份。")
             save(DATA.parent / (DATA.name + "-backup.json"), config)
-            return False
+            return created

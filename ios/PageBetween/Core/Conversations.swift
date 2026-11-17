@@ -27,6 +27,14 @@ public struct MobileConversation: Codable, Identifiable, Equatable, Sendable {
     public let quote: String
     public let locator: String
     public var turns: [MobileTurn] = []
+    public static func marginSnapshot(_ turns: [MobileTurn]) -> String {
+        turns.flatMap { turn in
+            let label = turn.role == "user" ? "提问" : turn.status == nil || turn.status == "complete" ? "回答" : "回答（未完成）"
+            let references = (turn.references ?? []).map { $0.citation + "\n\n" + $0.text }
+            return ["**" + label + "**\n\n" + turn.content] + references
+        }.joined(separator: "\n\n")
+    }
+
     public var createdAt = Date()
     public var updatedAt = Date()
     public var previewQuote: String?
@@ -62,7 +70,7 @@ extension LibraryRepository {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(conversation).write(to: directory.appendingPathComponent(conversation.id.uuidString + ".json"), options: .atomic)
     }
-    public func conversations(_ id: UUID, offset: Int = 0) throws -> [MobileConversation] {
+    public func conversations(_ id: UUID, offset: Int = 0, limit: Int = 30) throws -> [MobileConversation] {
         guard let book = books(includingDeleted: true).first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         let directory = try file(book, name: "conversations")
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
@@ -70,7 +78,7 @@ extension LibraryRepository {
         let sorted = entries.filter { $0.pathExtension == "json" && UUID(uuidString: $0.deletingPathExtension().lastPathComponent) != nil }.sorted {
             ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
         }
-        return try sorted.dropFirst(max(0, offset)).prefix(30).map { url in
+        return try sorted.dropFirst(max(0, offset)).prefix(limit).map { url in
             var item = try JSONDecoder().decode(MobileConversation.self, from: Data(contentsOf: url))
             guard item.book == id else { throw LibraryFailure.invalidFile }
             for index in item.turns.indices where item.turns[index].status == "generating" { item.turns[index].status = "stopped" }

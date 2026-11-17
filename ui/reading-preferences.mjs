@@ -11,5 +11,7 @@ export function selectedTypography(preferences) {
 }
 
 export function readingPreferences(global, perBook, book, reading) {
-  return reading && book ? { ...global, ...perBook[book.id] } : global;
+  if (!reading || !book) return global;
+  const { palmKeys, pinnedTool1, pinnedTool2, ...overrides } = perBook[book.id] || {};
+  return { ...global, ...overrides };
 }

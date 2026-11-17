@@ -51,22 +51,36 @@ struct AssistantSelection: Identifiable {
     init(book: MobileBook, store: LibraryStore, isReference: Bool = false) {
         self.book = book; self.store = store; self.isReference = isReference
         super.init()
-        let defaults = UserDefaults.standard
-        fontScale = defaults.object(forKey: "reading.fontScale") == nil ? 100 : min(200, max(70, defaults.double(forKey: "reading.fontScale")))
-        if let value = defaults.object(forKey: "reading.lineHeight") as? Double, value.isFinite { lineHeight = min(2.2, max(1.4, value)) }
-        if let value = defaults.object(forKey: "reading.pageMargins") as? Double, value.isFinite { pageMargins = min(2, max(0.5, value)) }
-        fontFamily = defaults.string(forKey: "reading.fontFamily") ?? ""
-        theme = defaults.string(forKey: "reading.theme") ?? "paper"
-        let key = book.format == "pdf" ? "reading.pdfScroll" : "reading.textScroll"
-        scroll = defaults.object(forKey: key) == nil ? book.format == "pdf" : defaults.bool(forKey: key)
-        if let saved = book.appearance, saved.isValid {
-            fontScale = saved.fontScale
-            lineHeight = saved.lineHeight
-            pageMargins = saved.pageMargins
-            fontFamily = saved.fontFamily
-            theme = saved.theme
-            scroll = saved.scroll
-        }
+        let defaults = Self.defaults(format: book.format)
+        let saved = book.appearance.flatMap { $0.isValid ? $0 : nil }
+        overrideFields = saved.map { Set($0.overrides ?? ReadingAppearance.fields) } ?? []
+        setAppearance(saved?.inherited(from: defaults) ?? defaults)
+    }
+
+    @Published private(set) var overrideFields: Set<String> = []
+    private var appliedAppearance: ReadingAppearance?
+    private var appearanceTask: Task<Void, Never>?
+
+    static func defaults(format: String) -> ReadingAppearance {
+        let settings = UserDefaults.standard
+        let pdf = format == "pdf"
+        return ReadingAppearance(
+            fontScale: min(200, max(70, settings.object(forKey: "reading.fontScale") as? Double ?? 100)),
+            lineHeight: min(2.2, max(1.4, settings.object(forKey: "reading.lineHeight") as? Double ?? 1.85)),
+            pageMargins: min(2, max(0.5, settings.object(forKey: "reading.pageMargins") as? Double ?? 1)),
+            fontFamily: settings.string(forKey: "reading.fontFamily") ?? "",
+            theme: settings.string(forKey: "reading.theme") ?? "paper",
+            scroll: settings.object(forKey: pdf ? "reading.pdfScroll" : "reading.textScroll") as? Bool ?? pdf)
+    }
+
+    private func setAppearance(_ value: ReadingAppearance) {
+        appliedAppearance = value
+        fontScale = value.fontScale
+        lineHeight = value.lineHeight
+        pageMargins = value.pageMargins
+        fontFamily = value.fontFamily
+        theme = value.theme
+        scroll = value.scroll
     }
     func load() async {
         guard !loaded else { return }; loaded = true
@@ -149,11 +163,35 @@ struct AssistantSelection: Identifiable {
         EPUBPreferences(columnCount: .one, fontFamily: fontFamily.isEmpty ? nil : FontFamily(rawValue: fontFamily), fontSize: fontScale / 100, lineHeight: lineHeight, pageMargins: pageMargins, publisherStyles: fontFamily.isEmpty && lineHeight == 1.85 && pageMargins == 1, scroll: scroll, theme: theme == "night" ? .dark : theme == "sepia" ? .sepia : .light)
     }
     func apply() {
-        let appearance = ReadingAppearance(fontScale: fontScale, lineHeight: lineHeight, pageMargins: pageMargins, fontFamily: fontFamily, theme: theme, scroll: scroll)
-        if !isReference { Task {
-            do { try await store.repository.saveAppearance(book.id, value: appearance); await store.refresh() }
+        var appearance = ReadingAppearance(fontScale: fontScale, lineHeight: lineHeight, pageMargins: pageMargins, fontFamily: fontFamily, theme: theme, scroll: scroll)
+        let changed = appliedAppearance.map { appearance.changedFields(from: $0) } ?? []
+        guard !changed.isEmpty else { return }
+        appliedAppearance = appearance
+        if !isReference {
+            overrideFields.formUnion(changed)
+            appearance.overrides = overrideFields.sorted()
+            persistAppearance(appearance)
+        }
+        refreshAppearance()
+    }
+
+    func restoreAppearance() {
+        overrideFields.removeAll()
+        setAppearance(Self.defaults(format: book.format))
+        persistAppearance(nil)
+        refreshAppearance()
+    }
+
+    private func persistAppearance(_ value: ReadingAppearance?) {
+        let previous = appearanceTask
+        appearanceTask = Task {
+            await previous?.value
+            do { try await store.repository.saveAppearance(book.id, value: value); await store.refresh() }
             catch { failure = error.localizedDescription }
-        } }
+        }
+    }
+
+    private func refreshAppearance() {
         (navigator as? EPUBNavigatorViewController)?.submitPreferences(preferences())
         (navigator as? MobilePDFNavigator)?.applyScroll(scroll)
     }
@@ -216,7 +254,6 @@ struct AssistantSelection: Identifiable {
         var copy = book
         copy.locator = try locator.jsonString(); copy.progress = progress; copy.chapter = chapter
         copy.appearance = ReadingAppearance(fontScale: fontScale, lineHeight: lineHeight, pageMargins: pageMargins, fontFamily: fontFamily, theme: theme, scroll: scroll)
-        prepareForLayoutChange()
         return MobileReader(book: copy, store: store, isReference: true)
     }
     var canNavigateReference: Bool { controller != nil && (contentReady || navigator is MobilePDFNavigator) }
@@ -371,23 +408,15 @@ struct ReaderScreen: View {
     init(book: MobileBook, store: LibraryStore) { _reader = StateObject(wrappedValue: MobileReader(book: book, store: store)) }
     var body: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                VStack(spacing: 0) {
-                    Group {
-                        if let controller = reader.controller { NavigatorHost(controller: controller).id(ObjectIdentifier(controller)) }
-                        else if let failure = reader.failure { ReaderUnavailable(message: failure, retry: { await reader.retry() }) }
-                        else { ProgressView("正在打开书籍…") }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if let comparison {
-                        ReferenceReaderPane(reader: comparison, close: { reader.prepareForLayoutChange(); self.comparison = nil })
-                            .frame(height: geometry.size.height * 0.5)
-                    }
-                }
-            }
+            Group {
+                if let controller = reader.controller { NavigatorHost(controller: controller).id(ObjectIdentifier(controller)) }
+                else if let failure = reader.failure { ReaderUnavailable(message: failure, retry: { await reader.retry() }) }
+                else { ProgressView("正在打开书籍…") }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottom) { if let notice = reader.notice { Text(notice).font(.callout).padding(12).background(.regularMaterial, in: Capsule()).padding(.bottom, 64).accessibilityAddTraits(.updatesFrequently) } }
             .navigationTitle(reader.book.title).navigationBarTitleDisplayMode(.inline)
-            .toolbar(comparison != nil || reader.chromeVisible || reader.controller == nil || reader.failure != nil ? .visible : .hidden, for: .navigationBar, .bottomBar)
-            .statusBarHidden(comparison == nil && !reader.chromeVisible && reader.controller != nil && reader.failure == nil)
+            .toolbar(reader.chromeVisible || reader.controller == nil || reader.failure != nil ? .visible : .hidden, for: .navigationBar, .bottomBar)
+            .statusBarHidden(!reader.chromeVisible && reader.controller != nil && reader.failure == nil)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("书库", systemImage: "chevron.left") { Task { await reader.flush(); dismiss() } } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -431,7 +460,18 @@ struct ReaderScreen: View {
             .task { await reader.load() }
             .onChange(of: phase) { if phase != .active { reader.store.preparation.pauseAll(); Task { await reader.flush() } } }
             .alert("操作未完成", isPresented: Binding(get: { reader.failure != nil && reader.controller != nil }, set: { if !$0 { reader.failure = nil } })) { Button("好") { reader.failure = nil } } message: { Text(reader.failure ?? "") }
-        }.tint(MobilePalette.accent).preferredColorScheme(reader.theme == "night" ? .dark : .light)
+        }
+        .accessibilityHidden(comparison != nil)
+        .allowsHitTesting(comparison == nil)
+        .overlay {
+            if let comparison {
+                ReferenceReaderPane(reader: comparison, close: { self.comparison = nil })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(MobilePalette.paper.ignoresSafeArea())
+            }
+        }
+        .tint(MobilePalette.accent)
+        .preferredColorScheme((comparison?.theme ?? reader.theme) == "night" ? .dark : .light)
     }
     private func appearanceSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double, display: String) -> some View {
         HStack(spacing: 12) {
@@ -464,10 +504,11 @@ struct ReaderScreen: View {
                     }
                     Section {
                         Picker("纸张", selection: $reader.theme) { Text("纸白").tag("paper"); Text("暖纸").tag("sepia"); Text("夜间").tag("night") }.pickerStyle(.segmented).onChange(of: reader.theme) { reader.apply() }
+                        Button("恢复全局默认") { reader.restoreAppearance() }.disabled(reader.overrideFields.isEmpty)
                     }
                 }
             }
-            .navigationTitle("阅读设置").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("本书阅读设置").navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("完成") { appearance = false } }
         }.presentationDetents([.height(440), .large]).presentationDragIndicator(.visible)
     }

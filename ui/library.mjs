@@ -27,7 +27,7 @@ export function cover(book, small = false) {
   return `<div data-palette="${palette}" class="book-cover ${book.shelf === "学习" ? "cover-study" : ""} ${small ? "small-cover" : ""}">${
     book.cover
       ? `<img src="${escapeHTML(book.cover)}" alt="${escapeHTML(book.title)}封面" loading="lazy">`
-      : `<span class="cover-format">${escapeHTML(book.format)}</span><span class="cover-title ${book.title.length > 36 ? "long-title" : ""}">${escapeHTML(book.title)}</span><span class="cover-author">${escapeHTML(book.author)}</span>`
+      : `<span class="cover-title ${book.title.length > 36 ? "long-title" : ""}">${escapeHTML(book.title)}</span><span class="cover-author">${escapeHTML(book.author)}</span>`
   }</div>`;
 }
 

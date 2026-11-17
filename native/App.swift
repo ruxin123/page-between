@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   var quitting = false
   var restarting = false
   var pendingFiles: [URL] = []
+  var pendingSourceLink: String?
   var importing = false
   var ready = false
   var outputBuffer = Data()
@@ -342,6 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     if action == "ready" {
       ready = true
       writeRuntime()
+      openPendingSourceLink()
       importPendingFiles()
       return
     }
@@ -563,12 +565,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     }
   }
 
-  func application(_ sender: NSApplication, openFiles filenames: [String]) {
-    pendingFiles += filenames.map { URL(fileURLWithPath: $0) }.filter {
-      supported.contains($0.pathExtension.lowercased())
+  func application(_ application: NSApplication, open urls: [URL]) {
+    pendingFiles += urls.filter { $0.isFileURL && supported.contains($0.pathExtension.lowercased()) }
+    if !demo {
+      pendingSourceLink = urls.last(where: {
+        $0.scheme == "yejian" && $0.host == "source" && $0.absoluteString.utf8.count <= 16000
+      })?.absoluteString ?? pendingSourceLink
     }
-    sender.reply(toOpenOrPrint: .success)
+    openPendingSourceLink()
     importPendingFiles()
+  }
+
+  func openPendingSourceLink() {
+    guard ready, let link = pendingSourceLink else { return }
+    pendingSourceLink = nil
+    window.makeKeyAndOrderFront(nil)
+    NSApp.activate(ignoringOtherApps: true)
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      _ = try? await web.callAsyncJavaScript("await window.readerOpenSourceLink(link);",
+        arguments: ["link": link], in: nil, contentWorld: .page)
+    }
   }
 
   func importPendingFiles() {

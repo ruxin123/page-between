@@ -51,7 +51,7 @@ final class ReadingFlowTests: XCTestCase {
         let secondary = app.descendants(matching: .any).matching(identifier: "reference.position").firstMatch
         let first = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "第一章"), object: secondary)
         XCTAssertEqual(XCTWaiter.wait(for: [first], timeout: 20), .completed, app.debugDescription)
-        XCTAssertTrue(primary.label.contains("第二章"))
+        XCTAssertFalse(primary.isHittable)
         reference.buttons["阅读设置"].tap()
         let size = app.sliders["字号比例"]
         XCTAssertTrue(size.waitForExistence(timeout: 10)); size.adjust(toNormalizedSliderPosition: 0.75)
@@ -69,7 +69,7 @@ final class ReadingFlowTests: XCTestCase {
         XCTAssertTrue(reference.waitForExistence(timeout: 15)); app.buttons["reference.previous"].tap()
         let earlier = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "第 1 页"), object: secondary)
         XCTAssertEqual(XCTWaiter.wait(for: [earlier], timeout: 15), .completed)
-        XCTAssertTrue(primary.label.contains("第 2 页"))
+        XCTAssertFalse(primary.isHittable)
         reference.buttons["阅读设置"].tap()
         let zoom = app.sliders["缩放百分比"]
         XCTAssertTrue(zoom.waitForExistence(timeout: 10)); zoom.adjust(toNormalizedSliderPosition: 0.6)
@@ -220,13 +220,14 @@ final class ReadingFlowTests: XCTestCase {
         let excerpt = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "excerpt.row.")).firstMatch
         XCTAssertTrue(excerpt.waitForExistence(timeout: 10), app.debugDescription)
         excerpt.tap()
+        app.buttons["记一句"].tap()
         let note = app.descendants(matching: .any).matching(identifier: "excerpt.note").firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 10)); note.tap(); note.typeText("Original thought")
         app.buttons["保存笔记"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original thought")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(excerpt.waitForExistence(timeout: 10)); excerpt.tap()
-        XCTAssertTrue(note.waitForExistence(timeout: 10)); XCTAssertTrue((note.value as? String ?? "").contains("Original thought"))
-        app.buttons["删除"].tap()
+        XCTAssertTrue(app.staticTexts["Original thought"].waitForExistence(timeout: 10))
+        app.buttons["更多"].tap(); app.buttons["删除"].tap()
         XCTAssertTrue(app.buttons["撤销删除"].waitForExistence(timeout: 10)); app.buttons["撤销删除"].tap()
         XCTAssertTrue(excerpt.waitForExistence(timeout: 10))
         app.buttons["导出"].tap(); app.buttons["JSON"].tap()
@@ -262,7 +263,7 @@ final class ReadingFlowTests: XCTestCase {
         note.tap(); XCTAssertTrue(app.images["原文图像"].waitForExistence(timeout: 10), app.debugDescription)
         capture(app, "transferred-excerpt")
         let detailDone = app.navigationBars["选段"].buttons["完成"]
-        detailDone.tap(); app.buttons["翻译收藏"].tap()
+        detailDone.tap(); app.buttons["margins.type"].tap(); app.buttons["译文"].tap()
         let favorite = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Original transferred paragraph.")).firstMatch
         XCTAssertTrue(favorite.waitForExistence(timeout: 10)); favorite.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "原创迁移译文。")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
@@ -383,11 +384,14 @@ final class ReadingFlowTests: XCTestCase {
         XCTFail("Selection menu action is unavailable: " + title + "\n" + app.debugDescription)
     }
     @MainActor private func openBook(_ book: XCUIElement, in app: XCUIApplication) {
-        for _ in 0..<5 {
+        for _ in 0..<8 {
             let center = book.frame.midY
             if center > app.frame.minY + 180 && center < app.frame.maxY - 140 { break }
-            if center >= app.frame.maxY - 140 { app.scrollViews.firstMatch.swipeUp() }
-            else { app.scrollViews.firstMatch.swipeDown() }
+            let scroll = app.scrollViews.firstMatch
+            let low = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.66))
+            let high = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
+            if center >= app.frame.maxY - 140 { low.press(forDuration: 0.05, thenDragTo: high) }
+            else { high.press(forDuration: 0.05, thenDragTo: low) }
         }
         book.tap()
         let content = app.descendants(matching: .any).matching(identifier: "reader.pdf").firstMatch

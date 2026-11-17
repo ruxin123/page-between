@@ -138,6 +138,7 @@ export function createTutor({
         ? "继续提问"
         : "发送提问";
     const generating = active?.messages.at(-1)?.status === "generating";
+    keep.disabled = pending || generating;
     $("ai-stop").hidden = !generating;
     $("ai-progress").hidden = !pending && !generating;
     imageControls();
@@ -478,13 +479,13 @@ export function createTutor({
   $("copy-question").parentElement.append(keep);
   keep.onclick = async () => {
     const original = active?.source || source;
-    if (!original || !book) return;
+    if (!original || !book || pending || active?.messages.at(-1)?.status === "generating") return;
     keep.disabled = true;
     try {
       await saveMargin(post, { book, source: original }, active ? { type: "ai", id: active.id } : undefined);
       toast("已保存到页边。");
     } catch (error) { toast(error.message, { kind: "error" }); }
-    finally { keep.disabled = false; }
+    finally { keep.disabled = pending || active?.messages.at(-1)?.status === "generating"; }
   };
   $("copy-question").onclick = async () => {
     const original = active?.source || source;

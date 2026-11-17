@@ -262,7 +262,9 @@ export function createTranslation({
     showContent();
     showSource();
     $("translation-query").value = context.source?.quote || "";
-    panel.classList.toggle("word-translation", /^[A-Za-z][A-Za-z\'-]{0,48}$/.test(context.source?.quote?.trim() || ""));
+    const word = /^[A-Za-z][A-Za-z'-]{0,48}$/.test(context.source?.quote?.trim() || "");
+    panel.classList.toggle("word-translation", word);
+    $("translation-language-options").open = !word;
     setEditing(false);
     renderOriginal();
     $("translation-result").hidden = true;
@@ -412,7 +414,7 @@ export function createTranslation({
     if (!result || !context?.source) return;
     keep.disabled = true;
     try {
-      await saveMargin(post, { book: context.book, source: { ...context.source, quote: result.text } }, { type: "translation", id: result.id });
+      await saveMargin(post, { book: context.book, source: context.source }, { type: "translation", id: result.id });
       toast("已保存到页边。");
     } catch (error) { toast(error.message, { kind: "error" }); }
     finally { keep.disabled = false; }

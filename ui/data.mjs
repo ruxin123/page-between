@@ -41,7 +41,7 @@ export function createDataSettings({ api, post, toast }) {
       $("data-restart").hidden = !data.pendingCacheClear;
       $("data-last-restore").textContent = data.lastRestore.message || "";
       $("backup-frequency").value = data.backup?.frequency || "off";
-      $("backup-last").textContent = data.backup?.error || (data.backup?.lastSuccess ? "上次备份 " + new Date(data.backup.lastSuccess * 1000).toLocaleString() : "");
+      $("backup-last").textContent = [data.backup?.lastSuccess ? "最近成功备份 " + new Date(data.backup.lastSuccess * 1000).toLocaleString() : "", data.backup?.error].filter(Boolean).join(" · ");
     } catch (error) {
       $("data-status").textContent = error.message;
     }

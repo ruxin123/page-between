@@ -133,13 +133,13 @@ public actor LibraryRepository {
         try update(book)
     }
 
-    public func saveAppearance(_ id: UUID, value: ReadingAppearance) throws {
-        guard value.isValid else { throw LibraryFailure.invalidFile }
+    public func saveAppearance(_ id: UUID, value: ReadingAppearance?) throws {
+        guard value?.isValid != false else { throw LibraryFailure.invalidFile }
         guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         book.appearance = value
-        if let old = book.transferredAppearance {
+        if let value, let old = book.transferredAppearance {
             book.transferredAppearance = TransferAppearance(fontScale: value.fontScale, lineHeight: value.lineHeight, pageMargins: value.pageMargins, fontFamily: value.fontFamily, theme: value.theme, scroll: value.scroll, desktop: old.desktop)
-        }
+        } else if value == nil { book.transferredAppearance = nil }
         try replace(book)
     }
 

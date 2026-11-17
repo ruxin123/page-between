@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 import zipfile
+from urllib.parse import urlencode
 
 import ai_tutor
 import book_images
@@ -16,6 +17,28 @@ from storage import load, save
 
 LOCK = threading.RLock()
 MAX_EXPORT = 200 * 1024**2
+
+
+def source_link(book, position):
+    anchor = {key: position[key] for key in ("index", "pdfY", "fragment", "sourceOffset", "anchor", "top", "resource") if key in position}
+    params = {"book": book["id"], "position": json.dumps(anchor, separators=(",", ":"))}
+    if re.fullmatch(r"[0-9a-f]{64}", book.get("sourceHash") or ""):
+        params["sha256"] = book["sourceHash"]
+    return "yejian://source?" + urlencode(params)
+
+
+def conversation_text(book, messages, *, links=False):
+    parts = []
+    for message in messages:
+        label = "提问" if message.get("role") == "user" else "回答"
+        if message.get("status") in {"stopped", "error", "generating"}:
+            label += "（未完成）"
+        parts.append(f"**{label}**\n\n" + message.get("content", ""))
+        for ref in message.get("references") or []:
+            citation = ref.get("citation", "")
+            link = source_link(book, ref["position"]) if links and ref.get("position") else ""
+            parts.append(citation + (f" · [返回原文]({link})" if link else "") + "\n\n" + ref.get("text", ""))
+    return "\n\n".join(parts)
 
 
 def records(book, root=None):
@@ -39,7 +62,7 @@ def validate(book, root):
         source = item.get("source")
         ai_tutor.source_for(book, source, resource_root=root, quote_limit=12000)
         validate_position(source["position"], book)
-        for name in ("translation", "answer"):
+        for name in ("translation", "answer", "translationInput"):
             if not isinstance(item.get(name, ""), str) or len(item.get(name, "")) > 100000:
                 raise ValueError("页边关联内容无效。")
     return data
@@ -57,22 +80,21 @@ def change(book, payload):
                 return copy.deepcopy(item)
             if len(data["items"]) >= 10000:
                 raise ValueError("本书页边记录已达上限，请先导出整理。")
-            source = ai_tutor.source_for(book, payload.get("source"))
-            original = payload["source"].get("quote", "")
-            if original.strip():
-                source["quote"] = original
-            # Nearby context is for answering questions, not part of a saved excerpt.
-            source = {key: source[key] for key in ("quote", "position", "citation", "image", "rects") if key in source}
-            kind = payload["source"].get("kind")
-            source["kind"] = kind if isinstance(kind, str) and kind in {"text", "table", "equation", "image"} else "text"
-            item = {"id": ident, "source": source, "createdAt": time.time(), "note": ""}
+            raw = payload.get("source")
+            item = {"id": ident, "createdAt": time.time(), "note": ""}
             related = payload.get("related")
             if related:
                 if not isinstance(related, dict):
                     raise ValueError("关联记录无效。")
                 if related.get("type") == "ai":
                     conversation = ai_tutor.conversation(related.get("id"), book["id"])
-                    item["answer"] = "\n\n".join(message["content"] for message in conversation["messages"] if message.get("role") == "assistant" and message.get("status") != "generating")
+                    messages = conversation["messages"]
+                    if not messages or messages[-1].get("status") == "generating":
+                        raise ValueError("请等回答结束后再保存。")
+                    item["answer"] = conversation_text(book, messages)
+                    if len(item["answer"]) > 100000:
+                        raise ValueError("对话过长，请从答疑记录导出完整对话。")
+                    raw = conversation["source"]
                 elif related.get("type") == "translation":
                     import translation
                     with translation.LOCK:
@@ -82,10 +104,21 @@ def change(book, payload):
                         if translated is None:
                             raise ValueError("这次翻译已关闭，请重新翻译后保存。")
                         item["translation"] = translated["translation"]
+                        raw = translated["source"]
+                        if translated["text"] != raw["quote"]:
+                            item["translationInput"] = translated["text"]
                 else:
                     raise ValueError("关联记录无效。")
                 item["related"] = related
-            existing = next((previous for previous in data["items"] if not previous.get("deletedAt") and previous["source"] == item["source"] and previous.get("answer") == item.get("answer") and previous.get("translation") == item.get("translation")), None)
+            source = ai_tutor.source_for(book, raw, resource_root=BOOK_ROOT if related else None, quote_limit=12000 if related else 6000)
+            if raw.get("quote", "").strip():
+                source["quote"] = raw["quote"]
+            source.pop("context", None)
+            source.pop("contextBefore", None)
+            kind = raw.get("kind")
+            source["kind"] = kind if isinstance(kind, str) and kind in {"text", "table", "equation", "image"} else "text"
+            item["source"] = source
+            existing = next((previous for previous in data["items"] if not previous.get("deletedAt") and all(previous.get(key) == item.get(key) for key in ("source", "answer", "translation", "translationInput"))), None)
             if existing:
                 return copy.deepcopy(existing)
             data["items"].insert(0, item)
@@ -106,13 +139,21 @@ def change(book, payload):
         return copy.deepcopy(item)
 
 
-def chapter_for(book, position):
+def chapter_for(book, position, *, key=False):
     page, y = position["index"], position.get("pdfY", 0)
     if book["type"] == "pdf":
         entries = [entry for entry in flatten_toc(book.get("toc", []))
                    if type(entry.get("index")) is int and (entry["index"], entry.get("pdfY", 0)) <= (page, y)]
         if entries:
-            return max(entries, key=lambda entry: (entry["index"], entry.get("pdfY", 0)))["title"]
+            entry = max(entries, key=lambda entry: (entry["index"], entry.get("pdfY", 0)))
+            return f'{entry["index"]}:{entry.get("pdfY", 0)}' if key else entry["title"]
+    if book["type"] == "epub" and position.get("fragment"):
+        entry = next((entry for entry in flatten_toc(book.get("toc", []))
+                      if entry.get("index") == page and entry.get("fragment") == position["fragment"]), None)
+        if entry:
+            return f'{page}:{entry["fragment"]}' if key else entry["title"]
+    if key:
+        return str(page)
     if book["type"] in {"txt", "epub"} and 1 <= page <= len(book.get("chapters", [])):
         return book["chapters"][page - 1]["title"]
     return position_label(book, position)
@@ -121,6 +162,30 @@ def chapter_for(book, position):
 def listing(book):
     with LOCK:
         return [{**copy.deepcopy(item), "chapter": chapter_for(book, item["source"]["position"])} for item in records(book)["items"] if not item.get("deletedAt")]
+
+
+def timeline(book, groups):
+    rows = []
+    for record_type, records in groups.items():
+        for item in records:
+            source = item.get("source") or {"position": item.get("position"), "citation": item.get("detail") or item.get("label")}
+            position = source.get("position")
+            if not position or not isinstance(position.get("index"), int):
+                continue
+            rows.append({**item, "recordType": record_type, "source": source,
+                         "chapter": chapter_for(book, position), "chapterKey": chapter_for(book, position, key=True),
+                         "sourceLink": source_link(book, position)})
+    return sorted(rows, key=lambda row: (row["source"]["position"]["index"],
+        row["source"]["position"].get("pdfY", row["source"]["position"].get("top", 0)) or 0,
+        row["source"]["position"].get("sourceOffset", 0) or 0,
+        (row["source"]["position"].get("anchor") or {}).get("index", 0),
+        (row["source"]["position"].get("anchor") or {}).get("charOffset", 0),
+        (row.get("createdAt", row.get("updatedAt", 0)) or 0) / (1000 if row["recordType"] in {"conversations", "bookmarks"} else 1)))
+
+
+def conversation_detail(book, ident):
+    conversation = ai_tutor.conversation(ident, book["id"])
+    return {"conversation": conversation, "sourceHtml": preview(book, conversation)}
 
 
 def preview(book, item):
@@ -148,51 +213,65 @@ def export(book, state, format):
     directory = CACHE / "exports"
     directory.mkdir(parents=True, exist_ok=True)
     name = uuid.uuid4().hex + (".json" if format == "json" else ".zip")
-    path = directory / (name.split(".")[0] + ".part")
+    path = (directory / name).with_suffix(".part")
+
+    def rows():
+        for key, title in (("excerpts", "选段"), ("bookmarks", "书签"), ("translations", "翻译收藏"), ("conversations", "答疑")):
+            for item in data[key]:
+                source = item.get("source") or {"position": item.get("position"), "citation": item.get("label", "")}
+                position = source.get("position")
+                link = source_link(book, position) if position else ""
+                if link:
+                    item["sourceLink"] = link
+                yield key, title, item, source, link
+
     try:
         if format == "json":
-            def embed(value):
-                nonlocal size
-                if isinstance(value, dict):
-                    for key, item in value.items():
-                        if key == "image" and isinstance(item, str):
-                            value[key] = book_images.image_part(book, item)["image_url"]["url"]
-                            size += len(value[key])
-                            if size > MAX_EXPORT:
-                                raise ValueError("JSON 原图较多，请改用 Markdown 文件包。")
-                        else:
-                            embed(item)
-                elif isinstance(value, list):
-                    for item in value: embed(item)
-            embed(data)
+            for _, _, item, source, _ in rows():
+                if "source" not in item:
+                    continue
+                source = item["source"] = copy.deepcopy(source)
+                if source.get("image"):
+                    source["image"] = book_images.image_part(book, source["image"])["image_url"]["url"]
+                    size += len(source["image"])
+                for image in source.get("transferImages", []):
+                    image["url"] = book_images.image_part(book, image["url"])["image_url"]["url"]
+                    size += len(image["url"])
+                if size > MAX_EXPORT:
+                    raise ValueError("JSON 原图较多，请改用 Markdown 文件包。")
             save(path, data)
         else:
             lines = ["# " + book["title"], ""]
             with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
                 images = set()
-                for item in data["excerpts"]:
-                    source = item["source"]
-                    lines += ["## " + position_label(book, source["position"]), "", source["quote"], ""]
-                    if source.get("image"):
-                        body, mime = book_images.stored_image(book, source["image"])
-                        image = "images/" + source["image"].rsplit("/", 1)[-1]
+                for key, title, item, source, link in rows():
+                    lines += ["## " + title, "", source.get("citation") or "", ""]
+                    if link:
+                        lines += [f"[返回原文]({link})", ""]
+                    lines += [source.get("transferMarkdown") or source.get("quote", ""), ""]
+                    urls = dict.fromkeys(filter(None, [source.get("image"), *(image["url"] for image in source.get("transferImages", []))]))
+                    for url in urls:
+                        image = "images/" + url.rsplit("/", 1)[-1]
                         if image not in images:
+                            body, _ = book_images.stored_image(book, url)
                             size += len(body)
                             if size > MAX_EXPORT:
                                 raise ValueError("本书记录超过 200 MB，请减少导出记录或单独保存原图。")
                             archive.writestr(image, body)
                             images.add(image)
                         lines += [f"![原图]({image})", ""]
-                    for key, title in (("note", "笔记"), ("translation", "译文"), ("answer", "答疑")):
-                        if item.get(key): lines += ["### " + title, "", item[key], ""]
-                for title, items, text in (("书签", data["bookmarks"], lambda item: item.get("label", "")),
-                                            ("翻译收藏", data["translations"], lambda item: item["text"] + "\n\n" + item["translation"]),
-                                            ("答疑记录", data["conversations"], lambda item: item["source"]["quote"] + "\n\n" + "\n\n".join(message.get("content", "") for message in item["messages"]))):
-                    if items:
-                        lines += ["## " + title, ""]
-                        for item in items:
-                            lines += [item.get("source", {}).get("citation", ""), "", text(item), ""]
-                archive.writestr("页边.md", "\n".join(lines))
+                    edited = item.get("translationInput") or (item.get("text") if key == "translations" else None)
+                    if edited and edited != source.get("quote"):
+                        lines += ["### 翻译输入", "", edited, ""]
+                    if key == "conversations":
+                        lines += [conversation_text(book, item["messages"], links=True), ""]
+                    for field, label in (("note", "笔记"), ("translation", "译文"), ("explanation", "释义"), ("answer", "问答")):
+                        if item.get(field):
+                            lines += ["### " + label, "", item[field], ""]
+                markdown = "\n".join(lines).encode("utf-8")
+                if size + len(markdown) > MAX_EXPORT:
+                    raise ValueError("本书记录超过 200 MB，请减少导出记录。")
+                archive.writestr("页边.md", markdown)
         path.replace(directory / name)
     finally:
         path.unlink(missing_ok=True)
@@ -239,7 +318,7 @@ def export_pdf(book):
             continue
         source = item["source"]
         contents = source["quote"]
-        for key, title in (("note", "笔记"), ("translation", "译文"), ("answer", "答疑")):
+        for key, title in (("note", "笔记"), ("translationInput", "翻译输入"), ("translation", "译文"), ("answer", "答疑")):
             if item.get(key):
                 contents += "\n\n" + title + "\n" + item[key]
         grouped = {}

@@ -79,12 +79,12 @@ struct AssistantScreen: View {
                                 item.attachments = selection.attachments
                                 item.transferredPosition = initialConversation?.transferredPosition
                                 if selection.translate { item.translation = answer; item.translationDetails = translationDetails }
-                                else { item.answer = turns.filter { $0.role == "assistant" && $0.status != "generating" }.map(\.content).joined(separator: "\n\n") }
+                                else if !turns.isEmpty { item.answer = MobileConversation.marginSnapshot(turns) }
                                 try await repository.saveExcerpt(selection.book, excerpt: item)
                                 if selection.translate { favoriteSaved = true }
                             } catch { self.error = error.localizedDescription }
                         }
-                    }.disabled(busy || selection.translate && (answer.isEmpty || favoriteSaved))
+                    }.disabled(busy || (selection.translate ? answer.isEmpty || favoriteSaved : turns.contains { $0.status == "generating" }))
                 }
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { request?.cancel(); dismiss() } }
             }

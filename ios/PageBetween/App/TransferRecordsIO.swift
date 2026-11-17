@@ -139,7 +139,7 @@ extension TransferLocations {
         }
         for item in data.excerpts {
             var value = try excerpt(item.source, id: item.id, createdAt: item.createdAt)
-            value.note = item.note; value.answer = item.answer; value.translation = item.translation
+            value.note = item.note; value.answer = item.answer; value.translation = item.translation; value.translationInput = item.translationInput
             value.deletedAt = item.deletedAt.map(Date.init(timeIntervalSince1970:))
             result.excerpts.append(value)
         }
@@ -188,7 +188,7 @@ extension TransferLocations {
             if let details = item.translationDetails, let translation = item.translation {
                 if item.deletedAt == nil { data.translations.append(TransferTranslation(id: TransferRecords.id(item.id), source: portable, text: details.originalText ?? item.quote, translation: translation, explanation: details.explanation, provider: details.provider, model: details.model, sourceLanguage: details.sourceLanguage, targetLanguage: details.targetLanguage, detectedLanguage: details.detectedLanguage, createdAt: item.createdAt.timeIntervalSince1970)) }
             } else {
-                data.excerpts.append(TransferExcerpt(id: TransferRecords.id(item.id), source: portable, note: item.note, answer: item.answer, translation: item.translation, createdAt: item.createdAt.timeIntervalSince1970, deletedAt: item.deletedAt?.timeIntervalSince1970))
+                data.excerpts.append(TransferExcerpt(id: TransferRecords.id(item.id), source: portable, note: item.note, answer: item.answer, translation: item.translation, translationInput: item.translationInput, createdAt: item.createdAt.timeIntervalSince1970, deletedAt: item.deletedAt?.timeIntervalSince1970))
             }
         }
         var offset = 0

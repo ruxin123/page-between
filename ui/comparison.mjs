@@ -11,23 +11,47 @@ export function createComparison({ getSeed, layout, closed }) {
   pane.hidden = true;
   pane.setAttribute("aria-label", "对照阅读");
   pane.innerHTML = `<div class="comparison-handle" role="separator" tabindex="0" aria-label="调整对照大小" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50"></div><header><strong>对照</strong><button class="icon-button" data-close aria-label="关闭对照">${icon("close")}</button></header><div class="comparison-loading" role="status">正在打开…</div>`;
-  document.body.append(pane);
+  const switcher = document.createElement("nav");
+  switcher.className = "comparison-switcher";
+  switcher.hidden = true;
+  switcher.setAttribute("aria-label", "对照视图");
+  switcher.innerHTML = '<button data-view="main" aria-pressed="true">正文</button><button data-view="reference" aria-pressed="false">对照</button><button data-close aria-label="关闭对照">' + icon("close") + '</button>';
+  document.body.append(pane, switcher);
   const handle = pane.querySelector("[role=separator]"), status = pane.querySelector("[role=status]");
   let frame, seed, size = 50, timer;
-  const stacked = () => innerWidth < 900;
+  const reader = document.getElementById("reader");
+  const narrow = matchMedia("(max-width: 899px)");
+  let active = "reference";
+  function showActive(view, focus = false) {
+    active = view;
+    document.body.dataset.comparisonLayout = narrow.matches ? "switch" : "split";
+    document.body.dataset.comparisonActive = active;
+    switcher.hidden = !narrow.matches;
+    handle.hidden = narrow.matches;
+    reader.inert = narrow.matches && active === "reference";
+    pane.inert = narrow.matches && active === "main";
+    for (const button of switcher.querySelectorAll("[data-view]"))
+      button.setAttribute("aria-pressed", String(button.dataset.view === active));
+    if (focus && narrow.matches) switcher.querySelector('[aria-pressed="true"]').focus();
+  }
+  switcher.addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (button?.dataset.view) showActive(button.dataset.view);
+    else if (button) close();
+  });
+  narrow.addEventListener("change", () => { if (!pane.hidden) showActive(active); });
   function bounds() {
-    const extent = stacked() ? innerHeight : innerWidth;
-    const minimum = Math.min(45, Math.max(30, 300 / extent * 100));
+    const minimum = Math.min(45, Math.max(30, 300 / innerWidth * 100));
     return [minimum, 100 - minimum];
   }
-  function setSize(value) {
+  function setSize(value, remember = true) {
     const [low, high] = bounds();
-    size = Math.max(low, Math.min(high, value));
-    handle.setAttribute("aria-valuenow", String(Math.round(size)));
+    const displayed = Math.max(low, Math.min(high, value));
+    if (remember) size = displayed;
+    handle.setAttribute("aria-valuenow", String(Math.round(displayed)));
     handle.setAttribute("aria-valuemin", String(Math.ceil(low)));
     handle.setAttribute("aria-valuemax", String(Math.floor(high)));
-    handle.setAttribute("aria-orientation", stacked() ? "horizontal" : "vertical");
-    document.documentElement.style.setProperty("--comparison-size", size + (stacked() ? "dvh" : "vw"));
+    document.documentElement.style.setProperty("--comparison-size", displayed + "vw");
   }
   function load() {
     clearTimeout(timer);
@@ -55,7 +79,11 @@ export function createComparison({ getSeed, layout, closed }) {
     const remove = () => {
       pane.hidden = true;
       frame?.remove(); frame = null;
-      document.body.removeAttribute("data-comparison");
+      delete document.body.dataset.comparison;
+      delete document.body.dataset.comparisonLayout;
+      delete document.body.dataset.comparisonActive;
+      reader.inert = false;
+      switcher.hidden = true;
       document.getElementById("comparison-open").setAttribute("aria-pressed", "false");
     };
     if (reflow) layout(remove); else remove();
@@ -73,7 +101,7 @@ export function createComparison({ getSeed, layout, closed }) {
   handle.onpointerdown = event => {
     if (event.button !== 0) return;
     event.preventDefault(); handle.setPointerCapture(event.pointerId);
-    handle.onpointermove = event => layout(() => setSize((stacked() ? innerHeight - event.clientY : innerWidth - event.clientX) / (stacked() ? innerHeight : innerWidth) * 100));
+    handle.onpointermove = event => layout(() => setSize((innerWidth - event.clientX) / innerWidth * 100));
     handle.onpointerup = handle.onpointercancel = () => { handle.onpointermove = null; };
   };
   handle.onkeydown = event => {
@@ -81,7 +109,7 @@ export function createComparison({ getSeed, layout, closed }) {
     event.preventDefault(); event.stopPropagation();
     layout(() => setSize(event.key === "Home" ? 50 : size + (["ArrowLeft", "ArrowUp"].includes(event.key) ? 5 : -5)));
   };
-  window.addEventListener("resize", () => { if (!pane.hidden) setSize(size); });
+  window.addEventListener("resize", () => { if (!pane.hidden) setSize(size, false); });
   return {
     get open() { return !pane.hidden; },
     close,
@@ -93,7 +121,8 @@ export function createComparison({ getSeed, layout, closed }) {
         pane.hidden = false;
         document.body.dataset.comparison = "open";
         document.getElementById("comparison-open").setAttribute("aria-pressed", "true");
-        setSize(size);
+        setSize(size, false);
+        showActive("reference", true);
       });
       load();
     },

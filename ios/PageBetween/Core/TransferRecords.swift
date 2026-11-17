@@ -45,10 +45,11 @@ public struct TransferExcerpt: Codable, Sendable {
     public var note: String
     public var answer: String?
     public var translation: String?
+    public var translationInput: String?
     public var createdAt: Double
     public var deletedAt: Double?
-    public init(id: String, source: TransferSource, note: String = "", answer: String? = nil, translation: String? = nil, createdAt: Double, deletedAt: Double? = nil) {
-        self.id = id; self.source = source; self.note = note; self.answer = answer; self.translation = translation; self.createdAt = createdAt; self.deletedAt = deletedAt
+    public init(id: String, source: TransferSource, note: String = "", answer: String? = nil, translation: String? = nil, translationInput: String? = nil, createdAt: Double, deletedAt: Double? = nil) {
+        self.id = id; self.source = source; self.note = note; self.answer = answer; self.translation = translation; self.translationInput = translationInput; self.createdAt = createdAt; self.deletedAt = deletedAt
     }
 }
 public struct TranslationDetails: Codable, Equatable, Sendable {
@@ -138,7 +139,7 @@ public struct TransferRecords: Codable, Sendable {
         for item in excerpts {
             try item.source.validate()
             guard Self.validID(item.id), date(item.createdAt), item.deletedAt.map(date) != false, item.note.count <= 2000,
-                  (item.answer?.count ?? 0) <= 100000, (item.translation?.count ?? 0) <= 100000 else { throw LibraryFailure.invalidFile }
+                  (item.answer?.count ?? 0) <= 100000, (item.translation?.count ?? 0) <= 100000, (item.translationInput?.count ?? 0) <= 12000 else { throw LibraryFailure.invalidFile }
         }
         for item in translations {
             try item.source.validate()

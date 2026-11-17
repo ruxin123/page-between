@@ -12,6 +12,7 @@ struct MobileSettingsScreen: View {
     var body: some View {
         NavigationStack {
             Form {
+                NavigationLink("全局阅读默认") { ReadingDefaultsForm() }
                 Section("AI 答疑") {
                     profile($services.ai, key: $aiKey, service: "ai")
                     Toggle("支持图像输入", isOn: Binding(get: { services.ai.supportsImages == true }, set: { services.ai.supportsImages = $0 }))
@@ -74,5 +75,30 @@ struct MobileSettingsScreen: View {
             }
         }.textInputAutocapitalization(.never).autocorrectionDisabled()
         .onChange(of: value.wrappedValue.baseURL) { models[service] = nil }
+    }
+}
+
+private struct ReadingDefaultsForm: View {
+    @AppStorage("reading.fontScale") private var fontScale = 100.0
+    @AppStorage("reading.lineHeight") private var lineHeight = 1.85
+    @AppStorage("reading.pageMargins") private var pageMargins = 1.0
+    @AppStorage("reading.fontFamily") private var fontFamily = ""
+    @AppStorage("reading.theme") private var theme = "paper"
+    @AppStorage("reading.pdfScroll") private var pdfScroll = true
+    @AppStorage("reading.textScroll") private var textScroll = false
+
+    var body: some View {
+        Form {
+            Picker("文字阅读", selection: $textScroll) { Text("左右翻页").tag(false); Text("连续滚动").tag(true) }
+            Picker("PDF 阅读", selection: $pdfScroll) { Text("单页翻阅").tag(false); Text("连续滚动").tag(true) }
+            Picker("纸张", selection: $theme) { Text("纸白").tag("paper"); Text("暖纸").tag("sepia"); Text("夜间").tag("night") }
+            Picker("字体", selection: $fontFamily) { Text("原书").tag(""); Text("宋体").tag("Songti SC"); Text("苹方").tag("PingFang SC"); Text("Georgia").tag("Georgia") }
+            LabeledContent("字号", value: "\(Int(fontScale))%")
+            Slider(value: $fontScale, in: 70...200, step: 10).accessibilityLabel("字号")
+            LabeledContent("行距", value: lineHeight.formatted(.number.precision(.fractionLength(2))))
+            Slider(value: $lineHeight, in: 1.4...2.2, step: 0.05).accessibilityLabel("行距")
+            LabeledContent("页边距", value: pageMargins.formatted(.number.precision(.fractionLength(1))))
+            Slider(value: $pageMargins, in: 0.5...2, step: 0.1).accessibilityLabel("页边距")
+        }.navigationTitle("全局阅读默认")
     }
 }

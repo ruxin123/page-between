@@ -2,9 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum MobilePalette {
-    static let paper = Color(UIColor { trait in trait.userInterfaceStyle == .dark ? UIColor(red: 0.078, green: 0.118, blue: 0.098, alpha: 1) : UIColor(red: 0.985, green: 0.981, blue: 0.963, alpha: 1) })
-    static let ink = Color(red: 0.11, green: 0.17, blue: 0.14)
-    static let accent = Color(red: 0.29, green: 0.45, blue: 0.37)
+    static let paper = Color(UIColor { trait in trait.userInterfaceStyle == .dark ? UIColor(red: 0.078, green: 0.118, blue: 0.098, alpha: 1) : UIColor(red: 1, green: 0.988, blue: 0.961, alpha: 1) })
+    static let ink = Color(red: 0.145, green: 0.157, blue: 0.141)
+    static let accent = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark
+            ? UIColor(red: 0.66, green: 0.78, blue: 0.67, alpha: 1)
+            : UIColor(red: 0.24, green: 0.36, blue: 0.29, alpha: 1)
+    })
+    static let note = Color(red: 0.67, green: 0.52, blue: 0.37)
 }
 
 struct LibraryScreen: View {

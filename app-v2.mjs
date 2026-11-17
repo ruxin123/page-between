@@ -146,7 +146,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.58";
+document.body.dataset.readerBuild = "2.59";
 document.body.dataset.mode = reference ? "reference" : palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -175,6 +175,7 @@ const comparison = reference || palm ? null : createComparison({
     const position = readerReady ? makePosition() : location;
     const book = current?.id;
     if (!comparison.open) {
+      margins.close(false, false);
       setTocOpen(false, false);
       setReaderSettingsOpen(false);
     }
@@ -287,9 +288,20 @@ const documentParsing = createDocumentParsing({
     }
     renderJobs();
     if (route === "library") renderLibrary();
+    else arrangeReaderTools();
   },
 });
-const margins = createMargins({ api, post, toast, getBookmarks: () => bookmarks, openSource: (book, position) => window.readerOpenTutorSource(book, position) });
+const margins = createMargins({
+  api, post, toast,
+  openSource: (book, position) => window.readerOpenTutorSource(book, position),
+  isCurrent: id => route === "reader" && current?.id === id,
+  canDock: () => innerWidth >= 1240 && !palm && !reference && !comparison?.open && !$("reader").classList.contains("focused"),
+  layout: mutate => {
+    const position = readerReady ? makePosition() : location;
+    restorePosition(mutate);
+    if (position && current && route === "reader") renderCurrent(position);
+  },
+});
 const libraryView = createLibraryView(document);
 const folderView = createFolders({ post, refresh: refreshLibrary, changed: renderLibrary });
 function postState(patch) {
@@ -476,8 +488,9 @@ function openJobs() {
   $("jobs-dialog").showModal();
 }
 
-function settingsMarkup() {
-  const pdf = current?.type === "pdf" && route === "reader";
+function settingsMarkup(global) {
+  const prefs = global ? globalPrefs : validatePreferences(readingPreferences(globalPrefs, bookPrefs, current, true));
+  const pdf = !global && current?.type === "pdf";
   const themes = [
     ["paper", "清纸", "#fffefa"],
     ["sage", "雾松", "#e4eddc"],
@@ -489,8 +502,8 @@ function settingsMarkup() {
   const range = (label, key, min, max, step, output, value = prefs[key]) =>
     `<label class="setting-range"><span>${label}<output data-output="${key}">${output}</output></span><input data-pref="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></label>`;
   return `<section class="settings-section"><h2>浏览方式</h2>${select(
-    pdf ? "PDF 阅读" : palm ? "掌上窗口" : "文字阅读",
-    pdf ? "pdfMode" : palm ? "palmMode" : "textMode",
+    pdf ? "PDF 阅读" : !global && palm ? "掌上窗口" : "文字阅读",
+    pdf ? "pdfMode" : !global && palm ? "palmMode" : "textMode",
     pdf
       ? [
           ["scroll", "连续滚动"],
@@ -501,7 +514,7 @@ function settingsMarkup() {
           ["scroll", "连续滚动"],
         ],
   )}${
-    route === "settings"
+    global
       ? select("PDF 阅读", "pdfMode", [
           ["scroll", "连续滚动"],
           ["pages", "单页翻阅"],
@@ -528,21 +541,28 @@ function settingsMarkup() {
           ["source-serif", "Source Serif 4"],
           ["georgia", "Georgia"],
           ["system", "系统字体"],
-        ])}${palm ? range("字号偏好", "palmScale", 0.5, 2, 0.05, `${Math.round(prefs.palmScale * 100)}%`) : range("字号", "fontSize", 10.5, 42, 0.5, `${Number(prefs.fontSize.toFixed(1))} px`)}${!palm ? range("行距", "lineHeight", 1.5, 2.4, 0.05, prefs.lineHeight.toFixed(2)) + range("正文宽度", "textWidth", 480, 860, 20, `${prefs.textWidth} px`) : ""}</section>`
-  }${desktop || (palm && native) ? `<section class="settings-section"><h2>掌上阅读</h2>${palm && native ? '<div class="window-sizes"><button class="secondary-button" data-window-size="compact">小巧</button><button class="secondary-button" data-window-size="standard">标准</button></div>' : ""}${
-    desktop
+        ])}${!global && palm ? range("字号偏好", "palmScale", 0.5, 2, 0.05, `${Math.round(prefs.palmScale * 100)}%`) : range("字号", "fontSize", 10.5, 42, 0.5, `${Number(prefs.fontSize.toFixed(1))} px`)}${range("行距", "lineHeight", 1.5, 2.4, 0.05, prefs.lineHeight.toFixed(2))}${global || !palm ? range("正文宽度", "textWidth", 480, 860, 20, `${prefs.textWidth} px`) : ""}</section>`
+  }${(global && desktop) || (!global && palm && native) ? `<section class="settings-section"><h2>掌上阅读</h2>${palm && native ? '<div class="window-sizes"><button class="secondary-button" data-window-size="compact">小巧</button><button class="secondary-button" data-window-size="standard">标准</button></div>' : ""}${
+    global && desktop
       ? select("后台翻页", "palmKeys", [
           ["arrows", "⌃⌥⌘ ← / →"],
           ["letters", "⌃⌥⌘ P / N"],
           ["off", "关闭后台快捷键"],
         ])
       : ""
-  }</section>` : ""}<section class="settings-section"><h2>常用工具</h2>${["pinnedTool1", "pinnedTool2"].map((key, index) => select(index ? "第二个入口" : "第一个入口", key, [["auto", "按书籍类别"], ["none", "不固定"], ["palm", "掌上阅读"], ["process", "文档处理"], ["focus", "专注阅读"]])).join("")}</section>`;
+  }</section>` : ""}${global ? `<section class="settings-section"><h2>常用工具</h2>${["pinnedTool1", "pinnedTool2"].map((key, index) => select(index ? "第二个入口" : "第一个入口", key, [["auto", "按书籍类别"], ["none", "不固定"], ["palm", "掌上阅读"], ["process", "文档处理"], ["focus", "专注阅读"], ["comparison", "对照阅读"]])).join("")}</section>` : reference ? "" : `<div class="settings-section"><button class="secondary-button" data-inherit ${!current || !Object.keys(bookPrefs[current.id] || {}).length ? "disabled" : ""}>恢复全局默认</button></div>`}`;
 }
 function renderSettings() {
-  $("global-settings").innerHTML = settingsMarkup();
-  $("quick-settings").innerHTML = settingsMarkup();
+  $("global-settings").innerHTML = settingsMarkup(true);
+  $("quick-settings").innerHTML = settingsMarkup(false);
   $("sample-current").disabled = !appearanceSample?.text;
+  markBookOverrides();
+}
+function markBookOverrides() {
+  const overrides = bookPrefs[current?.id] || {};
+  for (const control of $("quick-settings").querySelectorAll("[data-pref]")) {
+    control.closest("label")?.toggleAttribute("data-overridden", Object.hasOwn(overrides, control.dataset.pref));
+  }
 }
 function actualSize() {
   return palm
@@ -562,7 +582,7 @@ function applyPreferences() {
     fontFamilies[prefs.enFont] || fontFamilies.literata,
   );
   style.setProperty("--reading-size", `${actualSize()}px`);
-  style.setProperty("--reading-line", palm ? 1.65 : prefs.lineHeight);
+  style.setProperty("--reading-line", prefs.lineHeight);
   style.setProperty("--paragraph-space", `${prefs.paragraphSpace}em`);
   style.setProperty("--heading-space", `${prefs.headingSpace}em`);
   style.setProperty("--reading-width", `${prefs.textWidth}px`);
@@ -722,6 +742,9 @@ function restoreAnchor(anchor) {
 function persistReadingPreferences(changes) {
   if (route === "reader" && current && !Object.keys(changes).some(key => key.startsWith("pinnedTool"))) {
     bookPrefs[current.id] = { ...bookPrefs[current.id], ...changes };
+    const reset = $("quick-settings").querySelector("[data-inherit]");
+    if (reset) reset.disabled = false;
+    markBookOverrides();
     return postState({ bookPrefs: { [current.id]: changes } });
   }
   Object.assign(globalPrefs, changes);
@@ -732,8 +755,13 @@ function arrangeReaderTools() {
   if (!$("reader-more-tools")) return;
   $("reader-more-tools").append($("reading-mode"), $("book-options"), $("pin-current-page"));
   $("pin-current-page").hidden = current?.type !== "pdf";
-  const tools = { palm: $("palm-open"), process: $("reader-process"), focus: $("focus-button") };
-  const pinned = new Set([prefs.pinnedTool1, prefs.pinnedTool2].map(tool => tool === "auto" ? current?.shelf === "学习" ? "process" : "palm" : tool));
+  const tools = { palm: $("palm-open"), process: $("reader-process"), focus: $("focus-button"), comparison: $("comparison-open") };
+  const needsPreparation = current?.type === "pdf" &&
+    (["running", "error", "paused"].includes(current.localPreparation?.status) ||
+      jobs.some(job => job.book === current.id && ["running", "error", "paused"].includes(job.status)));
+  const automatic = needsPreparation ? "process" : current?.shelf === "学习" ? "comparison" : "palm";
+  const pinned = new Set([prefs.pinnedTool1, prefs.pinnedTool2].map(tool => tool === "auto" ? automatic : tool));
+  tools.comparison.classList.toggle("compact-tool", pinned.has("comparison"));
   for (const [name, button] of Object.entries(tools))
     (pinned.has(name) ? $("reader-pinned-tools") : $("reader-more-tools")).append(button);
 }
@@ -762,12 +790,13 @@ async function changePreference(key, value) {
   retainedAnchor = anchor;
   Object.assign(prefs, changes);
   applyPreferences();
-  document.querySelectorAll(`[data-pref="${key}"]`).forEach((control) => {
+  const settings = route === "reader" ? $("quick-settings") : $("global-settings");
+  settings.querySelectorAll(`[data-pref="${key}"]`).forEach((control) => {
     if (control.type === "checkbox") control.checked = !!value;
     else if (document.activeElement !== control) control.value = value;
   });
   persistReadingPreferences(changes).catch(error => toast(error.message));
-  document.querySelectorAll("[data-typography]").forEach(button =>
+  settings.querySelectorAll("[data-typography]").forEach(button =>
     button.setAttribute("aria-pressed", String(selectedTypography(prefs) === button.dataset.typography)));
   if (key === "typography") renderSettings();
   if (["pdfZoom", "pdfZoomMode", "pdfMode"].includes(key)) {
@@ -1056,13 +1085,17 @@ async function writeBookmarks(book, action) {
 function renderBookmarks() {
   if (!current) return;
   const marks = bookmarks.filter((mark) => mark.book === current.id);
-  $("bookmarks-list").innerHTML =
+  const signature = JSON.stringify(marks);
+  if ($("bookmarks-list").dataset.signature !== signature) {
+    $("bookmarks-list").dataset.signature = signature;
+    $("bookmarks-list").innerHTML =
     marks
       .map(
         (mark) =>
           `<div class="bookmark-row"><button class="bookmark-open" data-mark="${escapeHTML(mark.id)}">${escapeHTML(mark.label)}<small>${escapeHTML(mark.detail)}</small></button><button class="icon-button" data-remove-mark="${escapeHTML(mark.id)}" aria-label="删除书签">${icon("close")}</button></div>`,
       )
       .join("") || '<div class="empty-state">暂无书签</div>';
+  }
   const position = makePosition();
   $("bookmark-button").setAttribute(
     "aria-pressed",
@@ -1414,7 +1447,20 @@ function showToolbar(rectangle) {
     current.type !== "txt" ||
     !current.parseEnabled ||
     !Number.isFinite(currentSelection.position?.sourceOffset);
-  $("selection-more-toggle").hidden = $("chapter-start").hidden && $("pin-selection").hidden && $("lookup-selection").hidden;
+  const order = bar.dataset.content === "word"
+    ? ["translate-selection", "copy-selection", "ask-selection"]
+    : currentSelection.kind !== "text"
+      ? ["ask-selection", "save-selection", "copy-selection", "copy-image"]
+      : current.shelf === "学习"
+        ? ["ask-selection", "search-selection", "save-selection"]
+        : ["translate-selection", "ask-selection", "save-selection"];
+  const actions = ["copy-selection", "copy-image", "ask-selection", "translate-selection", "search-selection", "save-selection"];
+  const primary = order.filter(id => !$(id).hidden).slice(0, 3);
+  const more = $("selection-more-toggle");
+  const menu = $("selection-more-menu");
+  for (const id of actions) if (!primary.includes(id)) menu.insertBefore($(id), $("save-selection-note"));
+  for (const id of primary) bar.insertBefore($(id), more);
+  more.hidden = ![...menu.children].some(button => !button.hidden);
   $("copy-label").textContent =
     currentSelection.format === "latex"
       ? "复制 LaTeX"
@@ -1424,7 +1470,11 @@ function showToolbar(rectangle) {
           ? "复制表格"
           : "复制";
   bar.style.left = `${Math.max(7, Math.min(innerWidth - bar.offsetWidth - 7, rectangle.left + rectangle.width / 2 - bar.offsetWidth / 2))}px`;
-  bar.style.top = `${Math.max(7, Math.min(innerHeight - bar.offsetHeight - 38, rectangle.bottom + 8))}px`;
+  const viewport = $("reading-viewport").getBoundingClientRect();
+  const top = Math.max(8, viewport.top), bottom = Math.min(innerHeight - 8, viewport.bottom);
+  const above = rectangle.top - bar.offsetHeight - 8;
+  const below = rectangle.bottom + 8;
+  bar.style.top = `${Math.max(top, Math.min(bottom - bar.offsetHeight, above >= top ? above : below))}px`;
 }
 function refreshSelectionToolbar() {
   if (currentSelection) revealReaderTools();
@@ -2392,9 +2442,9 @@ async function renderPdf(position, revision) {
   updateProgress();
 }
 
-function bookResourceRoot() {
+function bookResourceRoot(book = current) {
   return (
-    new URL(current.chapters[0].url, window.location).pathname.split(
+    new URL(book.chapters[0].url, window.location).pathname.split(
       "/content/",
     )[0] + "/content/"
   );
@@ -2586,7 +2636,7 @@ async function styleEpub() {
   ])
     doc.documentElement.style.setProperty(key, colors.getPropertyValue(key));
   const fixed = current.layout === "pre-paginated";
-  style.textContent = `.reader-flow{font:inherit;color:inherit;}.reader-flow :is(img,svg,table,figure){break-inside:avoid;}.reader-flow :is(h1,h2,h3,h4){break-after:avoid;}html{height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;background:${colors.getPropertyValue("--paper")}!important;color:${colors.getPropertyValue("--ink")}!important;font-size:${actualSize()}px!important;}body{height:auto!important;min-height:0!important;margin:0!important;padding:${padding}!important;box-sizing:border-box!important;font-family:${fontFamilies[prefs.enFont]},${fontFamilies[prefs.zhFont]},serif!important;font-size:${actualSize()}px!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;overflow-wrap:break-word!important;color:${colors.getPropertyValue("--ink")}!important;background:${colors.getPropertyValue("--paper")}!important;}img{max-width:100%!important;}svg[viewBox][height="100%"]{height:auto!important;max-width:100%!important;}p{font-family:inherit!important;line-height:${palm ? 1.65 : prefs.lineHeight}!important;margin-bottom:${prefs.paragraphSpace}em!important;}table{max-width:100%;}a{color:${colors.getPropertyValue("--accent")};} [data-reader-selected]{outline:2px solid ${colors.getPropertyValue("--accent")};outline-offset:3px;}::selection{background:var(--selection);}${prefs.theme === "night" ? "body :is(p,span,div,h1,h2,h3,h4,li,blockquote){color:inherit!important;background-color:transparent!important;}" : ""}${palm ? "h1{font-size:1.25em!important;}h2{font-size:1.15em!important;}h3{font-size:1.08em!important;}" : ""}${fixed ? "body{padding:0!important;}" : ""}${readingMode() === "pages" ? `html,body{width:100%!important;height:100%!important;padding:0!important;}#reader-flow{font:inherit;}.reader-flow :is(img,svg){max-height:${Math.max(80, $("reading-viewport").clientHeight - (palm ? 90 : 160))}px!important;object-fit:contain;}` : ""}`;
+  style.textContent = `.reader-flow{font:inherit;color:inherit;}.reader-flow :is(img,svg,table,figure){break-inside:avoid;}.reader-flow :is(h1,h2,h3,h4){break-after:avoid;}html{height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;background:${colors.getPropertyValue("--paper")}!important;color:${colors.getPropertyValue("--ink")}!important;font-size:${actualSize()}px!important;}body{height:auto!important;min-height:0!important;margin:0!important;padding:${padding}!important;box-sizing:border-box!important;font-family:${fontFamilies[prefs.enFont]},${fontFamilies[prefs.zhFont]},serif!important;font-size:${actualSize()}px!important;line-height:${prefs.lineHeight}!important;overflow-wrap:break-word!important;color:${colors.getPropertyValue("--ink")}!important;background:${colors.getPropertyValue("--paper")}!important;}img{max-width:100%!important;}svg[viewBox][height="100%"]{height:auto!important;max-width:100%!important;}p{font-family:inherit!important;line-height:${prefs.lineHeight}!important;margin-bottom:${prefs.paragraphSpace}em!important;}table{max-width:100%;}a{color:${colors.getPropertyValue("--accent")};} [data-reader-selected]{outline:2px solid ${colors.getPropertyValue("--accent")};outline-offset:3px;}::selection{background:${colors.getPropertyValue("--text-selection")}!important;color:${colors.getPropertyValue("--ink")}!important;}${prefs.theme === "night" ? "body :is(p,span,div,h1,h2,h3,h4,li,blockquote){color:inherit!important;background-color:transparent!important;}" : ""}${palm ? "h1{font-size:1.25em!important;}h2{font-size:1.15em!important;}h3{font-size:1.08em!important;}" : ""}${fixed ? "body{padding:0!important;}" : ""}${readingMode() === "pages" ? `html,body{width:100%!important;height:100%!important;padding:0!important;}#reader-flow{font:inherit;}.reader-flow :is(img,svg){max-height:${Math.max(80, $("reading-viewport").clientHeight - (palm ? 90 : 160))}px!important;object-fit:contain;}` : ""}`;
   await Promise.race([
     Promise.all(
       [prefs.zhFont, prefs.enFont].map((key) =>
@@ -2909,7 +2959,6 @@ async function renderCurrent(position) {
   readerZoom.update();
   $("reading-viewport").setAttribute("aria-busy", "true");
   $("bookmark-button").disabled = true;
-  $("ai-open").disabled = true;
   $("knowledge-open").disabled = true;
   retainedAnchor = position.anchor || null;
   pendingAnchor = null;
@@ -3004,7 +3053,6 @@ async function renderCurrent(position) {
     if (revision === renderRevision) {
       $("reading-viewport").setAttribute("aria-busy", "false");
       updateBookmarkBusy();
-      $("ai-open").disabled = !readerReady;
       $("knowledge-open").disabled = !readerReady;
     }
   }
@@ -3181,7 +3229,10 @@ function setTocOpen(open, reflow = true) {
 async function readBook(id, sourcePosition) {
   const book = books.find((book) => book.id === id);
   if (!book) return;
-  if (current?.id !== book.id) comparison?.close(false);
+  if (current?.id !== book.id) {
+    comparison?.close(false);
+    margins.close(false, false);
+  }
   savePosition();
   current = book;
   revealReaderTools();
@@ -3212,6 +3263,7 @@ function showRoute(sourcePosition) {
         : "library";
   if (route === "reader" && next !== "reader") {
     comparison?.close(false);
+    margins.close(false, false);
     if (current?.type !== "pdf" && readerReady) appearanceSample = { title: chapterTitle(), text: readingElements().map(element => element.textContent.trim()).filter(Boolean).join("\n\n").slice(0, 640) };
     leavePdfPreparation();
     savePosition(true);
@@ -3605,7 +3657,7 @@ function validatePreferences(input) {
   ])
     output[key] = clamp(output[key], min, max);
   for (const key of ["pinnedTool1", "pinnedTool2"])
-    if (!["auto", "none", "palm", "process", "focus"].includes(output[key])) output[key] = defaults[key];
+    if (!["auto", "none", "palm", "process", "focus", "comparison"].includes(output[key])) output[key] = defaults[key];
   return output;
 }
 
@@ -3617,11 +3669,11 @@ function handleKeydown(event) {
     event.target.matches?.("input,textarea,select") ||
     event.target.isContentEditable;
   if (event.key === "Escape") {
-    if (document.querySelector("dialog[open]")) return;
+    if (document.querySelector("dialog[open]:not(.is-docked)")) return;
+    if (margins.active) { margins.close(); return; }
     if (route === "library") {
       $("library-search").value = "";
       shelfFilter = "all";
-let appearanceSample;
       renderLibrary();
     }
     setTocOpen(false);
@@ -3632,7 +3684,7 @@ let appearanceSample;
     if ($("reader").classList.contains("focused")) setFocus(false);
     return;
   }
-  if (document.querySelector("dialog[open]")) return;
+  if (document.querySelector("dialog[open]:not(.is-docked)")) return;
   if (
     (event.metaKey || event.ctrlKey) &&
     !event.altKey &&
@@ -3839,6 +3891,28 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
+  const inherit = event.target.closest("[data-inherit]");
+  if (inherit && current && route === "reader" && !reference) {
+    const book = current, settings = $("quick-settings");
+    settings.inert = true;
+    try {
+      await postState({ bookPrefs: { [book.id]: null } });
+      delete bookPrefs[book.id];
+      if (current?.id === book.id && route === "reader") {
+        const position = makePosition();
+        prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, book, true));
+        applyPreferences();
+        setTocOpen(prefs.tocOpen && innerWidth >= 1100 && !palm && !comparison?.open, false);
+        renderSettings();
+        await renderCurrent(position);
+        settings.inert = false;
+        settings.querySelector("select")?.focus();
+      }
+    } catch (error) {
+      toast(error.message, { kind: "error" });
+    } finally { settings.inert = false; }
+    return;
+  }
   const size = event.target.closest("[data-window-size]");
   if (size && native) {
     window.webkit.messageHandlers.readerNative.postMessage({
@@ -3905,7 +3979,6 @@ $("empty-action").onclick = () => {
   else {
     $("library-search").value = "";
     shelfFilter = "all";
-let appearanceSample;
     renderLibrary();
     $("library-search").focus();
   }
@@ -4030,6 +4103,7 @@ function setReaderSettingsOpen(open) {
   $("reader-settings").hidden = !open;
   $("reader-settings-open").setAttribute("aria-expanded", String(open));
   if (open) {
+    margins.close(false, false);
     setTocOpen(false);
     renderSettings();
     $("reader-settings-close").focus();
@@ -4090,10 +4164,20 @@ $("palm-footer").hidden = !palm;
 watchSelection(document);
 $("selection-toolbar").onmousedown = (event) => event.preventDefault();
 $("selection-more-menu").onmousedown = event => event.preventDefault();
-$("selection-more-toggle").onclick = () => {
+$("selection-more-menu").addEventListener("toggle", event => {
+  if (event.newState !== "open") return;
   const box = $("selection-more-toggle").getBoundingClientRect();
-  $("selection-more-menu").style.left = Math.max(8, Math.min(innerWidth - 200, box.right - 192)) + "px";
-  $("selection-more-menu").style.top = (box.top > 120 ? box.top - 112 : box.bottom + 8) + "px";
+  const menu = event.currentTarget;
+  menu.style.left = Math.max(8, Math.min(innerWidth - menu.offsetWidth - 8, box.right - menu.offsetWidth)) + "px";
+  menu.style.top = (box.top >= menu.offsetHeight + 16 ? box.top - menu.offsetHeight - 8 : Math.min(box.bottom + 8, innerHeight - menu.offsetHeight - 8)) + "px";
+});
+$("selection-more-menu").addEventListener("click", event => {
+  if (event.target.closest("button")) $("selection-more-menu").hidePopover();
+});
+$("save-selection-note").onclick = () => {
+  if (!currentSelection) return;
+  const context = tutorContext(currentSelection);
+  if (context) margins.save(context, current);
 };
 $("copy-selection").onclick = () =>
   currentSelection && copyText(currentSelection.text);
@@ -4138,7 +4222,7 @@ $("chapter-start").onclick = () => {
 };
 $("knowledge-open").onclick = () => bookSearch.open();
 $("search-selection").onclick = () => {
-  if (currentSelection)
+  if (currentSelection?.text)
     bookSearch.open(sliceText(currentSelection.text, 0, 6000));
 };
 function tutorContext(selection = null) {
@@ -4278,6 +4362,37 @@ window.readerOpenTutorSource = async (book, position) => {
   await showRoute({ ...position, updatedAt: lastInput });
   if (readerReady) await savePosition(true);
 };
+window.readerOpenSourceLink = async raw => {
+  try {
+    if (typeof raw !== "string" || raw.length > 16000) throw new Error();
+    const url = new URL(raw);
+    if (url.protocol !== "yejian:" || url.host !== "source" || url.pathname || url.username || url.password) throw new Error();
+    const id = url.searchParams.get("book"), hash = url.searchParams.get("sha256");
+    const validHash = /^[0-9a-f]{64}$/.test(hash || "");
+    const book = books.find(item => item.id === id && (!validHash || item.sourceHash === hash))
+      || (validHash ? books.find(item => item.sourceHash === hash) : null);
+    if (!book) { toast("书库里找不到原书。", { kind: "warning" }); return; }
+    const input = JSON.parse(url.searchParams.get("position"));
+    if (!Number.isSafeInteger(input?.index) || input.index < 1 || input.index > count(book)) throw new Error();
+    const position = { index: input.index };
+    if (typeof input.top === "number" && input.top >= 0 && input.top <= 10000000) position.top = input.top;
+    if (book.type === "pdf" && typeof input.pdfY === "number" && input.pdfY >= 0 && input.pdfY <= 1) position.pdfY = input.pdfY;
+    if (book.type === "txt" && Number.isSafeInteger(input.sourceOffset) && input.sourceOffset >= 0) position.sourceOffset = input.sourceOffset;
+    if (book.type === "epub" && typeof input.fragment === "string" && input.fragment.length <= 1000) position.fragment = input.fragment;
+    if (book.type === "epub" && typeof input.resource === "string" && input.resource.length <= 3000) {
+      const resource = new URL(input.resource, window.location.href);
+      if (resource.origin === window.location.origin && resource.pathname.startsWith(bookResourceRoot(book)) && /\.x?html?$/i.test(resource.pathname))
+        position.resource = resource.pathname;
+    }
+    if (book.type !== "pdf" && Number.isSafeInteger(input.anchor?.index) && input.anchor.index >= 0) {
+      position.anchor = { index: input.anchor.index, quote: typeof input.anchor.quote === "string" ? input.anchor.quote.slice(0, 120) : "",
+        charOffset: Number.isSafeInteger(input.anchor.charOffset) ? Math.max(0, input.anchor.charOffset) : 0,
+        pixels: typeof input.anchor.pixels === "number" ? clamp(input.anchor.pixels, -10000, 10000) : 0 };
+      if (Number.isSafeInteger(input.anchor.sourceNode) && input.anchor.sourceNode >= 0) position.anchor.sourceNode = input.anchor.sourceNode;
+    }
+    await window.readerOpenTutorSource(book.id, position);
+  } catch { toast("原文链接无法打开。", { kind: "error" }); }
+};
 function askSelection() {
   if (!currentSelection) return;
   const context = tutorContext(currentSelection);
@@ -4330,24 +4445,14 @@ function translateSelection() {
   $("selection-toolbar").hidden = true;
 }
 $("translate-selection").onclick = translateSelection;
-$("translation-history-open").onclick = () => {
-  if (current) translator.open({ book: current.id }, null, true);
+$("reading-records").onclick = () => {
+  if (!current) return;
+  if (margins.active) margins.close();
+  else {
+    setReaderSettingsOpen(false);
+    margins.open(current);
+  }
 };
-$("ai-open").onclick = tutor.showHistory;
-$("records-bookmarks").onclick = () => { setTocOpen(true); $("bookmark-tab").click(); };
-document.querySelector("#reading-records summary").onclick = event => {
-  event.preventDefault();
-  if (current) margins.open(current);
-};
-$("reading-records").addEventListener("click", (event) => {
-  if (event.target.closest("button")) $("reading-records").open = false;
-});
-document.addEventListener("click", (event) => {
-  if (!event.target.closest("#reading-records")) $("reading-records").open = false;
-});
-$("reading-records").addEventListener("keydown", (event) => {
-  if (event.key === "Escape") { $("reading-records").open = false; document.querySelector("#reading-records summary").focus(); event.stopPropagation(); }
-});
 if (palm && native)
   document.querySelector(".ai-settings-link").onclick = (event) => {
     event.preventDefault();
@@ -4412,6 +4517,7 @@ window.addEventListener("palm-pin", (event) => {
 let resizeTimer;
 window.addEventListener("resize", () => {
   const anchor = lastAnchor || captureAnchor();
+  margins.adapt();
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(async () => {
     $("reader").classList.toggle("toc-docked", !$("reader-aside").hidden && innerWidth >= 1100 && !palm && !comparison?.open && !reference);
@@ -4668,7 +4774,12 @@ try {
   renderSettings();
   renderJobs();
   $("startup").hidden = true;
-  await showRoute();
+  if (reference) {
+    route = "reader";
+    document.body.dataset.view = "reader";
+    $("workspace").hidden = true;
+    $("reader").hidden = false;
+  } else await showRoute();
   if (reference) window.parent.postMessage({type:"page-between-reference-ready"}, window.location.origin);
   else window.webkit?.messageHandlers?.appNative?.postMessage({ action: "ready" });
   setInterval(updateTimer, 1000);

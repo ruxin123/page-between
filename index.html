@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.58" />
+    <link rel="stylesheet" href="/layout.css?v=2.59" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -322,28 +322,7 @@
         </div>
         <div class="reader-actions">
           <div id="reader-pinned-tools" class="reader-pinned-tools"></div>
-          <details id="reading-records" class="reading-records">
-            <summary class="icon-button" aria-label="页边与阅读记录" title="页边"><i data-icon="history"></i></summary>
-            <div class="reading-records-menu">
-              <button id="records-bookmarks"><i data-icon="bookmark"></i>书签</button>
-          <button
-            class="icon-button"
-            id="ai-open"
-            aria-label="书内 AI 答疑"
-            title="书内答疑"
-          >
-            <i data-icon="ask"></i>答疑记录
-          </button>
-          <button
-            id="translation-history-open"
-            class="icon-button"
-            title="本书翻译收藏"
-            aria-label="本书翻译收藏"
-          >
-            <i data-icon="translate"></i>翻译收藏
-          </button>
-            </div>
-          </details>
+          <button id="reading-records" aria-label="页边" aria-controls="reading-margins" aria-expanded="false"><i data-icon="history"></i><span>页边</span></button>
 
           <button
             class="icon-button"
@@ -595,6 +574,7 @@
       <button id="selection-more-toggle" popovertarget="selection-more-menu" aria-label="更多选段操作">⋯</button>
     </div>
     <div id="selection-more-menu" popover>
+      <button id="save-selection-note" type="button">保存并记一句</button>
       <button id="lookup-selection" type="button" hidden>本机词典</button>
       <button id="pin-selection" type="button">固定引用</button>
       <button id="chapter-start" hidden><i data-icon="toc"></i>从这里分章</button>
@@ -693,24 +673,27 @@
               </button>
             </div>
           </form>
-          <div class="translation-languages">
-            <label
-              ><span class="visually-hidden">原文语言</span
-              ><select id="translation-from" aria-label="原文语言"></select
-            ></label>
-            <button
-              id="translation-swap"
-              class="icon-button"
-              title="交换语言"
-              aria-label="交换语言"
-            >
-              <i data-icon="swap"></i>
-            </button>
-            <label
-              ><span class="visually-hidden">译文语言</span
-              ><select id="translation-to" aria-label="译文语言"></select
-            ></label>
-          </div>
+          <details id="translation-language-options" class="translation-language-options" open>
+            <summary>语言</summary>
+            <div class="translation-languages">
+              <label
+                ><span class="visually-hidden">原文语言</span
+                ><select id="translation-from" aria-label="原文语言"></select
+              ></label>
+              <button
+                id="translation-swap"
+                class="icon-button"
+                title="交换语言"
+                aria-label="交换语言"
+              >
+                <i data-icon="swap"></i>
+              </button>
+              <label
+                ><span class="visually-hidden">译文语言</span
+                ><select id="translation-to" aria-label="译文语言"></select
+              ></label>
+            </div>
+          </details>
           <section class="translation-result-card">
             <div class="translation-provider">
               <label for="translation-provider" class="visually-hidden"
@@ -1221,6 +1204,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.58"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.59"></script>
   </body>
 </html>

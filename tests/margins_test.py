@@ -145,3 +145,57 @@ class Margins(unittest.TestCase):
                 self.assertIn('页边.md',archive.namelist())
                 self.assertEqual(len([name for name in archive.namelist() if name.startswith('images/')]),1)
         margins.validate(self.book,self.root/'books')
+
+    def test_related_saves_preserve_source_and_complete_conversation(self):
+        messages = [{"role": "user", "content": "Why does this hold?"},
+                    {"role": "assistant", "content": "Use the definition.", "status": "generating",
+                     "references": [{"citation": "[1] Definition", "text": "The condition."}]}]
+        translated = {"id": "translated", "source": self.context, "text": "Edited $x$", "translation": "译文"}
+        payload = {"id": "a" * 32, "operation": "save",
+                   "source": {**self.context, "quote": "Client text"}, "related": {"type": "ai", "id": "question"}}
+        with patch("ai_tutor.conversation", return_value={"source": self.context, "messages": messages}):
+            with self.assertRaisesRegex(ValueError, "结束"):
+                margins.change(self.book, payload)
+            self.assertEqual(margins.listing(self.book), [])
+            messages[-1]["status"] = "ready"
+            snapshot = margins.change(self.book, payload)
+        for value in ("Why does this hold?", "Use the definition.", "The condition."):
+            self.assertIn(value, snapshot["answer"])
+        self.assertEqual(snapshot["source"]["quote"], self.context["quote"])
+        with patch("translation.records", return_value={"items": [translated]}):
+            saved = margins.change(self.book, {**payload, "id": "b" * 32, "related": {"type": "translation", "id": translated["id"]}})
+        self.assertEqual(saved["source"]["quote"], self.context["quote"])
+        self.assertEqual(saved["source"]["position"], self.context["position"])
+        self.assertEqual(saved["translationInput"], translated["text"])
+
+    def test_all_record_types_export_multiple_images_and_reopen_links(self):
+        from urllib.parse import parse_qs, urlsplit
+        urls = []
+        for color in ("white", "black"):
+            with Image.new("RGB", (40, 20), color) as image:
+                body = io.BytesIO()
+                image.save(body, format="PNG")
+            urls.append(book_images.save_image(self.book, "data:image/png;base64," + base64.b64encode(body.getvalue()).decode()))
+        book = {**self.book, "sourceHash": "d" * 64}
+        source = {**self.context, "transferImages": [{"url": url, "raw": ""} for url in urls], "citation": "Original"}
+        translated = {"id": "translated", "source": source, "text": self.context["quote"], "translation": "中文译文"}
+        conversation = {"id": "question", "book": book["id"], "source": source, "messages": [
+            {"role": "user", "content": "A test question"}, {"role": "assistant", "content": "A test answer"}]}
+        state = {"bookmarks": [{"book": book["id"], "label": "First page", "position": {"index": 1}}]}
+        with patch("translation.records", return_value={"items": [translated]}), patch("ai_tutor.records", return_value={"conversations": [conversation]}):
+            exported = margins.export(book, state, "json")
+            result = load(self.root / "cache" / "exports" / exported["download"].split("/")[-1], {})
+            for key in ("translations", "conversations"):
+                self.assertEqual(len(result[key][0]["source"]["transferImages"]), 2)
+                self.assertTrue(all(image["url"].startswith("data:image/png;base64,") for image in result[key][0]["source"]["transferImages"]))
+            mark_url = urlsplit(result["bookmarks"][0]["sourceLink"])
+            self.assertEqual((mark_url.scheme, mark_url.netloc), ("yejian", "source"))
+            self.assertEqual(parse_qs(mark_url.query)["sha256"], ["d" * 64])
+            exported = margins.export(book, state, "markdown")
+            with zipfile.ZipFile(self.root / "cache" / "exports" / exported["download"].split("/")[-1]) as archive:
+                markdown = archive.read("页边.md").decode()
+                self.assertIn("A test question", markdown)
+                self.assertIn("中文译文", markdown)
+                self.assertIn("First page", markdown)
+                self.assertEqual(len([name for name in archive.namelist() if name.startswith("images/")]), 2)
+                self.assertEqual(markdown.count("![原图]"), 4)

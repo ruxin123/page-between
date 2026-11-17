@@ -54,7 +54,7 @@ def validate(data):
                 raise ValueError('迁移记录标识或时间无效。')
             seen.add(item['id']); source(item.get('source'))
             if key == 'excerpts':
-                if not _text(item.get('note'), 2000) or not _text(item.get('answer') or '', 100000) or not _text(item.get('translation') or '', 100000) or (item.get('deletedAt') is not None and not _date(item['deletedAt'])):
+                if not _text(item.get('note'), 2000) or not _text(item.get('answer') or '', 100000) or not _text(item.get('translation') or '', 100000) or not _text(item.get('translationInput') or '', 12000) or (item.get('deletedAt') is not None and not _date(item['deletedAt'])):
                     raise ValueError('迁移笔记无效。')
             elif key == 'translations':
                 if not all(_text(item.get(k), n) for k, n in (('text',12000), ('translation',20000), ('explanation',3000), ('model',200), ('sourceLanguage',40), ('targetLanguage',40), ('detectedLanguage',40))) or item.get('provider') not in {'google','ai'}:
@@ -153,7 +153,7 @@ def export_book(book, state):
         return result
     with book_margins.LOCK:
         for item in book_margins.records(book)['items']:
-            data['excerpts'].append({k:copy.deepcopy(item[k]) for k in ('id','note','answer','translation','createdAt','deletedAt') if k in item} | {'source':source(item['source'])})
+            data['excerpts'].append({k:copy.deepcopy(item[k]) for k in ('id','note','answer','translation','translationInput','createdAt','deletedAt') if k in item} | {'source':source(item['source'])})
     with translation.LOCK:
         for item in translation.records(book)['items']:
             data['translations'].append({k:item.get(k,'') for k in ('id','text','translation','explanation','provider','model','sourceLanguage','targetLanguage','detectedLanguage')} | {'source':source(item['source']), 'createdAt':item['createdAt']})

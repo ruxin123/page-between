@@ -612,6 +612,15 @@ class Handler(SimpleHTTPRequestHandler):
                     if not item:
                         raise ValueError("找不到这条页边记录。")
                     return self.json({"item": item, "html": book_margins.preview(book, item), "translationHtml": ai_tutor.answer_html(item.get("translation", ""), source=True), "answerHtml": ai_tutor.answer_html(item.get("answer", ""))})
+                if query.get("all") == ["1"]:
+                    state = load(DATA / "state.json", {})
+                    groups = {
+                        "excerpts": items,
+                        "bookmarks": [mark for mark in state.get("bookmarks", []) if mark.get("book") == book["id"]],
+                        "translations": translation.history(book),
+                        "conversations": ai_tutor.history(book["id"]),
+                    }
+                    return self.json({"items": book_margins.timeline(book, groups)})
                 return self.json({"items": items})
             if route.path == "/api/translation/status":
                 return self.json(translation.status())
@@ -622,7 +631,8 @@ class Handler(SimpleHTTPRequestHandler):
                 if not book:
                     raise ValueError("找不到这本书。")
                 if route.path.endswith("/item"):
-                    return self.json(translation.lookup(book, query.get("id", [""])[0]))
+                    item = translation.lookup(book, query.get("id", [""])[0])
+                    return self.json({**item, "sourceHtml": book_margins.preview(book, item)} if query.get("source") == ["1"] else item)
                 return self.json(
                     {"items": translation.history(book)}
                     if route.path.endswith("/history")
@@ -636,7 +646,7 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("找不到这本书。")
                 ident = query.get("id", [""])[0]
                 return self.json(
-                    {"conversation": ai_tutor.conversation(ident, book["id"])}
+                    (book_margins.conversation_detail(book, ident) if query.get("source") == ["1"] else {"conversation": ai_tutor.conversation(ident, book["id"])})
                     if ident
                     else {"conversations": ai_tutor.history(book["id"])}
                 )
@@ -1254,8 +1264,11 @@ class Handler(SimpleHTTPRequestHandler):
                     if isinstance(payload.get("prefs"), dict):
                         state.setdefault("prefs", {}).update(payload["prefs"])
                     for ident, preferences in payload.get("bookPrefs", {}).items():
-                        if isinstance(preferences, dict) and book_for(ident):
-                            state.setdefault("bookPrefs", {}).setdefault(ident, {}).update(preferences)
+                        if book_for(ident):
+                            if preferences is None:
+                                state.get("bookPrefs", {}).pop(ident, None)
+                            elif isinstance(preferences, dict):
+                                state.setdefault("bookPrefs", {}).setdefault(ident, {}).update(preferences)
                     for ident, position in payload.get("positions", {}).items():
                         if isinstance(position, dict) and position.get(
                             "updatedAt", 0

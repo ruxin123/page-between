@@ -218,6 +218,12 @@ def build(demo=False):
             }
         ],
     }
+    if not demo:
+        info["CFBundleURLTypes"] = [{
+            "CFBundleURLName": "local.pagebetween.source",
+            "CFBundleTypeRole": "Viewer",
+            "CFBundleURLSchemes": ["yejian"],
+        }]
     (contents / "Info.plist").write_bytes(plistlib.dumps(info))
     notices = contents / "Resources/Notices"
     notices.mkdir()

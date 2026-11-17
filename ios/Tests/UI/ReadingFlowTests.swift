@@ -217,17 +217,21 @@ final class ReadingFlowTests: XCTestCase {
         app.buttons["保存到页边"].tap()
         app.buttons["完成"].tap()
         app.buttons["reader.more"].tap(); app.buttons["页边"].tap()
-        let excerpt = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "excerpt.row.")).firstMatch
-        XCTAssertTrue(excerpt.waitForExistence(timeout: 10), app.debugDescription)
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "excerpt.row.", "原文图像"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        guard let newest = rows.allElementsBoundByIndex.last else { return XCTFail("找不到新保存的原图选段") }
+        let excerpt = app.buttons[newest.identifier]
         excerpt.tap()
-        app.buttons["记一句"].tap()
+        let edit = app.buttons["记一句"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        edit.tap()
         let note = app.descendants(matching: .any).matching(identifier: "excerpt.note").firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 10)); note.tap(); note.typeText("Original thought")
         app.buttons["保存笔记"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Original thought")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(excerpt.waitForExistence(timeout: 10)); excerpt.tap()
         XCTAssertTrue(app.staticTexts["Original thought"].waitForExistence(timeout: 10))
-        app.buttons["更多"].tap(); app.buttons["删除"].tap()
+        app.navigationBars["选段"].buttons["更多"].tap(); app.buttons["删除"].tap()
         XCTAssertTrue(app.buttons["撤销删除"].waitForExistence(timeout: 10)); app.buttons["撤销删除"].tap()
         XCTAssertTrue(excerpt.waitForExistence(timeout: 10))
         app.buttons["导出"].tap(); app.buttons["JSON"].tap()

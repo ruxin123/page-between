@@ -35,6 +35,7 @@ async function api(path, body) {
         textMode: "pages",
         palmMode: "pages",
       },
+      bookPrefs: { "demo-a": null, "demo-b": null, "demo-c": null },
       positions: {
         "demo-c": { index: 2, pdfY: 0.3, updatedAt: Date.now() },
         "demo-a": { index: 1, page: 0, updatedAt: Date.now() },
@@ -54,7 +55,7 @@ async function api(path, body) {
           document
             .querySelector("#reading-viewport")
             .getAttribute("aria-busy") === "false" &&
-          !document.querySelector("#ai-open").disabled,
+          !document.querySelector("#knowledge-open").disabled,
       );
     const set = async (value, root = "#reader-zoom") => {
       await page.locator(root + " input").fill(value + "%");
@@ -134,7 +135,8 @@ async function api(path, body) {
     checks++;
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.waitForFunction(
-      () => document.querySelector(".pdf-page").offsetWidth < 1100,
+      (previousWidth) => document.querySelector(".pdf-page").offsetWidth < previousWidth,
+      fit.width,
     );
     await ready();
     fit = await fits();
@@ -194,6 +196,7 @@ async function api(path, body) {
     const saved = (await api("/api/state")).positions["demo-c"];
     assert(Math.abs(saved.pdfY - 0.3) < 0.025, JSON.stringify(saved));
     checks++;
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.reload();
     await ready();
     assert.equal(await page.locator("#reader-zoom input").inputValue(), "125%");
@@ -243,6 +246,18 @@ c.setPageSize((900,600));c.drawString(60,500,'Original landscape page');c.showPa
         .evaluate((n) => n.offsetWidth),
       800,
     );
+    checks++;
+    await page.reload();
+    await ready();
+    const opened = await fits();
+    assert(Math.abs(opened.width - opened.availableWidth) < 2);
+    assert.equal(
+      await page.locator('.pdf-page[data-page="2"]').evaluate((n) => n.offsetWidth),
+      opened.width,
+      "Each page fits the reading area when the saved zoom overflows",
+    );
+    assert.equal(await page.locator("#page-label").getAttribute("data-chapter"), "2");
+    assert.equal((await api("/api/state")).bookPrefs[imported.book.id].pdfZoom, 100);
     checks++;
     for (const [id, epub] of [
       ["demo-b", false],
@@ -358,6 +373,9 @@ c.setPageSize((900,600));c.drawString(60,500,'Original landscape page');c.showPa
   } finally {
     await browser.close();
     await api("/api/state", {
+      bookPrefs: Object.fromEntries(
+        ["demo-a", "demo-b", "demo-c"].map((id) => [id, old.bookPrefs?.[id] || null]),
+      ),
       prefs: {
         ...old.prefs,
         pdfZoomMode: old.prefs.pdfZoomMode || "legacy",

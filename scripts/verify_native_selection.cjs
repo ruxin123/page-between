@@ -67,15 +67,19 @@ c.save();import sys;sys.stdout.buffer.write(b.getvalue())
         });
         page.on("pageerror", (e) => failures.push(e.message));
         await page.goto(base + "/#/read/" + book.id);
-        await page.waitForFunction(
+        const ready = () => page.waitForFunction(
           () =>
             document
               .querySelector("#reading-viewport")
               ?.getAttribute("aria-busy") === "false" &&
-            !document.querySelector("#ai-open").disabled &&
+            !document.querySelector("#knowledge-open")?.disabled &&
             document.querySelector(".textLayer[data-pdf-native]"),
         );
-        await page.locator("#toc-close").click();
+        await ready();
+        if (await page.locator("#toc-close").isVisible()) {
+          await page.locator("#toc-close").click();
+          await ready();
+        }
         const initial = await page.evaluate(async () => {
           const root = document.querySelector('.pdf-page[data-page="1"]'),
             layer = root.querySelector(".textLayer");

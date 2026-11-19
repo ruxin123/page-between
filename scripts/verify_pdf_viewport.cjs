@@ -36,11 +36,69 @@ c.save();sys.stdout.buffer.write(b.getvalue())
 `,
   ]);
 }
+
+async function checkNextScan(browser) {
+  const scans = execFileSync(process.env.PYTHON || "python3", ["-c", `
+import io,sys
+from PIL import Image, ImageDraw, ImageFont
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+output=io.BytesIO(); c=canvas.Canvas(output,pagesize=(600,800),invariant=1)
+for number in range(1,4):
+    image=Image.new('RGB',(600,800),'white')
+    ImageDraw.Draw(image).text((60,36), 'Original scanned page '+str(number), fill='black', font=ImageFont.load_default(size=20))
+    c.bookmarkPage(str(number)); c.addOutlineEntry('Scan '+str(number),str(number))
+    c.drawImage(ImageReader(image),0,0,width=600,height=800); c.showPage()
+c.save(); sys.stdout.buffer.write(output.getvalue())
+`]);
+  const response = await fetch(base + "/api/import?name=original-next-scan.pdf&parse=1", {
+    method: "POST", body: scans,
+  });
+  assert(response.ok);
+  const { book } = await response.json();
+  await api("/api/state", {
+    bookPrefs: { [book.id]: { pdfMode: "scroll", pdfZoom: 100, tocOpen: false } },
+    positions: { [book.id]: { index: 1, top: 0, updatedAt: Date.now() } },
+  });
+  const p = await browser.newPage({ viewport: { width: 1100, height: 740 } });
+  try {
+    const requests = [];
+    await p.route("**/api/ocr?*", route => {
+      const page = Number(new URL(route.request().url()).searchParams.get("page"));
+      requests.push(page);
+      return route.fulfill({ json: { engine: "apple-vision", lines: [
+        { text: `Original scanned page ${page}`, bbox: [.1, .045, .53, .075] },
+      ] } });
+    });
+    await p.goto(base + "/#/read/" + book.id);
+    const next = p.locator('.pdf-page[data-page="2"]');
+    await next.locator('.textLayer span').waitFor({ state: 'attached', timeout: 8000 });
+    assert.deepEqual(requests, [1, 2], "Mount only the current and next text layers while page two is offscreen");
+    const view = p.locator("#reading-viewport");
+    await view.evaluate(el => {
+      const next = el.querySelector('[data-page="2"]').getBoundingClientRect();
+      const bottom = el.getBoundingClientRect().bottom;
+      if (next.top <= bottom) throw new Error("Page 2 should start below the viewport");
+      el.scrollTop += next.top - bottom + 150;
+    });
+    assert.equal(await p.locator("#page-label").getAttribute("data-chapter"), "1");
+    const line = await next.locator('.textLayer span').boundingBox();
+    const bounds = await view.boundingBox();
+    assert(line.y + line.height < bounds.y + bounds.height);
+    await p.mouse.move(line.x + 1, line.y + line.height / 2);
+    await p.mouse.down();
+    await p.mouse.move(line.x + line.width - 1, line.y + line.height / 2, { steps: 8 });
+    await p.mouse.up();
+    assert.match(await p.evaluate(() => getSelection().toString()), /Original scanned page 2/);
+    assert.equal(await p.locator("#page-label").getAttribute("data-chapter"), "1");
+  } finally { await p.close(); }
+}
 (async () => {
   const state = await api("/api/state"),
     browser = await { chromium, webkit }[engine].launch();
   let cases = 0;
   try {
+    await checkNextScan(browser);
     for (const mixed of [false, true, "extreme"]) {
       const r = await fetch(
         base +
@@ -62,22 +120,19 @@ c.save();sys.stdout.buffer.write(b.getvalue())
       await p.goto(base + "/#/read/" + book.id);
       await p.waitForFunction(
         () =>
-          !document.querySelector("#ai-open").disabled &&
-          document
-            .querySelector("#reading-viewport")
-            .getAttribute("aria-busy") === "false",
+          document.querySelector("#reading-viewport")?.getAttribute("aria-busy") === "false" &&
+          !!document.querySelector(".pdf-bitmap")?.width,
       );
       async function allVisible() {
         await p.waitForFunction(() => {
           const view = document
             .querySelector("#reading-viewport")
             .getBoundingClientRect();
-          return [...document.querySelectorAll(".pdf-page")]
-            .filter((r) => {
-              const b = r.getBoundingClientRect();
-              return b.top < view.bottom && b.bottom > view.top;
-            })
-            .every(
+          const visible = [...document.querySelectorAll(".pdf-page")].filter((r) => {
+            const b = r.getBoundingClientRect();
+            return b.top < view.bottom && b.bottom > view.top;
+          });
+          return visible.length > 0 && visible.every(
               (r) =>
                 r.dataset.rendered === "ready" &&
                 r.querySelector("canvas")?.width,
@@ -127,6 +182,7 @@ c.save();sys.stdout.buffer.write(b.getvalue())
         shortPageJump: true,
         mixedSizeJump: true,
         resize: true,
+        nextScanSelectableEarly: true,
       }),
     );
   } finally {

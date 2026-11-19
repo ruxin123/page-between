@@ -44,7 +44,8 @@ enum UITestFixtures {
                 let svg = ##"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><rect width="160" height="80" fill="#537d68"/></svg>"##
                 let image = Data(svg.utf8).base64EncodedString()
                 let xml = ##"<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink"><description><title-info><book-title>Original FB2 sample</book-title><lang>en</lang></title-info></description><body><section id="first"><title><p>第一章 FB2 开篇</p></title><p>Original illustrated FB2 paragraph.</p><image l:href="#picture"/><p><a l:href="#second">Next chapter link</a></p><section><title><p>Nested FB2 section</p></title><p>Nested original content.</p></section></section><section id="second"><title><p>Second FB2 chapter</p></title><p>Second original FB2 paragraph.</p></section></body><binary id="picture" content-type="image/svg+xml">"## + image + "</binary></FictionBook>"
-                try Data(xml.utf8).write(to: fb2)
+                // Match the TXT fixture: a fresh source hash keeps repeated runs independent.
+                try Data((xml + "<!-- \(UUID().uuidString) -->").utf8).write(to: fb2)
                 store.reviewImport([text, fb2])
             } catch { store.error = error.localizedDescription }
         }

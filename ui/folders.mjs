@@ -11,7 +11,8 @@ export function createFolders({ post, refresh, changed }) {
   const host = document.getElementById("folder-navigation");
   const dialog = document.createElement("dialog");
   dialog.className = "folder-dialog";
-  dialog.innerHTML = `<form><h2></h2><label>名称<input name="name" maxlength="60" required autocomplete="off"></label><p role="alert"></p><div class="dialog-actions"><button type="button" data-cancel class="secondary-button">取消</button><button class="primary-button">保存</button></div></form>`;
+  dialog.setAttribute("aria-labelledby", "folder-dialog-title");
+  dialog.innerHTML = `<form><h2 id="folder-dialog-title"></h2><label>名称<input name="name" type="text" maxlength="60" required autocomplete="off" autofocus></label><p role="alert"></p><div class="dialog-footer"><button type="button" data-cancel class="secondary-button">取消</button><button class="primary-button">保存</button></div></form>`;
   document.body.append(dialog);
   let folders = [], selected = "", editing = null;
   const form = dialog.querySelector("form");
@@ -21,7 +22,7 @@ export function createFolders({ post, refresh, changed }) {
     dialog.querySelector("h2").textContent = folder ? "重命名文件夹" : "新建文件夹";
     form.elements.name.value = folder?.name || "";
     dialog.querySelector("[role=alert]").textContent = "";
-    dialog.showModal(); form.elements.name.focus();
+    dialog.showModal();
   }
   form.onsubmit = async event => {
     event.preventDefault();
@@ -30,6 +31,7 @@ export function createFolders({ post, refresh, changed }) {
       const result = await post("/api/folders", { operation: editing ? "rename" : "create", id: editing?.id, name: form.elements.name.value });
       if (!editing) selected = result.folders.at(-1).id;
       await refresh(); changed(); dialog.close();
+      host.querySelector(`[data-folder="${CSS.escape(selected)}"]`)?.focus();
     } catch (error) { dialog.querySelector("[role=alert]").textContent = error.message; }
     finally { save.disabled = false; }
   };

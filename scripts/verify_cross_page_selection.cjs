@@ -36,6 +36,11 @@ async function api(path, body) {
       viewport: { width: 1440, height: 1100 },
     });
     page.on("pageerror", (error) => errors.push(error.message));
+    let previewPayload;
+    page.on("request", request => {
+      if (new URL(request.url()).pathname === "/api/ai/preview")
+        previewPayload = request.postDataJSON();
+    });
     await page.addInitScript(() =>
       Object.defineProperty(navigator, "clipboard", {
         value: {
@@ -71,23 +76,21 @@ async function api(path, body) {
         );
       }, reverse);
       await page.locator("#selection-toolbar").waitFor({ state: "visible" });
+      if (!await page.locator("#copy-selection").isVisible())
+        await page.locator("#selection-more-toggle").click();
       await page.locator("#copy-selection").click();
       const raw = await page.evaluate(() => window.copiedRange);
       assert(raw.includes("x^2+1") && raw.includes(String.raw`\frac{a}{b}`));
       assert(raw.includes("name\tvalue\nfirst\t1\nsecond\t2"));
-      const request = page.waitForRequest(
-        (request) => new URL(request.url()).pathname === "/api/ai/preview",
-      );
       await page.locator("#ask-selection").click();
-      const payload = (await request).postDataJSON();
-      assert.equal(payload.position.index, 1);
-      assert.equal(payload.position.endIndex, 2);
-      assert.equal(payload.quote, raw);
       await page.waitForFunction(
         () =>
           document.querySelector("#ai-quote mfrac") &&
           document.querySelector("#ai-quote table"),
       );
+      assert.equal(previewPayload.position.index, 1);
+      assert.equal(previewPayload.position.endIndex, 2);
+      assert.equal(previewPayload.quote, raw);
       assert.equal(await page.locator("#ai-quote math").count(), 2);
       assert.equal(await page.locator("#ai-quote table tr").count(), 3);
       assert(

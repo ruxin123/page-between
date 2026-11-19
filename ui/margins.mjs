@@ -18,10 +18,10 @@ export function createMargins({ api, post, toast, openSource, layout, canDock, i
   dialog.innerHTML = `<header class="dialog-heading"><h2 id="margins-title">页边</h2><button class="icon-button" data-close aria-label="关闭页边">${icon("close")}</button></header>
     <div class="margins-tools"><select data-type aria-label="记录类型"><option value="">全部</option>${Object.entries(types).map(([key, label]) => `<option value="${key}">${label}</option>`).join("")}</select><select data-chapter aria-label="章节"></select><details><summary>导出</summary><div><button data-export="markdown">Markdown</button><button data-export="json">JSON</button><button data-export="pdf">注释 PDF</button></div></details></div>
     <div class="margin-undo" data-undo hidden><span>已删除选段</span><button class="secondary-button" data-restore>撤销</button></div>
-    <div data-list></div><section data-detail hidden></section><p role="status" data-status></p>`;
+    <div data-list></div><section data-detail hidden></section><p role="status" data-status></p><button class="secondary-button" data-retry hidden>重试</button>`;
   document.getElementById("reader").append(dialog);
   const $ = selector => dialog.querySelector(selector);
-  let book, items = [], generation = 0, trigger, docked = false;
+  let book, items = [], generation = 0, trigger, detailRow, docked = false;
   const status = message => { $("[data-status]").textContent = message; };
   function close(reflow = true, returnFocus = true) {
     if (!dialog.open) return;
@@ -57,26 +57,45 @@ export function createMargins({ api, post, toast, openSource, layout, canDock, i
     $("[data-list]").hidden = false;
     $(".margins-tools").hidden = false;
     status("");
-    if (focus) $("[data-list] button")?.focus();
+    if (focus) {
+      const row = $(`[data-list] [data-row="${items.indexOf(detailRow)}"]`);
+      (row || $("[data-list] button") || $("[data-close]")).focus();
+    }
+    detailRow = null;
   }
   async function load() {
     back();
-    const version = ++generation, chapter = $("[data-chapter]").value;
+    const version = ++generation;
+    const chapterPicker = $("[data-chapter]"), typePicker = $("[data-type]");
+    const chapter = chapterPicker.value, retry = $("[data-retry]");
+    const retryHadFocus = document.activeElement === retry;
+    const restoreRetryFocus = () => retryHadFocus &&
+      (document.activeElement === document.body || document.activeElement === dialog);
+    items = [];
+    $("[data-list]").replaceChildren();
+    chapterPicker.disabled = typePicker.disabled = true;
+    retry.hidden = true;
     status("正在读取…");
     try {
       const result = await api("/api/margins?all=1&book=" + encodeURIComponent(book.id));
       if (version !== generation || !dialog.open) return;
       items = result.items;
       const chapters = new Map(items.map(item => [item.chapterKey, item.chapter]));
-      $("[data-chapter]").innerHTML = '<option value="">所有章节</option>' + [...chapters].map(([key, title]) => `<option value="${esc(key)}">${esc(title)}</option>`).join("");
-      $("[data-chapter]").disabled = !chapters.size;
-      if (chapters.has(chapter)) $("[data-chapter]").value = chapter;
+      chapterPicker.innerHTML = '<option value="">所有章节</option>' + [...chapters].map(([key, title]) => `<option value="${esc(key)}">${esc(title)}</option>`).join("");
+      chapterPicker.disabled = !chapters.size;
+      typePicker.disabled = !items.length;
+      if (chapters.has(chapter)) chapterPicker.value = chapter;
       status("");
       draw();
+      if (restoreRetryFocus()) ($("[data-list] button") || $("[data-close]")).focus();
     } catch (error) {
-      if (version === generation) status(error.message);
+      if (version !== generation || !dialog.open) return;
+      status(error.message);
+      retry.hidden = false;
+      if (restoreRetryFocus()) retry.focus();
     }
   }
+  $("[data-retry]").onclick = load;
 
   async function show(item, edit = false) {
     const version = ++generation, type = item.recordType, bookID = book.id;
@@ -99,6 +118,7 @@ export function createMargins({ api, post, toast, openSource, layout, canDock, i
         message.role === "user" ? "提问" : message.status === "generating" ? "回答生成中" : "回答",
         (message.html || `<p>${esc(message.content)}</p>`) + (message.references || []).map(ref => `<button class="margin-source-ref" data-ref="${esc(JSON.stringify(ref.position))}">${esc(ref.citation)}</button>`).join("")
       )).join("");
+      detailRow = item;
       $("[data-detail]").hidden = false;
       $("[data-list]").hidden = true;
       $(".margins-tools").hidden = true;
@@ -186,6 +206,7 @@ export function createMargins({ api, post, toast, openSource, layout, canDock, i
     finally { button.disabled = false; }
   };
   async function open(value, type = "") {
+    if (value.id !== book?.id) $("[data-chapter]").value = "";
     book = value;
     $('[data-export="pdf"]').hidden = book.type !== "pdf";
     $("[data-undo]").hidden = true;

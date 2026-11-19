@@ -12,17 +12,22 @@ struct ExcerptsScreen: View {
         let type: RecordType
         let item: SavedExcerpt
         var id: String { type.rawValue + item.id.uuidString }
-        var locator: Locator? { try? Locator(jsonString: item.locator) }
-        var order: Double {
+        let order: Double
+        let chapterKey: String
+
+        init(type: RecordType, item: SavedExcerpt) {
+            self.type = type
+            self.item = item
+            let locator = try? Locator(jsonString: item.locator)
             if let locator, locator.mediaType.matches(.pdf) {
+                let page = locator.locations.position ?? 1
                 let y = locator.locations.fragments.first { $0.hasPrefix("y=") }.flatMap { Double($0.dropFirst(2)) } ?? 0
-                return Double(locator.locations.position ?? 1) + min(0.9999, max(0, y))
+                order = Double(page) + min(0.9999, max(0, y))
+                chapterKey = "pdf:" + String(page)
+            } else {
+                order = locator?.locations.totalProgression ?? locator?.locations.progression ?? 0
+                chapterKey = locator?.href.description ?? item.chapter
             }
-            return locator?.locations.totalProgression ?? locator?.locations.progression ?? 0
-        }
-        var chapterKey: String {
-            if locator?.mediaType.matches(.pdf) == true { return "pdf:" + String(locator?.locations.position ?? 1) }
-            return locator?.href.description ?? item.chapter
         }
     }
     private struct RecordGroup: Identifiable {

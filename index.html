@@ -10,7 +10,7 @@
     />
     <title>页间 · 书库</title>
     <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/layout.css?v=2.59" />
+    <link rel="stylesheet" href="/layout.css?v=2.60" />
   </head>
   <body data-theme="paper" data-view="library">
     <div id="startup" class="startup" role="status" aria-label="正在打开书库">
@@ -418,8 +418,16 @@
           <i data-icon="close"></i>
         </button>
       </header>
+      <button
+        class="focus-exit"
+        id="focus-exit"
+        aria-keyshortcuts="Escape"
+        title="退出专注 · Esc"
+        hidden
+      >
+        <i data-icon="focus" aria-hidden="true"></i>退出专注
+      </button>
       <div class="reader-stage">
-        <button id="toc-scrim" aria-label="关闭目录"></button>
         <div
           id="reading-viewport"
           class="reading-viewport"
@@ -449,9 +457,6 @@
           </div>
         </div>
         <div id="ocr-status" class="ocr-status" role="status" hidden></div>
-        <button class="focus-exit" id="focus-exit" hidden>
-          <i data-icon="focus"></i>退出专注 <kbd>Esc</kbd>
-        </button>
       </div>
       <footer class="reader-footer">
         <button
@@ -486,7 +491,7 @@
           <i data-icon="forward"></i>
         </button>
       </footer>
-      <aside
+      <dialog
         id="reader-aside"
         class="reader-aside"
         aria-label="目录与书签"
@@ -514,7 +519,7 @@
         <div id="bookmarks-list" class="bookmarks-list" hidden></div>
         <div id="toc-source" class="toc-source" role="status"></div>
         <button id="toc-edit" class="toc-edit" hidden>调整章节…</button>
-      </aside>
+      </dialog>
       <aside
         id="reader-settings"
         class="reader-settings"
@@ -759,9 +764,9 @@
         </section>
       </div>
     </aside>
-    <dialog id="knowledge-dialog" class="knowledge-dialog">
+    <dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-heading">
       <header class="aside-head">
-        <strong>书内检索与引用</strong
+        <strong id="knowledge-heading">书内检索与引用</strong
         ><button
           id="knowledge-close"
           class="icon-button"
@@ -866,10 +871,10 @@
       </div>
     </aside>
 
-    <dialog id="import-dialog" class="import-dialog">
+    <dialog id="import-dialog" class="import-dialog" aria-labelledby="import-heading">
       <form method="dialog" class="dialog-heading">
         <div>
-          <h2>导入书籍</h2>
+          <h2 id="import-heading">导入书籍</h2>
         </div>
         <button class="icon-button" aria-label="关闭导入">
           <i data-icon="close"></i>
@@ -916,9 +921,9 @@
         </button>
       </div>
     </dialog>
-    <dialog id="book-dialog" class="book-dialog">
+    <dialog id="book-dialog" class="book-dialog" aria-labelledby="book-heading">
       <form method="dialog" class="dialog-heading">
-        <h2>书籍设置</h2>
+        <h2 id="book-heading">书籍设置</h2>
         <button class="icon-button" aria-label="关闭书籍设置">
           <i data-icon="close"></i>
         </button>
@@ -942,13 +947,15 @@
       class="book-dialog"
       aria-labelledby="book-remove-heading"
     >
-      <h2 id="book-remove-heading">删除书籍？</h2>
-      <p id="book-remove-title"></p>
+      <div class="dialog-heading"><h2 id="book-remove-heading">删除书籍？</h2></div>
+      <div class="book-form">
+        <p id="book-remove-title"></p>
+        <p id="book-remove-error" role="status"></p>
+      </div>
       <div class="dialog-footer">
         <button id="book-remove-cancel" class="secondary-button">取消</button
         ><button id="book-remove-confirm" class="primary-button">移至最近删除</button>
       </div>
-      <p id="book-remove-error" role="status"></p>
     </dialog>
     <dialog
       id="removed-books-dialog"
@@ -959,8 +966,10 @@
         <h2 id="removed-books-heading">最近删除</h2>
         <button class="icon-button" aria-label="关闭最近删除">×</button>
       </form>
-      <div id="removed-books-list"></div>
-      <p id="removed-books-status" role="status"></p>
+      <div class="book-form">
+        <div id="removed-books-list"></div>
+        <p id="removed-books-status" role="status"></p>
+      </div>
     </dialog>
     <dialog
       id="chapters-dialog"
@@ -1031,9 +1040,9 @@
         aria-live="polite"
       ></p>
     </dialog>
-    <dialog id="export-dialog" class="book-dialog">
+    <dialog id="export-dialog" class="book-dialog" aria-labelledby="export-heading">
       <form method="dialog" class="dialog-heading">
-        <h2>导出 EPUB</h2>
+        <h2 id="export-heading">导出 EPUB</h2>
         <button class="icon-button" aria-label="关闭导出">
           <i data-icon="close"></i>
         </button>
@@ -1062,9 +1071,9 @@
         </button>
       </form>
     </dialog>
-    <dialog id="cloud-dialog" class="book-dialog cloud-dialog">
+    <dialog id="cloud-dialog" class="book-dialog cloud-dialog" aria-labelledby="cloud-heading">
       <form method="dialog" class="dialog-heading">
-        <h2>文档处理</h2>
+        <h2 id="cloud-heading">文档处理</h2>
         <button class="icon-button" aria-label="关闭文档处理">
           <i data-icon="close"></i>
         </button>
@@ -1167,10 +1176,10 @@
         <a id="cloud-settings" href="#/settings/mineru">MinerU 设置</a>
       </section>
     </dialog>
-    <dialog id="page-dialog" class="book-dialog">
+    <dialog id="page-dialog" class="book-dialog" aria-labelledby="page-jump-heading">
       <form id="page-jump-form">
         <div class="dialog-heading">
-          <h2>跳到这里</h2>
+          <h2 id="page-jump-heading">跳到这里</h2>
           <button
             type="button"
             id="page-jump-close"
@@ -1204,6 +1213,6 @@
       aria-live="polite"
       aria-relevant="additions"
     ></div>
-    <script type="module" src="/ui/bootstrap.mjs?v=2.59"></script>
+    <script type="module" src="/ui/bootstrap.mjs?v=2.60"></script>
   </body>
 </html>

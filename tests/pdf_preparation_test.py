@@ -35,6 +35,57 @@ def result(book, page):
 
 
 class SelectionPreparation(unittest.TestCase):
+    def test_cached_vision_exercise_labels_rejoin_only_their_visual_rows(self):
+        def line(text, bounds):
+            return {"text": text, "bbox": bounds, "segments": [{"text": text, "bbox": bounds}]}
+
+        heading = line("习题 2.3", [.40, .50, .60, .53])
+        label = line("2.3.1", [.09, .58, .14, .594])
+        body = line("证明给定的关系。", [.17, .578, .48, .597])
+        next_label = line("2.3.2", [.09, .63, .14, .645])
+        next_body = line("求函数的最大值。", [.17, .631, .62, .65])
+        continuation = line("保留后面的条件。", [.18, .655, .52, .674])
+        data = {**result(self.book, 1), "engine": "apple-vision", "lines": [label, next_label, heading, body, next_body, continuation]}
+        raw = json.dumps(data)
+        self.book["language"] = "zh"
+        pdf.save_selection(self.book, 1, data)
+        repaired = pdf.saved_selection(self.book, 1)
+        self.assertEqual([row["text"] for row in repaired["lines"]], [heading["text"], "2.3.1 证明给定的关系。", "2.3.2 求函数的最大值。", continuation["text"]])
+        self.assertEqual([part["bbox"] for part in repaired["lines"][1]["segments"]], [label["bbox"], body["bbox"]])
+        self.assertEqual([part["band"] for part in repaired["lines"][1]["segments"]], [1, 2])
+        self.assertEqual(json.dumps(data), raw)
+        self.assertIs(pdf.split_ocr_columns(repaired), repaired)
+
+        distant = {**data, "lines": [label, next_label, heading,
+                                     line(body["text"], [.61, .578, .82, .597]),
+                                     line(next_body["text"], [.61, .631, .82, .65])]}
+        self.assertIs(pdf.split_ocr_columns(distant), distant)
+        one_number = {**data, "lines": [label, heading, body, next_body]}
+        self.assertIs(pdf.split_ocr_columns(one_number), one_number)
+
+    def test_numbered_ocr_rows_keep_formula_and_continuation_before_next_question(self):
+        def line(text, x, y, right, height=.016):
+            return {"text": text, "bbox": [x, y, right, y + height]}
+
+        numbers = [line(f"9.1.{n}", .096, y, .15 if n < 10 else .164)
+                   for n, y in enumerate([.420, .463, .554, .596, .638, .660], 6)]
+        heading = line("习题 9.1", .42, .24, .60)
+        bodies = [line("证明闭包的性质。", .172, .415, .92, .021),
+                  line("证明下列集合是闭集。", .174, .461, .71),
+                  line("A∪B", .455, .492, .62),
+                  line("保留这一行的补充条件。", .174, .526, .42),
+                  line("求交集。", .174, .549, .90, .021),
+                  line("求极限点。", .176, .591, .92, .021),
+                  line("计算上确界。", .187, .634, .93, .021),
+                  line("证明下确界存在。", .187, .656, .71, .021)]
+        data = {"engine": "apple-vision", "lines": [*numbers, heading, *bodies]}
+        actual = pdf.split_ocr_columns(data)["lines"]
+        self.assertEqual([row["text"] for row in actual], [
+            "习题 9.1", "9.1.6 证明闭包的性质。", "9.1.7 证明下列集合是闭集。", "A∪B",
+            "保留这一行的补充条件。", "9.1.8 求交集。", "9.1.9 求极限点。",
+            "9.1.10 计算上确界。", "9.1.11 证明下确界存在。",
+        ])
+
     def test_merged_ocr_columns_keep_headers_order_and_original_data(self):
         def segments(text, x, y, advance=.004):
             cells = []

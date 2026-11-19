@@ -467,6 +467,15 @@ class SharedState(unittest.TestCase):
                     }
                 )
                 self.assertEqual(status, 200)
+                connection.request("GET", "/api/state")
+                response = connection.getresponse()
+                tag = response.getheader("ETag")
+                self.assertTrue(tag)
+                self.assertEqual(json.loads(response.read()), state)
+                connection.request("GET", "/api/state", headers={"If-None-Match": tag})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 304)
+                self.assertEqual(response.read(), b"")
                 _, state = post(
                     {
                         "positions": {"book": {"index": 1, "updatedAt": 10}},
@@ -474,6 +483,11 @@ class SharedState(unittest.TestCase):
                         "prefs": {"theme": "night"},
                     }
                 )
+                connection.request("GET", "/api/state", headers={"If-None-Match": tag})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertNotEqual(response.getheader("ETag"), tag)
+                self.assertEqual(json.loads(response.read()), state)
                 self.assertEqual(state["positions"]["book"]["index"], 3)
                 self.assertEqual(len(state["bookmarks"]), 2)
                 self.assertEqual(

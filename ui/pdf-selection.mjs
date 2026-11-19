@@ -93,23 +93,48 @@ export function mergeSelectionRects(rects) {
   return result;
 }
 
+export function selectedSpanRange(node, range) {
+  if (node.firstChild?.nodeType !== 3 || !range.intersectsNode(node))
+    return null;
+  const selected = node.ownerDocument.createRange();
+  selected.selectNodeContents(
+    node.childNodes.length === 1 ? node.firstChild : node,
+  );
+  if (node.contains(range.startContainer))
+    selected.setStart(range.startContainer, range.startOffset);
+  if (node.contains(range.endContainer))
+    selected.setEnd(range.endContainer, range.endOffset);
+  return selected.collapsed ? null : selected;
+}
+
+export function canonicalObjectBounds(group, box) {
+  const bbox = group?.whole && group.bbox;
+  if (!bbox) return null;
+  // The selected object includes parts that are missing from the text layer.
+  const [left, top, right, bottom] = bbox;
+  return new DOMRect(
+    box.left + left * box.width,
+    box.top + top * box.height,
+    (right - left) * box.width,
+    (bottom - top) * box.height,
+  );
+}
+
 function selectionBands(layer, range) {
   const box = layer.getBoundingClientRect();
   const sx = box.width / layer.clientWidth,
     sy = box.height / layer.clientHeight;
   const rects = [];
+  const objects = [];
+  const drawn = new Set();
   if (box.width && box.height && range?.intersectsNode(layer)) {
     for (const node of layer.querySelectorAll("span")) {
-      if (node.firstChild?.nodeType !== 3 || !range.intersectsNode(node))
-        continue;
-      const selected = layer.ownerDocument.createRange();
-      selected.selectNodeContents(node);
-      if (node.contains(range.startContainer))
-        selected.setStart(range.startContainer, range.startOffset);
-      if (node.contains(range.endContainer))
-        selected.setEnd(range.endContainer, range.endOffset);
-      if (selected.collapsed) continue;
-      const bounds = selected.getBoundingClientRect();
+      const selected = selectedSpanRange(node, range);
+      if (!selected) continue;
+      const group = layer._canonical?.mapped.get(node)?.group;
+      if (drawn.has(group)) continue;
+      const objectBounds = canonicalObjectBounds(group, box);
+      const bounds = objectBounds || selected.getBoundingClientRect();
       if (!bounds.width || !bounds.height) continue;
       const rect = {
         left: (bounds.left - box.left) / sx,
@@ -118,6 +143,11 @@ function selectionBands(layer, range) {
         bottom: (bounds.bottom - box.top) / sy,
         chars: selected.toString().length,
       };
+      if (objectBounds) {
+        drawn.add(group);
+        objects.push(rect);
+        continue;
+      }
       const font = layer._selectionGeometry?.get(node);
       if (font && Math.abs(Math.sin(font.angle)) < 0.001) {
         const normal = Math.cos(font.angle);
@@ -135,7 +165,7 @@ function selectionBands(layer, range) {
       rects.push(rect);
     }
   }
-  return mergeSelectionRects(rects);
+  return [...mergeSelectionRects(rects), ...objects];
 }
 
 export function pdfSelectionRects(range, root) {
@@ -362,6 +392,7 @@ export function canonicalSelection(range, root) {
   for (const layer of root.querySelectorAll(".textLayer")) {
     const model = layer._canonical;
     if (!range.intersectsNode(layer)) continue;
+    const numberedRows = layer.hasAttribute("data-numbered-ocr-rows");
     const nodes =
       model?.nodes ||
       [...layer.querySelectorAll("span")].filter(
@@ -435,6 +466,16 @@ export function canonicalSelection(range, root) {
           hi = group.text.length;
         }
         pieces.push(group.text.slice(lo, hi));
+        corrected = true;
+      } else if (numberedRows) {
+        let row;
+        let raw = "";
+        for (const item of items) {
+          if (row !== undefined && row !== item.node.dataset.ocrLine) raw += "\n\n";
+          row = item.node.dataset.ocrLine;
+          raw += item.text.slice(item.start, item.end);
+        }
+        pieces.push(raw.trim());
         corrected = true;
       } else if (layer.dataset.ocrEngine === "tesseract-eng") {
         const fragment = layer.ownerDocument.createRange();

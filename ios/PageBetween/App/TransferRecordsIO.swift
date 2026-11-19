@@ -113,7 +113,10 @@ struct TransferLocations {
 extension TransferLocations {
     func imported(_ item: TransferBook, staging: URL, isNew: Bool) throws -> ImportedReadingRecords {
         var result = ImportedReadingRecords()
-        if isNew { result.position = item.position }
+        if isNew {
+            result.position = item.position
+            result.locator = try locator(item.position)
+        }
         for mark in item.bookmarks {
             let raw = try locator(mark.position)
             if mark.id == nil, book.bookmarks.contains(where: { $0.title == mark.title && (try? Locator(jsonString: $0.locator)) == (try? Locator(jsonString: raw)) }) { continue }

@@ -82,7 +82,7 @@ struct TransferScreen: View {
             let existing = await store.repository.books(includingDeleted: true).first(where: { $0.sourceHash == item.sha256 })
             if existing != nil { duplicates += 1; if manifest.schema == 1 { continue } }
             do {
-                var book: MobileBook
+                let book: MobileBook
                 if let existing { book = existing }
                 else {
                     let source = staging.appendingPathComponent(URL(fileURLWithPath: item.file).lastPathComponent)
@@ -100,10 +100,8 @@ struct TransferScreen: View {
                 let locations = try await TransferLocations.load(book, publication: publication, original: original)
                 let incoming = try locations.imported(item, staging: staging, isNew: existing == nil)
                 if existing == nil {
-                    if !item.title.isEmpty { book.title = item.title }
-                    if !item.author.isEmpty { book.author = item.author }
-                    book.locator = try locations.locator(item.position); book.progress = item.position.progress
-                    try await store.repository.update(book); added += 1
+                    try await store.repository.updateMetadata(book.id, title: item.title.isEmpty ? nil : item.title, author: item.author.isEmpty ? nil : item.author)
+                    added += 1
                 }
                 merged += try await store.repository.mergeReadingRecords(book.id, incoming: incoming)
             } catch { failed.append(item.title + "：" + error.localizedDescription) }

@@ -28,10 +28,16 @@ final class TransferTests: XCTestCase {
         var conversation = MobileConversation(book: book.id, quote: record.quote, locator: locator)
         conversation.turns = [MobileTurn(role: "user", content: "Original question")]
         var incoming = ImportedReadingRecords()
+        incoming.position = TransferPosition(index: 2, progress: 0.35)
+        incoming.locator = locator
         incoming.excerpts = [record]; incoming.conversations = [conversation]
         incoming.appearance = ReadingAppearance(fontScale: 110, lineHeight: 1.85, pageMargins: 1, fontFamily: "Georgia", theme: "night", scroll: false)
         let imported = try await repository.mergeReadingRecords(book.id, incoming: incoming)
         XCTAssertEqual(imported, 2)
+        let initial = await repository.books().first
+        XCTAssertEqual(initial?.locator, locator)
+        XCTAssertEqual(initial?.progress, 0.35)
+        XCTAssertEqual(initial?.transferredPosition?.index, 2)
         record.note = "Kept local edit"; record.deletedAt = Date()
         try await repository.saveExcerpt(book.id, excerpt: record)
         let localAppearance = ReadingAppearance(fontScale: 130, lineHeight: 1.6, pageMargins: 1, fontFamily: "PingFang SC", theme: "paper", scroll: true)
@@ -43,6 +49,7 @@ final class TransferTests: XCTestCase {
         XCTAssertEqual(repeated, 0)
         let saved = await repository.books().first
         XCTAssertEqual(saved?.excerpts, [record]); XCTAssertEqual(saved?.progress, 0.7); XCTAssertEqual(saved?.appearance, localAppearance)
+        XCTAssertNil(saved?.transferredPosition)
         let conversations = try await repository.conversations(book.id)
         XCTAssertEqual(conversations, [conversation])
     }

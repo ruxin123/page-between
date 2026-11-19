@@ -90,7 +90,7 @@ public actor LibraryRepository {
         while let part = try stream.read(upToCount: 1024 * 1024), !part.isEmpty { hash.update(data: part) }
         let digest = hash.finalize().map { String(format: "%02x", $0) }.joined()
         if var existing = catalog.books.first(where: { $0.sourceHash == digest }) {
-            if existing.deletedAt != nil { existing.deletedAt = nil; try update(existing) }
+            if existing.deletedAt != nil { existing.deletedAt = nil; try replace(existing) }
             return existing
         }
         let id = UUID(), folder = root.appendingPathComponent("books/" + id.uuidString, isDirectory: true)
@@ -105,15 +105,21 @@ public actor LibraryRepository {
         } catch { try? manager.removeItem(at: folder); throw error }
     }
 
-    public func update(_ book: MobileBook) throws {
-        guard let latest = catalog.books.first(where: { $0.id == book.id }) else { throw LibraryFailure.missingBook }
-        var value = book
-        // Metadata screens may hold an older book snapshot while the reader saves records.
-        value.appearance = latest.appearance
-        value.excerpts = latest.excerpts
-        value.transferredAppearance = latest.transferredAppearance
-        value.transferredPosition = latest.transferredPosition
-        try replace(value)
+    public func updateMetadata(_ id: UUID, title: String?, author: String?, readingFile: String? = nil) throws {
+        guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
+        if let title { book.title = title }
+        if let author { book.author = author }
+        if let readingFile {
+            _ = try file(book, name: readingFile)
+            book.readingFile = readingFile
+        }
+        try replace(book)
+    }
+
+    public func setPinned(_ id: UUID, enabled: Bool) throws {
+        guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
+        book.pinned = enabled
+        try replace(book)
     }
 
     private func replace(_ book: MobileBook) throws {
@@ -125,12 +131,12 @@ public actor LibraryRepository {
     public func markDeleted(_ id: UUID, deleted: Bool) throws {
         guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         book.deletedAt = deleted ? Date() : nil
-        try update(book)
+        try replace(book)
     }
     public func setParsing(_ id: UUID, enabled: Bool) throws {
         guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         book.parseEnabled = enabled
-        try update(book)
+        try replace(book)
     }
 
     public func saveAppearance(_ id: UUID, value: ReadingAppearance?) throws {
@@ -167,7 +173,7 @@ public actor LibraryRepository {
         guard var book = catalog.books.first(where: { $0.id == id }) else { throw LibraryFailure.missingBook }
         if let index = book.bookmarks.firstIndex(where: { $0.locator == locator }) { book.bookmarks.remove(at: index) }
         else { book.bookmarks.append(ReadingBookmark(title: title, locator: locator)) }
-        try update(book)
+        try replace(book)
     }
 
     public func discardFailedImport(_ id: UUID) throws {
@@ -194,7 +200,12 @@ public actor LibraryRepository {
             book.appearance = appearance
             book.transferredAppearance = incoming.portableAppearance
         }
-        if let position = incoming.position { book.transferredPosition = position }
+        if book.locator == nil, let position = incoming.position {
+            try position.validate()
+            book.transferredPosition = position
+            book.locator = incoming.locator
+            book.progress = position.progress
+        }
         let directory = try file(book, name: "conversations")
         let conversations = incoming.conversations.filter { !manager.fileExists(atPath: directory.appendingPathComponent($0.id.uuidString + ".json").path) }
         let required = Set(added.flatMap { $0.attachments ?? [] }.map(\.file) + conversations.flatMap { $0.sourceAttachments ?? [] }.map(\.file))
@@ -292,6 +303,7 @@ public struct ImportedReadingRecords: Sendable {
     public var appearance: ReadingAppearance?
     public var portableAppearance: TransferAppearance?
     public var position: TransferPosition?
+    public var locator: String?
     public var attachments: [String: URL] = [:]
     public init() {}
 }

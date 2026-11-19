@@ -13,7 +13,7 @@ import ReadiumZIPFoundation
     let preparation: PDFPreparationStore
     private let retriever: AssetRetriever
     private let opener: PublicationOpener
-    private var pendingImports: [BookImport] = []
+    private var importTask: Task<Void, Never>?
 
     init() throws {
         let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("PageBetween", isDirectory: true)
@@ -39,12 +39,21 @@ import ReadiumZIPFoundation
     }
     func importFiles(_ urls: [URL]) async { await importBooks(urls.map(BookImport.init)) }
     func importBooks(_ choices: [BookImport]) async {
-        pendingImports.append(contentsOf: choices)
-        guard !importing else { return }
+        guard !choices.isEmpty else { return }
+        let previous = importTask
+        let task = Task {
+            await previous?.value
+            await processImports(choices)
+        }
+        importTask = task
+        await task.value
+    }
+
+    private func processImports(_ choices: [BookImport]) async {
         importing = true
         defer { importing = false }
-        while !pendingImports.isEmpty {
-            let choice = pendingImports.removeFirst(), url = choice.url
+        for choice in choices {
+            let url = choice.url
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             let previousIDs = Set(await repository.books(includingDeleted: true).map(\.id))
@@ -68,13 +77,13 @@ import ReadiumZIPFoundation
                     book.readingFile = "reading.epub"
                 }
                 let publication = try await open(book)
-                book.title = publication.metadata.title ?? book.title
-                book.author = publication.metadata.authors.map(\.name).joined(separator: "、")
                 let cover = try await repository.file(book, name: "cover.jpg")
                 if !FileManager.default.fileExists(atPath: cover.path), case .success(let image) = await publication.coverFitting(maxSize: CGSize(width: 480, height: 680)), let data = image?.jpegData(compressionQuality: 0.82) {
                     try? data.write(to: cover, options: .atomic)
                 }
-                try await repository.update(book)
+                let author = publication.metadata.authors.map(\.name).joined(separator: "、")
+                try await repository.updateMetadata(book.id, title: publication.metadata.title,
+                    author: author.isEmpty ? nil : author, readingFile: book.readingFile)
             } catch {
                 let failure = error.localizedDescription
                 if let newImport { try? await repository.discardFailedImport(newImport) }
@@ -96,8 +105,8 @@ import ReadiumZIPFoundation
         }
     }
 
-    func save(_ book: MobileBook) async {
-        do { try await repository.update(book); await refresh() }
+    func setPinned(_ id: UUID, enabled: Bool) async {
+        do { try await repository.setPinned(id, enabled: enabled); await refresh() }
         catch { self.error = error.localizedDescription }
     }
 

@@ -126,6 +126,72 @@ print(json.dumps([image.getpixel((round(x*sx),round(y*sy))) for x,y in points]))
         await p.locator(".ocr-selection-highlights path").getAttribute("d"),
         "",
       );
+      for (const partial of [false, true]) {
+        const formula = await p.evaluate(async (partial) => {
+          const { renderOcrLayer, paintOcrSelection } = await import("/ui/ocr-layer.mjs");
+          const {
+            alignTextLayer, canonicalSelection, paintNativeSelection, pdfSelectionRects,
+          } = await import("/ui/pdf-selection.mjs");
+          const root = document.querySelector("#fixture");
+          const layer = document.querySelector("#ocr");
+          root.dataset.page = "1";
+          renderOcrLayer(layer, {
+            engine: "apple-vision",
+            lines: [
+              { text: "公式前", bbox: [0.1, 0.15, 0.45, 0.28] },
+              ...(partial ? [{
+                text: "lim", bbox: [0.38, 0.42, 0.47, 0.49],
+                segments: [
+                  { text: "li", bbox: [0.38, 0.42, 0.43, 0.49] },
+                  { text: "m", bbox: [0.43, 0.42, 0.47, 0.49] },
+                ],
+              }] : []),
+              { text: "公式后", bbox: [0.1, 0.7, 0.45, 0.83] },
+            ],
+          }, { width: 400, height: 220 }, "zh");
+          const bbox = [0.3, 0.38, 0.7, 0.58];
+          const text = partial ? "$$\\lim_{x\\to 0} f(x)$$" : "$$\\frac{f(x)}{g(x)}$$";
+          await alignTextLayer(layer, [{ type: "equation", text }], async () => ({
+            groups: [{ whole: true, bbox, spans: partial ? [{ index: 1 }, { index: 2 }] : [], text }],
+          }), "fixture", 1);
+          const nodes = [...layer.querySelectorAll("span")];
+          const before = nodes[0].firstChild;
+          const after = nodes.at(-1).firstChild;
+          const firstFormulaSpan = nodes[1];
+          // Reproduce WebKit's empty glyph bounds in both test engines.
+          if (!partial) firstFormulaSpan.style.fontSize = "0";
+          const selection = getSelection();
+          const contains = (selector) => {
+            const path = root.querySelector(selector);
+            return [0.1, 0.5, 0.9].every((x) =>
+              path.isPointInFill(new DOMPoint(
+                (bbox[0] + (bbox[2] - bbox[0]) * x) * layer.clientWidth,
+                (bbox[1] + bbox[3]) / 2 * layer.clientHeight,
+              )),
+            );
+          };
+          selection.setBaseAndExtent(after, after.length, before, 0);
+          const range = selection.getRangeAt(0);
+          paintOcrSelection(root, selection);
+          const ocr = contains(".ocr-selection-highlights path");
+          layer.dataset.pdfNative = "true";
+          paintNativeSelection(root, selection);
+          const native = contains(".pdf-selection-highlights path");
+          const saved = pdfSelectionRects(range, root).filter((rect) =>
+            rect.page === 1 && rect.bbox.every((value, index) =>
+              Math.abs(value - bbox[index]) < 0.001),
+          ).length;
+          const copied = canonicalSelection(range, root).includes(text);
+          selection.setBaseAndExtent(before, 0, firstFormulaSpan.firstChild, 0);
+          paintOcrSelection(root, selection);
+          const excluded = !contains(".ocr-selection-highlights path") &&
+            !canonicalSelection(selection.getRangeAt(0), root).includes(text);
+          return { ocr, native, saved, copied, excluded };
+        }, partial);
+        assert.deepEqual(formula, {
+          ocr: true, native: true, saved: 1, copied: true, excluded: true,
+        });
+      }
       await p.close();
     }
     console.log(
@@ -135,6 +201,8 @@ print(json.dumps([image.getpixel((round(x*sx),round(y*sy))) for x,y in points]))
         overlapMatchesSingleFill: true,
         copyUnchanged: true,
         clearSelection: true,
+        missingFormulaUsesPageBounds: true,
+        partialFormulaUsesPageBounds: true,
       }),
     );
   } finally {

@@ -12,6 +12,7 @@ import io
 import shutil
 import hashlib
 import math
+import unicodedata
 import xml.etree.ElementTree as ET
 from lxml import etree
 from contextlib import contextmanager
@@ -90,6 +91,8 @@ def recognition_revision(book, source):
 
 
 def split_ocr_columns(data):
+    if data.get("engine") == "apple-vision":
+        return rejoin_numbered_rows(data)
     if data.get("engine") != "tesseract-eng" or data.get("flows"):
         return data
     lines = data.get("lines", [])
@@ -158,6 +161,73 @@ def split_ocr_columns(data):
         if span:
             append_flow([span], 0, 1)
     return {**data, "lines": ordered, "flows": flows}
+
+
+def rejoin_numbered_rows(data):
+    lines = data.get("lines", [])
+    labels = {}
+    for index, line in enumerate(lines):
+        text = unicodedata.normalize("NFKC", line["text"].strip())
+        if re.fullmatch(r"\d{1,4}(?:\.\d{1,4}){1,4}\.?|\d{1,4}[.、]|\(\d{1,4}\)", text, flags=re.ASCII):
+            labels[index] = tuple(map(int, re.findall(r"\d+", text)))
+    if len(labels) < 2:
+        return data
+
+    def height(box):
+        return box[3] - box[1]
+
+    def center(box):
+        return (box[1] + box[3]) / 2
+
+    pairs = {}
+    for index in labels:
+        left = lines[index]["bbox"]
+        candidates = []
+        for other, line in enumerate(lines):
+            if other in labels or not any(char.isalpha() for char in line["text"]):
+                continue
+            right = line["bbox"]
+            gap = right[0] - left[2]
+            if (0 <= gap <= 3 * height(left)
+                and abs(center(left) - center(right)) <= .45 * max(height(left), height(right))
+                and right[2] - right[0] >= .8 * (left[2] - left[0])):
+                candidates.append((gap, other))
+        if candidates:
+            pairs[index] = min(candidates)[1]
+
+    # A sequence with stable label and body columns distinguishes exercise rows from independent columns.
+    counts = collections.Counter(pairs.values())
+    ordered = sorted((i for i in pairs if counts[pairs[i]] == 1), key=lambda i: center(lines[i]["bbox"]))
+    matched = set()
+    for first, second in zip(ordered, ordered[1:]):
+        a, b = lines[first]["bbox"], lines[second]["bbox"]
+        scale = max(height(a), height(b))
+        if (labels[second] == (*labels[first][:-1], labels[first][-1] + 1)
+            and abs(a[0] - b[0]) <= scale
+            and 0 < center(b) - center(a) <= 5 * scale
+            and abs(lines[pairs[first]]["bbox"][0] - lines[pairs[second]]["bbox"][0]) <= scale):
+            matched.update((first, second))
+    if not matched:
+        return data
+
+    def segments(line, band):
+        return [{**part, "band": band} for part in (line.get("segments") or [{"text": line["text"], "bbox": line["bbox"]}])]
+
+    bodies = {pairs[index]: lines[index] for index in matched}
+    result = []
+    for index, line in enumerate(lines):
+        if index in matched:
+            continue
+        label = bodies.get(index)
+        if label is not None:
+            a, b = label["bbox"], line["bbox"]
+            parts = segments(label, 1)
+            parts[-1]["text"] = parts[-1]["text"].rstrip() + " "
+            line = {**line, "text": label["text"].rstrip() + " " + line["text"].lstrip(),
+                    "bbox": [a[0], min(a[1], b[1]), b[2], max(a[3], b[3])],
+                    "segments": parts + segments(line, 2)}
+        result.append(line)
+    return {**data, "lines": result, "numberedRows": True}
 
 
 def selection_directory(book):
@@ -567,7 +637,7 @@ def recognize_page(book, page, mode, english):
         if result.returncode:
             raise ValueError("本页文字识别失败，可重试或继续阅读原页。")
         data = json.loads(result.stdout)
-    return split_ocr_columns(data)
+    return split_ocr_columns(data) if mode == "full" or english else data
 
 
 def joined_rows(lines):

@@ -61,7 +61,7 @@ struct LibraryScreen: View {
                                     if removed { Button("恢复", systemImage: "arrow.uturn.backward") { Task { await store.remove(book, deleted: false) } } }
                                     else {
                                         if book.format == "pdf" { Button("文档处理", systemImage: "doc.badge.gearshape") { processing = book } }
-                                        Button(book.pinned ? "移出常读" : "加入常读", systemImage: "star") { var updated = book; updated.pinned.toggle(); Task { await store.save(updated) } }
+                                        Button(book.pinned ? "移出常读" : "加入常读", systemImage: "star") { Task { await store.setPinned(book.id, enabled: !book.pinned) } }
                                         Button("删除书籍", systemImage: "trash", role: .destructive) { deleting = book }
                                     }
                                 }

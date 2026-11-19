@@ -111,6 +111,10 @@ RECOVERY_LOCK = threading.Lock()
 SESSION = os.environ.pop("PAGE_BETWEEN_SESSION", "")
 
 
+
+def empty_reading_state():
+    return {"schema": 2, "revision": 0, "prefs": {}, "positions": {}, "bookmarks": []}
+
 class ReaderServer(ThreadingHTTPServer):
     # ES modules and fonts arrive together when a fresh window opens.
     request_queue_size = 64
@@ -522,16 +526,35 @@ class Handler(SimpleHTTPRequestHandler):
     def do_HEAD(self):
         self.send_error(405)
 
-    def json(self, value, status=200):
+    def json(self, value, status=200, *, etag=None):
         data = json.dumps(value, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if etag:
+            self.send_header("ETag", etag)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         try:
             self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def reading_state(self):
+        try:
+            source = (DATA / "state.json").open(encoding="utf-8")
+        except FileNotFoundError:
+            return self.json(empty_reading_state())
+        with source:
+            # Read the tag and the content from the same atomic file snapshot.
+            info = os.fstat(source.fileno())
+            etag = f'"{info.st_dev:x}-{info.st_ino:x}-{info.st_mtime_ns:x}-{info.st_size:x}"'
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.end_headers()
+                return
+            state = json.load(source)
+        return self.json(state, etag=etag)
 
     def request_body(self, limit=2 * 1024 * 1024):
         length = int(self.headers.get("Content-Length", "0"))
@@ -704,17 +727,7 @@ class Handler(SimpleHTTPRequestHandler):
                     }
                 )
             if route.path == "/api/state":
-                state = load(
-                    DATA / "state.json",
-                    {
-                        "schema": 2,
-                        "revision": 0,
-                        "prefs": {},
-                        "positions": {},
-                        "bookmarks": [],
-                    },
-                )
-                return self.json(state)
+                return self.reading_state()
             if route.path.startswith("/api/downloads/"):
                 prune_exports(CACHE)
                 name = route.path.removeprefix("/api/downloads/")
@@ -1251,16 +1264,7 @@ class Handler(SimpleHTTPRequestHandler):
                     )
             if route.path == "/api/state":
                 with MUTEX:
-                    state = load(
-                        DATA / "state.json",
-                        {
-                            "schema": 2,
-                            "revision": 0,
-                            "prefs": {},
-                            "positions": {},
-                            "bookmarks": [],
-                        },
-                    )
+                    state = load(DATA / "state.json", empty_reading_state())
                     if isinstance(payload.get("prefs"), dict):
                         state.setdefault("prefs", {}).update(payload["prefs"])
                     for ident, preferences in payload.get("bookPrefs", {}).items():

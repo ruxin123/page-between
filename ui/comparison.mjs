@@ -7,6 +7,7 @@ export function transientStatePatch(patch) {
 
 export function createComparison({ getSeed, layout, closed }) {
   const pane = document.createElement("aside");
+  pane.id = "comparison-reference";
   pane.className = "comparison-pane";
   pane.hidden = true;
   pane.setAttribute("aria-label", "对照阅读");
@@ -15,7 +16,7 @@ export function createComparison({ getSeed, layout, closed }) {
   switcher.className = "comparison-switcher";
   switcher.hidden = true;
   switcher.setAttribute("aria-label", "对照视图");
-  switcher.innerHTML = '<button data-view="main" aria-pressed="true">正文</button><button data-view="reference" aria-pressed="false">对照</button><button data-close aria-label="关闭对照">' + icon("close") + '</button>';
+  switcher.innerHTML = `<div role="tablist" aria-label="阅读位置"><button id="comparison-main-tab" role="tab" aria-controls="reader" data-view="main">正文</button><button id="comparison-reference-tab" role="tab" aria-controls="comparison-reference" data-view="reference">对照</button></div><button data-close aria-label="关闭对照">${icon("close")}</button>`;
   document.body.append(pane, switcher);
   const handle = pane.querySelector("[role=separator]"), status = pane.querySelector("[role=status]");
   let frame, seed, size = 50, timer;
@@ -30,16 +31,52 @@ export function createComparison({ getSeed, layout, closed }) {
     handle.hidden = narrow.matches;
     reader.inert = narrow.matches && active === "reference";
     pane.inert = narrow.matches && active === "main";
-    for (const button of switcher.querySelectorAll("[data-view]"))
-      button.setAttribute("aria-pressed", String(button.dataset.view === active));
-    if (focus && narrow.matches) switcher.querySelector('[aria-pressed="true"]').focus();
+    for (const tab of switcher.querySelectorAll("[role=tab]")) {
+      const selected = tab.dataset.view === active;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    }
+    for (const [panel, tab] of [[reader, "main"], [pane, "reference"]]) {
+      if (narrow.matches) {
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", `comparison-${tab}-tab`);
+      } else {
+        panel.removeAttribute("role");
+        panel.removeAttribute("aria-labelledby");
+      }
+    }
+    if (focus && narrow.matches) switcher.querySelector('[aria-selected="true"]').focus();
   }
   switcher.addEventListener("click", event => {
     const button = event.target.closest("button");
     if (button?.dataset.view) showActive(button.dataset.view);
     else if (button) close();
   });
-  narrow.addEventListener("change", () => { if (!pane.hidden) showActive(active); });
+  switcher.addEventListener("keydown", event => {
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+    } else if (event.target.matches("[role=tab]") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      showActive(event.key === "Home" ? "main" : event.key === "End" ? "reference" : active === "main" ? "reference" : "main", true);
+    }
+  });
+  narrow.addEventListener("change", () => {
+    if (pane.hidden) return;
+    const focus = document.activeElement;
+    if (narrow.matches) {
+      const view = pane.contains(focus) ? "reference" : reader.contains(focus) ? "main" : active;
+      showActive(view);
+    } else {
+      showActive(active);
+      if (switcher.contains(focus)) {
+        const target = active === "main" ? reader.querySelector("#reading-viewport")
+          : frame?.contentDocument?.getElementById("reading-viewport") || frame;
+        target?.focus({ preventScroll: true });
+      }
+    }
+  });
   function bounds() {
     const minimum = Math.min(45, Math.max(30, 300 / innerWidth * 100));
     return [minimum, 100 - minimum];
@@ -83,6 +120,8 @@ export function createComparison({ getSeed, layout, closed }) {
       delete document.body.dataset.comparisonLayout;
       delete document.body.dataset.comparisonActive;
       reader.inert = false;
+      reader.removeAttribute("role");
+      reader.removeAttribute("aria-labelledby");
       switcher.hidden = true;
       document.getElementById("comparison-open").setAttribute("aria-pressed", "false");
     };

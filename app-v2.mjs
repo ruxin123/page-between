@@ -117,6 +117,7 @@ let renderRevision = 0,
   lastAnchor,
   pendingAnchor;
 let saveTimer,
+  pendingScrollSave = false,
   ocrTimer,
   timerDeadline = 0,
   timerRemaining = 1500,
@@ -146,7 +147,7 @@ let pagination,
   retainedAnchor = null;
 const pdfs = new Map(),
   ocrCache = new Map();
-document.body.dataset.readerBuild = "2.59";
+document.body.dataset.readerBuild = "2.60";
 document.body.dataset.mode = reference ? "reference" : palm ? "palm" : "standard";
 document.body.dataset.native = String(native);
 
@@ -190,7 +191,7 @@ const comparison = reference || palm ? null : createComparison({
     comparisonTimer = setTimeout(() => { if (route === "reader" && current?.id === book && position) renderCurrent(position); }, 90);
   },
   closed: reflow => {
-    if (reflow) { setTocOpen(prefs.tocOpen && innerWidth >= 1100, false); $("reading-viewport").focus({preventScroll:true}); }
+    if (reflow) { setTocOpen(canDockToc() && prefs.tocOpen, false); $("reading-viewport").focus({preventScroll:true}); }
     else clearTimeout(comparisonTimer);
   },
 });
@@ -226,8 +227,7 @@ const readerZoom = createReaderZoom({
 function currentZoom() {
   if (current?.type !== "pdf")
     return palm ? prefs.palmScale * 100 : (prefs.fontSize / 21) * 100;
-  if (prefs.pdfZoomMode === "custom") return prefs.pdfZoom;
-  return pdfNaturalWidth ? (pdfWidth / pdfNaturalWidth) * 100 : 100;
+  return Number(pdfPageElement(location?.index)?.dataset.zoom) || prefs.pdfZoom;
 }
 const dataSettings = createDataSettings({ api, post, toast });
 const bookExport = createBookExport({
@@ -753,17 +753,22 @@ function persistReadingPreferences(changes) {
 
 function arrangeReaderTools() {
   if (!$("reader-more-tools")) return;
-  $("reader-more-tools").append($("reading-mode"), $("book-options"), $("pin-current-page"));
+  const more = $("reader-more-tools");
+  const compact = ($("reader").clientWidth || innerWidth) <= 440;
+  more.append($("reading-mode"), $("book-options"), $("pin-current-page"));
+  const source = $("source-pdf-open");
+  if (compact && source.parentElement !== more) more.append(source);
+  else if (!compact && source.parentElement === more) $("knowledge-open").before(source);
   $("pin-current-page").hidden = current?.type !== "pdf";
   const tools = { palm: $("palm-open"), process: $("reader-process"), focus: $("focus-button"), comparison: $("comparison-open") };
   const needsPreparation = current?.type === "pdf" &&
     (["running", "error", "paused"].includes(current.localPreparation?.status) ||
       jobs.some(job => job.book === current.id && ["running", "error", "paused"].includes(job.status)));
   const automatic = needsPreparation ? "process" : current?.shelf === "学习" ? "comparison" : "palm";
-  const pinned = new Set([prefs.pinnedTool1, prefs.pinnedTool2].map(tool => tool === "auto" ? automatic : tool));
+  const pinned = new Set(compact ? [] : [prefs.pinnedTool1, prefs.pinnedTool2].map(tool => tool === "auto" ? automatic : tool));
   tools.comparison.classList.toggle("compact-tool", pinned.has("comparison"));
   for (const [name, button] of Object.entries(tools))
-    (pinned.has(name) ? $("reader-pinned-tools") : $("reader-more-tools")).append(button);
+    (pinned.has(name) ? $("reader-pinned-tools") : more).append(button);
 }
 
 async function changePreference(key, value) {
@@ -801,6 +806,7 @@ async function changePreference(key, value) {
   if (key === "typography") renderSettings();
   if (["pdfZoom", "pdfZoomMode", "pdfMode"].includes(key)) {
     if (current?.type === "pdf" && route === "reader") {
+      if (key !== "pdfMode") pdfZoomAdjusted = true;
       const position = makePosition(),
         view = $("reading-viewport"),
         before = $("pdf-paper").getBoundingClientRect(),
@@ -958,7 +964,7 @@ function currentProgress() {
     : chapterProgress(current.chapters, location.index - 1, fraction);
 }
 
-function updateProgress() {
+function updateProgress(scrollAnchor) {
   readerZoom.update();
   if (current?.type === "pdf") {
     const value = Math.round(currentZoom());
@@ -1002,7 +1008,7 @@ function updateProgress() {
     const here = {
       ...location,
       top: current.type === "pdf" ? pdfLocalTop() : view.scrollTop,
-      anchor: retainedAnchor || captureAnchor(),
+      anchor: scrollAnchor === undefined ? (retainedAnchor || captureAnchor()) : scrollAnchor,
     };
     $("bookmark-button").setAttribute(
       "aria-pressed",
@@ -1896,8 +1902,7 @@ function refreshPdfEnhancements() {
 }
 let pdfDocument,
   pdfRevision = 0,
-  pdfWidth = 0,
-  pdfNaturalWidth = 0,
+  pdfZoomAdjusted = false,
   pdfUse = 0,
   pdfDirection = 1,
   pdfRenderQueue = Promise.resolve();
@@ -2039,7 +2044,7 @@ async function paintPdfPage(index, revision) {
       preparePdfText(page, text, root, viewport, index, revision);
     root.onpointerenter = root.onpointerdown = () =>
       schedulePdfText(root, true);
-    schedulePdfText(root);
+    if (shouldPreparePdfText(index)) schedulePdfText(root);
   } catch (error) {
     if (!active()) return;
     if (error.name === "RenderingCancelledException") {
@@ -2096,19 +2101,25 @@ function visiblePdfPages() {
   }
   return pages;
 }
+function shouldPreparePdfText(index, visible) {
+  return index === location.index ||
+    (prefs.pdfMode === "scroll" && index === location.index + pdfDirection) ||
+    (visible ?? visiblePdfPages()).has(index);
+}
 function schedulePdfText(root, immediate = false) {
-  if (!root._startText || root._textReady || root._textPreparing) return;
-  if (
-    !immediate &&
-    (root._textTimer || !visiblePdfPages().has(Number(root.dataset.page)))
-  )
+  const index = Number(root.dataset.page);
+  if (root._textReady) {
+    if (!root.dataset.ocr && root._viewport && (current.parseEnabled || index === location.index))
+      prepareOcr(current, index, root._viewport, renderRevision, root);
     return;
+  }
+  if (!root._startText || root._textPreparing || (!immediate && root._textTimer)) return;
   clearTimeout(root._textTimer);
   const start = () => {
     root._textTimer = null;
     if (
       !root.isConnected ||
-      (!immediate && !visiblePdfPages().has(Number(root.dataset.page)))
+      (!immediate && !shouldPreparePdfText(index))
     )
       return;
     root._textPreparing = true;
@@ -2145,8 +2156,7 @@ async function preparePdfText(page, text, root, viewport, index, revision) {
     }
     root._textReady = true;
     refreshPdfObjects(current, root, revision).catch(() => {});
-    if (index === location.index && !root.dataset.ocr)
-      prepareOcr(current, index, viewport, revision, root);
+    if (shouldPreparePdfText(index)) schedulePdfText(root);
   } catch (error) {
     if (!active()) return;
     root._textReady = true;
@@ -2185,7 +2195,7 @@ function ensurePdfPages() {
   for (const page of new Set([...visible, ...wanted]))
     if (page >= 1 && page <= current.pages) {
       const root = pdfPageElement(page);
-      if (root && visible.has(page)) schedulePdfText(root);
+      if (root && shouldPreparePdfText(page, visible)) schedulePdfText(root);
       if (root) root._lastUsed = ++pdfUse;
       const canvas = root?.querySelector("canvas");
       if (
@@ -2223,14 +2233,6 @@ function ensurePdfPages() {
       }
     }
   const active = pdfPageElement(index);
-  if (
-    active?.dataset.rendered === "ready" &&
-    active._textReady &&
-    !active.dataset.ocr &&
-    active._viewport
-  ) {
-    prepareOcr(current, index, active._viewport, revision, active);
-  }
   showPdfOcrStatus(active);
   warmPdfPages();
   // Retain recent page images instead of throwing them away on every turn.
@@ -2380,38 +2382,33 @@ async function renderPdf(position, revision) {
         parseFloat(padding.paddingTop) -
         parseFloat(padding.paddingBottom),
     );
-  pdfNaturalWidth = (widest * 96) / 72;
   const scale =
     prefs.pdfZoomMode === "custom"
-      ? ((96 / 72) * prefs.pdfZoom) / 100
-      : prefs.pdfZoomMode === "width"
-        ? availableWidth / widest
-        : prefs.pdfZoomMode === "page"
-          ? Math.min(availableWidth / widest, availableHeight / tallest)
-          : null;
-  pdfWidth =
-    scale !== null
-      ? widest * scale
-      : (Math.min(960, view.clientWidth - (innerWidth < 760 ? 26 : 80)) *
-          prefs.pdfZoom) /
-        100;
+      ? prefs.pdfZoom / 75
+      : prefs.pdfZoomMode === "page"
+        ? Math.min(availableWidth / widest, availableHeight / tallest)
+        : null;
+  const savedWidth = scale === null
+    ? (Math.min(960, availableWidth) * prefs.pdfZoom) / 100
+    : widest * scale;
+  // A saved percentage can overflow in this window; a new zoom choice is deliberate.
+  const fitWidth = prefs.pdfZoomMode === "width" ||
+    (!pdfZoomAdjusted && savedWidth > availableWidth + 0.5);
+  const stackWidth = fitWidth ? availableWidth : savedWidth;
+  const naturalWidth = (index) => dimensions[index - 1]?.width || natural.width;
   const widthForPage = (index) =>
-    scale === null
-      ? pdfWidth
-      : (dimensions[index - 1]?.width || natural.width) * scale;
-  const viewport = page.getViewport({
-      scale: pdfWidth / page.getViewport({ scale: 1 }).width,
-    }),
+    fitWidth || scale === null ? stackWidth : naturalWidth(index) * scale;
+  const fallbackRatio = natural.height / natural.width,
     stack = $("pdf-paper");
   for (const root of stack.children) releasePdfPage(root);
   stack.replaceChildren();
-  stack.style.width = `${pdfWidth}px`;
+  stack.style.width = `${stackWidth}px`;
   stack.style.height = "auto";
   stack.dataset.book = book.id;
   stack.classList.toggle("continuous", prefs.pdfMode === "scroll");
   stack.style.paddingBottom =
     prefs.pdfMode === "scroll"
-      ? `${Math.max(0, $("reading-viewport").clientHeight - widthForPage(book.pages) * (ratios.at(-1) || viewport.height / viewport.width))}px`
+      ? `${Math.max(0, view.clientHeight - widthForPage(book.pages) * (ratios.at(-1) || fallbackRatio))}px`
       : "0px";
   const indices =
     prefs.pdfMode === "scroll"
@@ -2423,7 +2420,8 @@ async function renderPdf(position, revision) {
     root.setAttribute("aria-hidden", "true");
     root.dataset.page = index;
     const width = widthForPage(index);
-    root.style.height = `${width * (ratios[index - 1] || viewport.height / viewport.width)}px`;
+    root.dataset.zoom = (width * 75) / naturalWidth(index);
+    root.style.height = `${width * (ratios[index - 1] || fallbackRatio)}px`;
     root.style.width = `${width}px`;
     stack.append(root);
   }
@@ -2952,6 +2950,7 @@ async function renderCurrent(position) {
     location = position;
   }
   clearTimeout(saveTimer);
+  pendingScrollSave = false;
   pagination?.destroy();
   pagination = null;
   const revision = ++renderRevision;
@@ -3086,7 +3085,10 @@ async function navigate(index, options = {}, record = true) {
   }
   // Restoring a target suppresses scroll saves, so commit navigation explicitly.
   if (readerReady) savePosition(true).catch((error) => toast(error.message));
-  if (innerWidth < 1100) setTocOpen(false);
+  if ($("reader-aside").matches(":modal")) {
+    setTocOpen(false);
+    $("reading-viewport").focus({ preventScroll: true });
+  }
 }
 
 let quietTimer;
@@ -3117,6 +3119,7 @@ async function flip(direction) {
   location.fragment = "";
   clearSelection();
   const view = $("reading-viewport");
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (pagination) {
     const next = pagination.page + direction;
     if (next >= 0 && next < pagination.count) {
@@ -3132,15 +3135,11 @@ async function flip(direction) {
       return;
     }
   } else if (current.type !== "pdf") {
-    if (
-      direction > 0 &&
-      view.scrollTop + view.clientHeight < view.scrollHeight - 4
-    ) {
-      view.scrollBy({ top: view.clientHeight * 0.86, behavior: "smooth" });
-      return;
-    }
-    if (direction < 0 && view.scrollTop > 4) {
-      view.scrollBy({ top: -view.clientHeight * 0.86, behavior: "smooth" });
+    const canScroll = direction > 0
+      ? view.scrollTop + view.clientHeight < view.scrollHeight - 4
+      : view.scrollTop > 4;
+    if (canScroll) {
+      view.scrollBy({ top: direction * view.clientHeight * 0.86, behavior: reduceMotion ? "auto" : "smooth" });
       return;
     }
   }
@@ -3153,9 +3152,7 @@ async function flip(direction) {
     location.index + direction > count(current)
   )
     return;
-  const animated =
-    readingMode() === "pages" &&
-    !matchMedia("(prefers-reduced-motion:reduce)").matches;
+  const animated = readingMode() === "pages" && !reduceMotion;
   const book = current,
     revision = renderRevision;
   flipBusy = true;
@@ -3205,7 +3202,10 @@ function goBack() {
     savePosition(true);
     const book = books.find((book) => book.id === previous.book);
     if (!book) return;
-    if (current?.id !== book.id) readerReady = false;
+    if (current?.id !== book.id) {
+      readerReady = false;
+      pdfZoomAdjusted = false;
+    }
     current = book;
     prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, book, true));
     applyPreferences();
@@ -3213,18 +3213,38 @@ function goBack() {
     navigate(previous.position.index, previous.position, false);
   }
 }
+const tocWide = matchMedia("(min-width: 1100px)");
+
+function canDockToc() {
+  return tocWide.matches && !palm && !reference && !comparison?.open && !$("reader").classList.contains("focused");
+}
+
 function setTocOpen(open, reflow = true) {
-  const position = readerReady && reflow ? makePosition() : null;
-  const docked = open && innerWidth >= 1100 && !palm && !reference && !comparison?.open;
-  const changed = $("reader").classList.contains("toc-docked") !== docked;
-  $("reader-aside").hidden = !open;
-  $("reader").classList.toggle("toc-docked", docked);
-  const restoreFocus = !open && $("reader-aside").contains(document.activeElement);
+  const aside = $("reader-aside"), reader = $("reader");
+  const docked = open && canDockToc();
+  const changed = reader.classList.contains("toc-docked") !== docked;
+  const position = changed && readerReady && reflow ? makePosition() : null;
+  const focus = document.activeElement;
+  const hadFocus = aside.contains(focus);
   if (open) setReaderSettingsOpen(false);
-  if (reflow && open && !docked) $("toc-search").focus();
-  if (restoreFocus) $("toc-toggle").focus();
+  if (aside.open && (!open || changed)) aside.close();
+  aside.hidden = !open;
+  aside.classList.toggle("is-docked", docked);
+  reader.classList.toggle("toc-docked", docked);
   $("toc-toggle").setAttribute("aria-expanded", String(open));
-  if (position && changed && route === "reader") renderCurrent(position);
+  if (open && !aside.open) {
+    aside.setAttribute("closedby", docked ? "none" : "any");
+    if (docked) {
+      aside.show();
+      if (focus !== document.body) focus.focus({ preventScroll: true });
+      if (!hadFocus && aside.contains(document.activeElement))
+        $("reading-viewport").focus({ preventScroll: true });
+    } else {
+      aside.showModal();
+      (document.querySelector(".toc-search").hidden ? $("toc-close") : $("toc-search")).focus();
+    }
+  } else if (!open && hadFocus) $("toc-toggle").focus({ preventScroll: true });
+  if (position && route === "reader") return renderCurrent(position);
 }
 async function readBook(id, sourcePosition) {
   const book = books.find((book) => book.id === id);
@@ -3235,6 +3255,7 @@ async function readBook(id, sourcePosition) {
   }
   savePosition();
   current = book;
+  pdfZoomAdjusted = false;
   revealReaderTools();
   prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, book, true));
   applyPreferences();
@@ -3243,7 +3264,7 @@ async function readBook(id, sourcePosition) {
     : initialLocation(book);
   history = [];
   $("toc-search").value = "";
-  setTocOpen(!palm && !reference && !comparison?.open && innerWidth >= 1100 && prefs.tocOpen, false);
+  setTocOpen(canDockToc() && prefs.tocOpen, false);
   $("toc-tab").click();
   setReaderSettingsOpen(false);
   return renderCurrent(location);
@@ -3262,6 +3283,7 @@ function showRoute(sourcePosition) {
         ? requested[0]
         : "library";
   if (route === "reader" && next !== "reader") {
+    setTocOpen(false, false);
     comparison?.close(false);
     margins.close(false, false);
     if (current?.type !== "pdf" && readerReady) appearanceSample = { title: chapterTitle(), text: readingElements().map(element => element.textContent.trim()).filter(Boolean).join("\n\n").slice(0, 640) };
@@ -3664,12 +3686,13 @@ function validatePreferences(input) {
 function handleKeydown(event) {
   revealReaderTools();
   lastInput = Date.now();
-  if (event.isComposing) return;
+  if (event.isComposing || (route === "reader" && $("reader").inert)) return;
   const editing =
     event.target.matches?.("input,textarea,select") ||
     event.target.isContentEditable;
   if (event.key === "Escape") {
     if (document.querySelector("dialog[open]:not(.is-docked)")) return;
+    if (event.target.closest?.(".reader-more[open]")) { closeReaderMore(); return; }
     if (margins.active) { margins.close(); return; }
     if (route === "library") {
       $("library-search").value = "";
@@ -3705,7 +3728,7 @@ function handleKeydown(event) {
     return;
   }
   if (route !== "reader" || editing) return;
-  if (event.target.closest?.(".question-panel,.translation-panel,.margins-dialog,.pinned-reference")) return;
+  if (event.target.closest?.(".reader-aside,.reader-more,.question-panel,.translation-panel,.margins-dialog,.pinned-reference")) return;
   if (
     (event.metaKey || event.ctrlKey) &&
     !event.shiftKey &&
@@ -3806,6 +3829,7 @@ function onCopy(event) {
 function setFocus(value) {
   const anchor = retainedAnchor || lastAnchor || captureAnchor();
   $("reader").classList.toggle("focused", value);
+  setTocOpen(!value && canDockToc() && prefs.tocOpen, false);
   $("focus-button").setAttribute("aria-pressed", String(value));
   $("focus-exit").hidden = !value;
   if (current?.type === "pdf") renderCurrent(location);
@@ -3900,9 +3924,10 @@ document.addEventListener("click", async (event) => {
       delete bookPrefs[book.id];
       if (current?.id === book.id && route === "reader") {
         const position = makePosition();
+        pdfZoomAdjusted = false;
         prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, book, true));
         applyPreferences();
-        setTocOpen(prefs.tocOpen && innerWidth >= 1100 && !palm && !comparison?.open, false);
+        setTocOpen(canDockToc() && prefs.tocOpen, false);
         renderSettings();
         await renderCurrent(position);
         settings.inert = false;
@@ -4021,13 +4046,26 @@ $("reader-home").onclick = () => {
 $("comparison-open").hidden = reference || palm;
 $("comparison-open").onclick = () => { $("reader-more").open = false; comparison?.show(); };
 $("reader-back").onclick = goBack;
-$("toc-toggle").onclick = () => {
-  const open = $("reader-aside").hidden;
+function toggleToc(open) {
+  const remember = canDockToc();
   setTocOpen(open);
-  persistReadingPreferences({ tocOpen: open }).catch(error => toast(error.message));
-};
-$("toc-close").onclick = () => { setTocOpen(false); persistReadingPreferences({ tocOpen: false }).catch(error => toast(error.message)); };
-$("toc-scrim").onclick = () => setTocOpen(false);
+  if (remember) {
+    prefs.tocOpen = open;
+    persistReadingPreferences({ tocOpen: open }).catch(error => toast(error.message));
+  }
+}
+$("toc-toggle").onclick = () => toggleToc(!$("reader-aside").open);
+$("toc-close").onclick = () => toggleToc(false);
+$("reader-aside").addEventListener("cancel", event => {
+  event.preventDefault();
+  setTocOpen(false);
+});
+if (!("closedBy" in HTMLDialogElement.prototype)) $("reader-aside").addEventListener("click", event => {
+  if (event.target !== event.currentTarget || !event.target.matches(":modal")) return;
+  const bounds = event.target.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)
+    setTocOpen(false);
+});
 $("toc-search").addEventListener("input", renderToc);
 $("toc-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-index]");
@@ -4091,6 +4129,8 @@ $("source-pdf-open").onclick = () => {
   history.push(snapshot());
   savePosition(true);
   current = source;
+  prefs = validatePreferences(readingPreferences(globalPrefs, bookPrefs, source, true));
+  pdfZoomAdjusted = false;
   readerReady = false;
   if (!palm) window.history.replaceState(null, "", "#/read/" + source.id);
   navigate(page, { pdfY: 0 }, false);
@@ -4257,9 +4297,10 @@ function tutorContext(selection = null) {
       }
     } else {
       const layer = page?.querySelector(".textLayer");
-      separator = layer?.dataset.ocrEngine === "tesseract-eng" ? "" : " ";
+      const useOcrUnits = layer?.dataset.ocrEngine === "tesseract-eng" || layer?.hasAttribute("data-numbered-ocr-rows");
+      separator = useOcrUnits ? "" : " ";
       units =
-        layer?.dataset.ocrEngine === "tesseract-eng"
+        useOcrUnits
           ? ocrTextUnits(layer)
           : [...(layer?.querySelectorAll("span") || [])]
               .filter(
@@ -4470,13 +4511,29 @@ window.addEventListener("native-file-saved", () =>
 );
 document.addEventListener("keydown", handleKeydown);
 document.addEventListener("copy", onCopy);
+function closeReaderMore() {
+  const more = $("reader-more");
+  more.open = false;
+  more.querySelector("summary").focus({ preventScroll: true });
+}
+$("reader-more-tools").addEventListener("click", event => {
+  if ($("reader-more").open && event.target.closest("button")) closeReaderMore();
+}, { capture: true });
 attachPageGestures($("reading-viewport"));
 $("reading-mode").onclick = () =>
   changePreference(
     current.type === "pdf" ? "pdfMode" : palm ? "palmMode" : "textMode",
     readingMode() === "pages" ? "scroll" : "pages",
   );
-$("reading-viewport").addEventListener(
+const readingViewport = $("reading-viewport");
+const supportsScrollEnd = "onscrollend" in readingViewport;
+function saveAfterScroll() {
+  if (!pendingScrollSave) return;
+  pendingScrollSave = false;
+  savePosition().catch(() => {});
+}
+if (supportsScrollEnd) readingViewport.addEventListener("scrollend", saveAfterScroll);
+readingViewport.addEventListener(
   "scroll",
   () => {
     if (!readerReady || pagination) return;
@@ -4487,11 +4544,12 @@ $("reading-viewport").addEventListener(
     if (current?.type === "pdf" && prefs.pdfMode === "scroll")
       updatePdfScroll();
     lastAnchor = retainedAnchor || captureAnchor();
-    updateProgress();
+    updateProgress(lastAnchor);
     refreshSelectionToolbar();
+    pendingScrollSave = !restoringPosition;
     clearTimeout(saveTimer);
-    if (!restoringPosition)
-      saveTimer = setTimeout(() => savePosition().catch(() => {}), 250);
+    if (pendingScrollSave && !supportsScrollEnd)
+      saveTimer = setTimeout(saveAfterScroll, 250);
   },
   { passive: true },
 );
@@ -4514,13 +4572,16 @@ window.addEventListener("palm-pin", (event) => {
     event.detail ? "取消置顶" : "窗口置顶",
   );
 });
+tocWide.addEventListener("change", ({ matches }) => {
+  if (route === "reader" && !comparison?.open && !palm && !reference && !$("reader").classList.contains("focused"))
+    setTocOpen(matches && (prefs.tocOpen || $("reader-aside").open), false);
+});
 let resizeTimer;
 window.addEventListener("resize", () => {
-  const anchor = lastAnchor || captureAnchor();
+  const anchor = retainedAnchor || lastAnchor || captureAnchor();
   margins.adapt();
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(async () => {
-    $("reader").classList.toggle("toc-docked", !$("reader-aside").hidden && innerWidth >= 1100 && !palm && !comparison?.open && !reference);
     applyPreferences();
     if (route !== "reader" || !current) return;
     if (current.type === "pdf") {
@@ -4618,16 +4679,24 @@ function updateTimer() {
   $("timer-button").classList.toggle("timer-idle", !timerRunning && timerRemaining === 1500);
 }
 
-async function poll(resume = false) {
+let pendingPoll = null, readingStateTag = null;
+
+function poll(resume = false) {
+  if (pendingPoll) return resume ? pendingPoll.then(() => poll(true)) : pendingPoll;
+  pendingPoll = refreshRemoteState(resume).finally(() => { pendingPoll = null; });
+  return pendingPoll;
+}
+
+async function refreshRemoteState(resume) {
   try {
     const version = await api("/api/library-version");
     if (version.revision !== libraryRevision) {
-      libraryRevision = version.revision;
       const previousFlag = current?.parseEnabled,
         previousEnhancement = current?.enhancementRevision,
         previousStructure = current?.structureRevision,
         previousCount = current?.chapters?.length;
       await refreshLibrary();
+      libraryRevision = version.revision;
       if (route === "library") renderLibrary();
       if (
         route === "reader" &&
@@ -4650,10 +4719,16 @@ async function poll(resume = false) {
         }
       }
     }
-    const state = await api("/api/state");
+    const headers = readingStateTag && !resume ? { "If-None-Match": readingStateTag } : {};
+    const response = await fetch("/api/state", { headers, cache: "no-store" });
+    if (!response.ok) return;
+    const tag = response.headers.get("ETag");
+    if (!resume && tag && tag === readingStateTag) return;
+    const state = await response.json();
     if (reference) {
       bookmarks = state.bookmarks || bookmarks;
       renderBookmarks();
+      readingStateTag = tag;
       return;
     }
     if (stateWrites || state.revision < stateRevision) return;
@@ -4686,8 +4761,10 @@ async function poll(resume = false) {
       !preferencesChanged &&
       !marksChanged &&
       !positionsChanged
-    )
+    ) {
+      readingStateTag = tag;
       return;
+    }
     stateRevision = state.revision;
     positions = state.positions || positions;
     bookmarks = state.bookmarks || bookmarks;
@@ -4739,6 +4816,7 @@ async function poll(resume = false) {
         updateProgress();
       }
     }
+    readingStateTag = tag;
   } catch {}
 }
 

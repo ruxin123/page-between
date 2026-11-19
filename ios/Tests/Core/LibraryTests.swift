@@ -11,10 +11,9 @@ final class LibraryTests: XCTestCase {
         try bytes.write(to: source)
         let root = folder.appendingPathComponent("Library")
         let repository = try LibraryRepository(root: root)
-        var book = try await repository.importFile(source)
-        book.locator = "{\"href\":\"chapter-1.xhtml\"}"
-        book.progress = 0.4
-        try await repository.update(book)
+        let book = try await repository.importFile(source)
+        let locator = "{\"href\":\"chapter-1.xhtml\"}"
+        try await repository.saveLocation(book.id, locator: locator, progress: 0.4, chapter: "Original chapter")
         try await repository.markDeleted(book.id, deleted: true)
         let hidden = await repository.books()
         XCTAssertTrue(hidden.isEmpty)
@@ -23,7 +22,7 @@ final class LibraryTests: XCTestCase {
         let restarted = try LibraryRepository(root: root)
         let restored = try await restarted.importFile(source)
         XCTAssertEqual(restored.id, book.id)
-        XCTAssertEqual(restored.locator, book.locator)
+        XCTAssertEqual(restored.locator, locator)
         XCTAssertEqual(restored.progress, 0.4)
         let all = await restarted.books(includingDeleted: true)
         XCTAssertEqual(all.count, 1)
@@ -54,14 +53,20 @@ final class LibraryTests: XCTestCase {
         try await repository.saveExcerpt(a.id, excerpt: item)
         item.deletedAt = nil
         try await repository.saveExcerpt(a.id, excerpt: item)
-        var staleMetadata = a
-        staleMetadata.progress = 0.4
-        staleMetadata.pinned = true
-        try await repository.update(staleMetadata)
+        let bookmarkLocator = "{\"href\":\"chapter.xhtml\"}"
+        try await repository.toggleBookmark(a.id, title: "Original bookmark", locator: bookmarkLocator)
+        try await repository.setPinned(a.id, enabled: true)
+        try await repository.updateMetadata(a.id, title: "Updated title", author: nil)
         let reopened = try LibraryRepository(root: root)
         let books = await reopened.books()
         XCTAssertEqual(books.first(where: { $0.id == a.id })?.appearance, appearance)
-        XCTAssertEqual(books.first(where: { $0.id == a.id })?.progress, 0.4)
+        let updated = try XCTUnwrap(books.first(where: { $0.id == a.id }))
+        XCTAssertEqual(updated.progress, 0.4)
+        XCTAssertEqual(updated.locator, bookmarkLocator)
+        XCTAssertEqual(updated.chapter, "Original chapter")
+        XCTAssertEqual(updated.bookmarks.map(\.locator), [bookmarkLocator])
+        XCTAssertTrue(updated.pinned)
+        XCTAssertEqual(updated.title, "Updated title")
         XCTAssertEqual(books.first(where: { $0.id == a.id })?.excerpts, [item])
         XCTAssertNil(books.first(where: { $0.id == b.id })?.appearance)
         XCTAssertNil(books.first(where: { $0.id == b.id })?.excerpts)

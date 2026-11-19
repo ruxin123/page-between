@@ -12,11 +12,11 @@ iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcod
 
 ## 下载与安装
 
-当前发布版本 **0.5.36**，提供 Apple Silicon（arm64）安装包。
+当前发布版本 **0.5.37**，提供 Apple Silicon（arm64）安装包。
 
 | 安装包 | 用途 |
 | --- | --- |
-| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.36/page-between-0.5.36-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
+| [页间 · 普通版](https://github.com/ruxin123/page-between/releases/download/v0.5.37/page-between-0.5.37-macos-arm64.zip) | 从空书库开始，导入自己的书籍 |
 
 1. 下载 ZIP 并解压，将「页间.app」拖入应用程序文件夹。
 2. 打开应用，在书库点击「导入书籍」，选择文件并设置是否启用文档解析。
@@ -62,7 +62,7 @@ iPhone 原生版本正在开发，支持 iOS 17 及以上；功能范围和 Xcod
 
 PDF 页边可导出「注释 PDF」，把选区高亮和笔记放回原页，保留目录和已有批注。没有选区坐标的旧记录以页内便笺附注，原件不变。
 
-「更多 → 对照阅读」可同时阅读同一本书的两处，分别翻页、跳转和缩放。Mac 宽窗左右排列，窄窗和 iPhone 上下排列；关闭对照后继续原来的阅读位置。
+「更多 → 对照阅读」可同时阅读同一本书的两处，分别翻页、跳转和缩放。Mac 宽窗左右排列，窄窗在正文和对照间切换。iPhone 以整页打开对照。关闭对照后继续原来的阅读位置。
 
 ![页边选段与笔记](docs/screenshots/margins.png)
 

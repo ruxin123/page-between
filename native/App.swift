@@ -165,26 +165,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
       self.engine = process
       self.output = pipe
       outputBuffer = Data()
-      pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+      pipe.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
         let data = handle.availableData
         if data.isEmpty {
           handle.readabilityHandler = nil
           return
         }
         DispatchQueue.main.async {
-          guard let self = self, self.engine === process else { return }
+          guard let self = self, let process = process, self.engine === process else { return }
+          guard self.base == nil else { return }
           self.outputBuffer.append(data)
-          guard self.outputBuffer.count < 16384 else { return }
           while let newline = self.outputBuffer.firstIndex(of: 10) {
             let line = self.outputBuffer[..<newline]
             self.outputBuffer.removeSubrange(...newline)
-            if let value = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
+            if line.count < 16384,
+              let value = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
               value["ready"] as? Bool == true, let port = value["port"] as? Int,
               (1...65535).contains(port)
             {
+              self.outputBuffer.removeAll()
               self.engineReady(port, process: process)
+              break
             }
           }
+          if self.outputBuffer.count >= 16384 { self.outputBuffer.removeAll() }
         }
       }
       process.terminationHandler = { [weak self] stopped in
@@ -203,7 +207,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         self.stopEngine(process)
         self.showFailure("阅读服务未能启动，请重试。", retry: true)
       }
-    } catch { showFailure("无法启动本机阅读服务，请检查应用与本机存储后重试。", retry: true) }
+    } catch {
+      output?.fileHandleForReading.readabilityHandler = nil
+      output = nil
+      engine = nil
+      showFailure("无法启动本机阅读服务，请检查应用与本机存储后重试。", retry: true)
+    }
   }
 
   func engineReady(_ port: Int, process: Process) {

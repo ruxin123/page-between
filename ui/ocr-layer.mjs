@@ -1,3 +1,5 @@
+import { canonicalObjectBounds, selectedSpanRange } from "./pdf-selection.mjs";
+
 function validBox(box) {
   return (
     Array.isArray(box) &&
@@ -73,6 +75,7 @@ export function renderOcrLayer(root, data, viewport, language) {
   root.replaceChildren();
   root.lang = language;
   root.dataset.ocrEngine = data.engine;
+  root.toggleAttribute("data-numbered-ocr-rows", !!data.numberedRows);
   const measure = root.ownerDocument.createElement("canvas").getContext("2d"),
     english = data.engine === "tesseract-eng",
     family = language?.startsWith("zh")
@@ -128,6 +131,7 @@ export function renderOcrLayer(root, data, viewport, language) {
           height = (y1 - y0) * viewport.height;
         span.textContent = cell.text;
         span.dataset.ocrLine = index;
+        if (cell.band) span.dataset.ocrBand = cell.band;
         measure.font = `${height}px ${family}`;
         const width = Math.max(
           english ? 0.01 : 1,
@@ -192,18 +196,18 @@ export function paintOcrSelection(root, selection) {
     }
     const bands = new Map();
     if (range?.intersectsNode(layer)) {
+      const layerBox = layer.getBoundingClientRect();
       for (const node of layer.querySelectorAll("span")) {
-        if (!node.firstChild || !range.intersectsNode(node)) continue;
-        const selected = layer.ownerDocument.createRange();
-        selected.selectNodeContents(node);
-        if (node.contains(range.startContainer))
-          selected.setStart(range.startContainer, range.startOffset);
-        if (node.contains(range.endContainer))
-          selected.setEnd(range.endContainer, range.endOffset);
-        if (selected.collapsed) continue;
-        const box = selected.getBoundingClientRect();
+        const selected = selectedSpanRange(node, range);
+        if (!selected) continue;
+        const group = layer._canonical?.mapped.get(node)?.group;
+        if (bands.has(group)) continue;
+        const objectBounds = canonicalObjectBounds(group, layerBox);
+        const box = objectBounds || selected.getBoundingClientRect();
         if (!box.width || !box.height) continue;
-        const key = node.dataset.ocrLine ?? node;
+        const key = objectBounds ? group : node.dataset.ocrBand
+          ? `${node.dataset.ocrLine}:${node.dataset.ocrBand}`
+          : node.dataset.ocrLine ?? node;
         const band = bands.get(key);
         bands.set(key, {
           left: Math.min(band?.left ?? box.left, box.left),
@@ -241,6 +245,8 @@ export function ocrTextUnits(layer) {
     range.setStart(node.firstChild, 0);
     if (nodes[i + 1]) range.setEndBefore(nodes[i + 1]);
     else range.setEndAfter(node);
-    return range.toString();
+    const paragraph = layer.hasAttribute("data-numbered-ocr-rows") && nodes[i + 1] &&
+      node.dataset.ocrLine !== nodes[i + 1].dataset.ocrLine;
+    return range.toString() + (paragraph ? "\n\n" : "");
   });
 }
